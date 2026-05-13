@@ -1,0 +1,89 @@
+{
+  "moduleId": "15-hooks-automation",
+  "title": "Module 15 Exam — Hooks и pre-commit автоматизация",
+  "passThreshold": 70,
+  "_meta": {
+    "idPrefix": "git-m15-exam",
+    "description": "6-question integrated exam for Module 15"
+  },
+  "questions": [
+    {
+      "id": "git-m15-exam-q1",
+      "type": "multiple-choice",
+      "question": "Внутреннее устройство Git hooks: где живут, как активируются, и почему нативный механизм недостаточен для team?",
+      "options": [
+        { "id": "a", "text": "Hooks в .gitignore" },
+        { "id": "b", "text": "Hooks живут в .git/hooks/, активируются переименованием без .sample + chmod +x. Скрипт на любом языке, exit code 0/non-zero определяет abort. ПРОБЛЕМА для team: .git/ не versioned, не commit-ится — коллега после clone имеет пустой .git/hooks/, никаких проверок. Frameworks (pre-commit, husky, lefthook) хранят config в repo (versioned), один setup команда устанавливает hooks автоматически" },
+        { "id": "c", "text": "Hooks в .github/workflows/" },
+        { "id": "d", "text": "Hooks встроены в Git и не настраиваются" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Полная картина: (1) Mechanics — .git/hooks/ имеет шаблоны .sample при git init. Активация: убрать .sample (имя должно точно совпадать — pre-commit, commit-msg, pre-push), сделать executable. Git auto-вызывает в соответствующие моменты lifecycle. (2) Доступные client-side hooks: pre-commit (перед commit), commit-msg (валидация message), prepare-commit-msg (templating), post-commit, pre-rebase, post-checkout, post-merge, pre-push. (3) Скрипт на любом языке — Git делает exec. Exit code 0 = OK, non-zero = abort (для pre-* hooks). (4) Team-проблема: .git/ — служебная папка, .gitignore-эквивалент, не tracked в repo, не клонируется при git clone. Твои hooks существуют только у тебя локально. Коллега после clone имеет пустой .git/hooks/ — все проверки disabled. (5) Решение через frameworks: pre-commit/husky/lefthook хранят config в repo (versioned файлы), один setup command (`pre-commit install`) генерирует .git/hooks/ скрипты автоматически. Один source of truth, всем коллегам идентично. Bypass — `git commit --no-verify` обходит локальные hooks (legitимно для эмердженси), но belt+suspenders через CI ловит.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m15-exam-q2",
+      "type": "multiple-choice",
+      "question": "Полный production-ready .pre-commit-config.yaml для Python DE проекта (Airflow DAGs, dbt models, Python scripts, Jupyter)?",
+      "options": [
+        { "id": "a", "text": "Только ruff" },
+        { "id": "b", "text": "Слои: (1) pre-commit-hooks base (trailing-whitespace, end-of-file-fixer, check-yaml, check-added-large-files --maxkb=1024, check-merge-conflict, detect-private-key); (2) astral-sh/ruff-pre-commit (ruff + ruff-format) — заменяет black+isort+flake8; (3) pre-commit/mirrors-mypy с additional_dependencies: [pandas-stubs, types-PyYAML]; (4) kynan/nbstripout для Jupyter; (5) gitleaks/gitleaks для secrets; (6) sqlfluff/sqlfluff для dbt SQL; (7) yamllint для Airflow DAG configs. Все pinned через rev:" },
+        { "id": "c", "text": "Только проверка размера файлов" },
+        { "id": "d", "text": "Custom shell скрипты" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Каноничный production config: ```yaml repos: - repo: https://github.com/pre-commit/pre-commit-hooks rev: v4.6.0 hooks: [trailing-whitespace, end-of-file-fixer, check-yaml, check-toml, check-added-large-files (args: --maxkb=1024), check-merge-conflict, detect-private-key, mixed-line-ending (--fix=lf)] - repo: https://github.com/astral-sh/ruff-pre-commit rev: v0.5.0 hooks: [ruff (args: --fix), ruff-format] - repo: https://github.com/pre-commit/mirrors-mypy rev: v1.10.0 hooks: [mypy (additional_dependencies: [pandas-stubs, types-PyYAML, types-requests])] - repo: https://github.com/kynan/nbstripout rev: 0.7.1 hooks: [nbstripout] - repo: https://github.com/gitleaks/gitleaks rev: v8.18.4 hooks: [gitleaks] - repo: https://github.com/sqlfluff/sqlfluff rev: 3.0.7 hooks: [sqlfluff-lint (files: ^models/.*\\.sql$, args: --dialect=postgres), sqlfluff-fix] ``` . Логика выбора: (1) Базовая гигиена — обязательно. (2) Ruff — single tool вместо 4-х (black+isort+flake8+pyupgrade), в 10-100× быстрее. (3) Mypy — catch type errors до runtime. (4) Nbstripout — критично для .ipynb (модуль 14.04). (5) Gitleaks — secrets защита (модуль 17). (6) Sqlfluff — для dbt models с правильным dialect. (7) Yamllint — для Airflow DAG configs. Все pinned для reproducibility, autoupdate через отдельный PR.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m15-exam-q3",
+      "type": "multiple-choice",
+      "question": "Conventional commits полная схема: типы, валидация, автоматизация?",
+      "options": [
+        { "id": "a", "text": "Только free-form commit messages" },
+        { "id": "b", "text": "11 типов (feat MINOR, fix PATCH, chore, docs, refactor, test, style, perf, build, ci, revert; BREAKING CHANGE: или ! -> MAJOR). Формат: type(scope): description. Валидация через commitlint hook в pre-commit (stages: commit-msg, additional_dependencies: @commitlint/config-conventional). Автоматизация: git-cliff/conventional-changelog генерят CHANGELOG, semantic-release автоматически bumps version и создаёт GitHub Release" },
+        { "id": "c", "text": "Только feat и fix" },
+        { "id": "d", "text": "Conventional commits — устарел" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Полная схема: (1) ТИПЫ — feat (новая фича -> MINOR), fix (bug -> PATCH), chore (deps, maintenance), docs (документация), refactor (без изменения logic), test (тесты), style (формат), perf (performance), build (build system), ci (CI/CD), revert (отмена). + custom для DE (data:, migration:). BREAKING CHANGE через `!` после type/scope или footer 'BREAKING CHANGE: ...' -> MAJOR bump. (2) ФОРМАТ — `<type>[scope]: <description>` (header < 72 chars). Optional body после blank line. Optional footers (Closes JIRA-1234, Co-authored-by, BREAKING CHANGE). (3) ВАЛИДАЦИЯ — commitlint через pre-commit: ```yaml - repo: https://github.com/alessandrojcm/commitlint-pre-commit-hook rev: v9.16.0 hooks: - id: commitlint stages: [commit-msg] additional_dependencies: ['@commitlint/config-conventional'] ``` . Config в commitlint.config.js с extends: ['@commitlint/config-conventional']. (4) GUIDED — commitizen (`cz commit`) для onboarding period — задаёт вопросы и формирует правильный message. (5) АВТОМАТИЗАЦИЯ — git-cliff (Rust, fast) или conventional-changelog (Node) генерят CHANGELOG.md из commits, группируя по типам. (6) AUTO-VERSIONING — semantic-release (npm package): анализирует commits с last tag, определяет тип релиза, bumps version (по SemVer), создаёт Git tag, GitHub Release с release notes. Полная end-to-end автоматизация для libraries. (7) PR enforcement — на GitHub PR title часто = squash commit; добавить status check для PR title format (`amannn/action-semantic-pull-request@v5`).",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m15-exam-q4",
+      "type": "multiple-choice",
+      "question": "Выбор framework для разных DE сценариев — pre-commit vs husky vs lefthook?",
+      "options": [
+        { "id": "a", "text": "pre-commit всегда лучше" },
+        { "id": "b", "text": "(1) Чисто Python DE проект (Airflow, dbt, etl) — pre-commit (огромный community catalog Python hooks, изолированные venv-ы); (2) JS/TS front-end или dashboard — husky (нативная npm интеграция, lint-staged); (3) Polyglot monorepo (Python + JS + Go) — lefthook (параллельный by default, single binary, glob patterns для разных языков, самый быстрый); (4) Любой выбор — pin versions, document в README, заверни в CI с branch protection" },
+        { "id": "c", "text": "husky всегда" },
+        { "id": "d", "text": "Не имеет значения" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Полная decision matrix: (1) Pre-commit (Python framework) — для Python-heavy проектов. Преимущества: огромный community catalog (ruff, mypy, nbstripout, sqlfluff и тысячи других), изолированные venv-ы (no version conflicts), industry стандарт в Python (Airflow, dbt используют). Минусы: Python dependency, cold start чуть медленнее, для не-Python менее эргономично. Сценарии: Airflow DAGs, dbt projects, Python ETL, Python data pipelines, FastAPI/Django services, Streamlit apps. (2) Husky (Node framework) — для JS/TS проектов. Преимущества: нативная npm/yarn интеграция, lint-staged для запуска только на staged, простой setup для React/Vue. Минусы: Node dependency, для Python нужны workarounds. Сценарии: React/Vue/Angular фронтенды (data dashboards), Next.js apps, чисто Node.js services. (3) Lefthook (Go binary) — для polyglot monorepos. Преимущества: параллельное выполнение by default (заметно быстрее), single static binary (no Python/Node dep), glob patterns для разных языков в одном конфиге, tags для selective execution. Минусы: меньший community catalog (надо знать tool commands), каждый коллега ставит binary. Сценарии: monorepo с несколькими стеками (Python ETL + React dashboard + Go service), большие проекты где performance важна. (4) ОБЩЕЕ для всех — pinning versions, документация в README, CI с теми же checks (`pre-commit/action`, `lefthook run pre-commit --all-files` в GitHub Actions), branch protection 'require status checks'.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m15-exam-q5",
+      "type": "multiple-choice",
+      "question": "Полная стратегия enforcement в команде: как гарантировать что все commits проходят проверки, даже при попытках обхода?",
+      "options": [
+        { "id": "a", "text": "Только надеяться на discipline" },
+        { "id": "b", "text": "Три слоя защиты: (1) ЛОКАЛЬНО — pre-commit hooks для quick feedback (developer сразу видит ошибку). Bypass через --no-verify — legitimate for эмердженси. (2) CI — те же hooks в GitHub Actions / GitLab CI. Если местные обошли — CI поймает. (3) BRANCH PROTECTION — на GitHub: Settings -> Branches -> require status checks + require PR review. PR не может быть merged пока CI не зелёный, независимо от local behavior. Каждый слой компенсирует bypass предыдущего" },
+        { "id": "c", "text": "Только pre-commit достаточно" },
+        { "id": "d", "text": "Только code review" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Three-layer defense — canonical setup для production teams: (1) LOCAL — pre-commit/lefthook на developer-машине. Цель: quick feedback (видеть ошибку до push, экономия времени). Преимущество: developer experience — мгновенно знаешь что не так. Слабое место: bypass через --no-verify (легитимно для эмердженси-фиксов или сломанных hooks, но потенциально abused). (2) CI — те же проверки в pipeline. `.github/workflows/lint.yml` запускает `pre-commit run --all-files` или эквивалент. Слабое место: CI можно отключить или skip для конкретных PRs (если разрешено). (3) BRANCH PROTECTION — UI настройка на GitHub/GitLab. На GitHub: Settings -> Branches -> 'Add branch protection rule' для main: [x] Require a pull request before merging, [x] Require approvals (1+), [x] Require status checks to pass before merging (выбрать конкретные checks: `pre-commit` job, `tests` job), [x] Require branches to be up to date, [x] Require conversation resolution before merging, [x] Require linear history (no merge commits, force squash/rebase). С этими настройками PR в main невозможно merge с failing checks независимо от local поведения коллег. Force-push в main также блокирован. Стратегия работает потому что каждый слой компенсирует другой: developer случайно использовал --no-verify -> CI ловит. Кто-то disable-ил CI -> branch protection ловит missing status checks. Это minimum для production team в 2026.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m15-exam-q6",
+      "type": "true-false",
+      "question": "Полный onboarding setup для нового Junior DE в команде с pre-commit + conventional commits включает: (1) pip install pre-commit; (2) pre-commit install --hook-type commit-msg; (3) pre-commit run --all-files один раз для проверки текущего state; (4) Чтение CONTRIBUTING.md с описанием conventional commits types. После этого все commits и PR проходят автоматически.",
+      "correctAnswer": true,
+      "explanation": "Точно. Это минимальный onboarding workflow для новичка в проекте с правильной инфраструктурой. Детальная последовательность: (1) `git clone <repo> && cd <repo>` — обычно. (2) `python -m venv .venv && source .venv/bin/activate` — изолированное окружение. (3) `pip install -r requirements-dev.txt` (или poetry install) — устанавливает pre-commit вместе с другими dev deps. (4) `pre-commit install` — регистрирует pre-commit hook (для commits). (5) `pre-commit install --hook-type commit-msg` — регистрирует commit-msg hook (для commitlint валидации conventional commits). Без --hook-type только pre-commit hook ставится, commitlint не работает. (6) `pre-commit run --all-files` — sanity check: запустить все hooks на existing repo content. Если что-то fails — починить или understand почему (могут быть legitimate exclude paterns). (7) Прочитать CONTRIBUTING.md (если есть) или README.md — там описаны conventional commits types (feat, fix, chore, docs, refactor, test...), какие scopes используются (airflow, dbt, api, ...), git workflow (feature branches, PR template). (8) Опционально `cz commit` (commitizen) для guided commits в первые дни. После этого: каждый git commit автоматически проходит ruff/mypy/gitleaks/nbstripout/commitlint. Невалидные commits отменяются с пояснительными сообщениями. PR с passing checks готов для review. Это идеальный onboarding — 5 минут setup, защищён процесс от мелких ошибок. Не нужно учить ad-hoc 'у нас правило не commit-ить .env, не использовать print() для debug, формат сообщений такой-то' — всё encoded в config.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

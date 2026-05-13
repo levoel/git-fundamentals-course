@@ -1,0 +1,449 @@
+---
+title: "Почему Git ломается на больших файлах"
+description: "Внутренности хранения объектов в Git, почему бинарники без delta compression удваивают объём при каждом коммите, GitHub limits и реальные DE сценарии"
+order: 1
+difficulty: "intermediate"
+estimatedTime: 22
+topics: ["Git", "LFS", "packfile", "object storage", "performance"]
+---
+
+# Почему Git ломается на больших файлах
+
+В предыдущих модулях мы говорили "Git хранит snapshots". Это правда, но не вся правда — Git делает много умного, чтобы snapshots занимали мало места. Для текстовых файлов это работает отлично. Для больших бинарных — катастрофически плохо. Закоммитил CSV на 50MB пять раз — внезапно у тебя репо размером 250MB, и `git clone` идёт минуты вместо секунд.
+
+Для Data Engineer это важно понимать. CSV-снимки, parquet файлы, дампы баз, ML-модели, картинки для визуализации — всё это тянет тебя в зону, где Git становится не помощником, а врагом. В этом уроке: как именно Git хранит объекты, почему delta compression не спасает для бинарей, как репо разрастается, и где грань "уже плохо".
+
+---
+
+## Напоминание: что такое objects в .git
+
+Когда ты делаешь `git add` + `git commit`, Git создаёт три типа объектов в `.git/objects/`:
+
+<DiagramContainer title="Три типа Git objects" color="blue">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Blob — содержимое файла. SHA-1 hash = идентификатор. Один blob на уникальное содержимое.">
+        <DataBox label="blob" className="border-blue-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>содержимое файла</div>
+            <div>byte-for-byte</div>
+            <div>один на уникальный контент</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Tree — список файлов и подпапок с их SHA. Эквивалент 'directory listing'">
+        <DataBox label="tree" className="border-emerald-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>directory listing</div>
+            <div>имена + SHA blob/tree</div>
+            <div>один на уникальную структуру</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Commit — указатель на tree + parent commit + author + message">
+        <DataBox label="commit" className="border-purple-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>tree SHA</div>
+            <div>parent SHA</div>
+            <div>author, date, message</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Главное свойство — Git хранит **содержимое целиком** в blob-е. Если ты изменил один байт в файле, Git создаёт **новый** blob (новый SHA), а старый остаётся в `.git/objects/` навечно (пока не запустится garbage collector, и то с условиями).
+
+Посмотри своими глазами:
+
+```bash
+# В любом репо
+$ ls .git/objects/
+00  03  05  07  ...  ff  info  pack
+
+$ ls .git/objects/00/
+b3f5c8d9e2a1...   ← это blob-ы, tree-ы или commit-ы
+
+# Сколько занимает .git/?
+$ du -sh .git/
+12M  .git
+```
+
+Каждый коммит — это новые объекты. Со временем `.git/` накапливается.
+
+---
+
+## Delta compression: магия для текста
+
+Git не такой наивный, чтобы хранить **каждый blob** независимо. После определённого порога (обычно при `git gc` или при push) Git **упаковывает** объекты в **packfiles** (`.git/objects/pack/*.pack`).
+
+В packfile похожие blob-ы хранятся как **delta** — разница относительно базового blob-а. Это называется **delta compression**.
+
+```
+blob v1: "hello world"                    (11 bytes)
+blob v2: "hello mighty world"             (18 bytes)
+
+В packfile:
+  base: "hello world"
+  delta для v2: "+ ' mighty' at position 5"   ← всего ~15 bytes
+```
+
+Для текста это работает фантастически. Изменил одну строку в Python файле — blob v2 хранится как несколько байт описания изменений. Тысячи commit-ов в Python-репо могут занимать всего несколько MB на диске.
+
+```bash
+# Команда показывает упакованные vs неупакованные объекты
+$ git count-objects -vH
+count: 32
+size: 128.00 KiB
+in-pack: 5421
+packs: 1
+size-pack: 8.42 MiB
+prune-packable: 0
+garbage: 0
+size-garbage: 0
+```
+
+`in-pack: 5421, size-pack: 8.42 MiB` — пять тысяч объектов в одном packfile, всего 8MB благодаря delta compression. Без deltas это были бы сотни MB.
+
+---
+
+## Почему бинарные файлы — катастрофа
+
+Теперь представь: у тебя CSV с миллионом строк, 50MB. Ты внёс в него одно изменение — обновил одну строку. Создаётся новый blob, тоже 50MB. Изменил ещё раз — третий blob, ещё 50MB.
+
+Можно надеяться, что delta compression спасёт. И иногда спасает — для текстовых CSV есть надежда найти common chunks. Но для **сжатых бинарных форматов** (parquet, sqlite, zip, jpg, png) — нет.
+
+<DiagramContainer title="Почему delta compression не работает для бинарей" color="amber">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Текст: изменение в одном месте локально. Delta маленькая.">
+        <DataBox label="Text file" className="border-emerald-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>v1: 'hello world\\n' x 1000 lines</div>
+            <div>v2: меняем 1 строку</div>
+            <div>delta: ~50 bytes</div>
+            <div>(удар по 1 локальной точке)</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Сжатый формат: изменение одного значения переписывает компрессированные блоки целиком">
+        <DataBox label="Parquet/PNG/Zip" className="border-rose-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>v1: 50MB сжатый бинарь</div>
+            <div>v2: одно значение в данных</div>
+            <div>delta: ~50MB (всё переписано)</div>
+            <div>(сжатие распределяет изменения)</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Причина: алгоритмы сжатия (gzip, snappy, zstd, deflate) распределяют изменения по всему выходному файлу. Один новый байт во входе -> переписаны целиком блоки сжатия. Delta compression не находит общих байт между v1 и v2.
+
+Для DE-форматов это особенно болезненно:
+
+| Формат | Delta-friendly? | Почему |
+| --- | --- | --- |
+| .csv (несжатый) | Иногда | Текстовый, локальные изменения находятся |
+| .json (несжатый) | Иногда | Текстовый |
+| .parquet | Нет | Сжатие colonar, переупаковка при изменении |
+| .duckdb | Нет | Бинарный формат таблиц |
+| .sqlite | Нет | Бинарный B-tree |
+| .h5 / .hdf5 | Нет | Бинарный научный формат |
+| .pkl (pickle) | Нет | Бинарная сериализация Python |
+| .joblib | Нет | Часто содержит compressed numpy arrays |
+| .png / .jpg | Нет | Сжатие изображения |
+| .zip / .tar.gz | Нет | Архив |
+
+Правило: всё, что выглядит как "бинарь с внутренним сжатием" — Git не может эффективно хранить.
+
+---
+
+## Реальный сценарий: что происходит с репо
+
+Возьмём типичный DE-сценарий — версионируешь маленький parquet с features:
+
+```bash
+# Старт
+$ git init demo && cd demo
+$ python -c "
+import pandas as pd
+import numpy as np
+df = pd.DataFrame(np.random.rand(1_000_000, 5))
+df.to_parquet('features.parquet')
+"
+$ ls -lh features.parquet
+40M features.parquet
+
+$ git add features.parquet
+$ git commit -m "add features v1"
+
+$ du -sh .git
+38M .git    ← parquet файл в blob-е
+
+# Обновили: добавили 100 новых строк
+$ python -c "
+import pandas as pd
+import numpy as np
+df = pd.read_parquet('features.parquet')
+new = pd.DataFrame(np.random.rand(100, 5))
+df = pd.concat([df, new])
+df.to_parquet('features.parquet')
+"
+
+$ git add features.parquet
+$ git commit -m "add features v2"
+
+$ du -sh .git
+76M .git    ← Git хранит ОБА файла, нет дельты
+
+# Ещё пять итераций...
+$ du -sh .git
+228M .git   ← 6 версий по ~40MB. Тяжёлый репо за 5 минут работы
+```
+
+После 10 итераций — репо 400MB. После года активной работы с моделями и фичами — гигабайты. `git clone` для нового члена команды — несколько минут (на хороших сетях) или 30 минут (на корпоративном VPN). Каждый `git push` — отправка десятков MB на сервер.
+
+---
+
+## GitHub limits — где граница
+
+GitHub имеет конкретные лимиты:
+
+<DiagramContainer title="GitHub лимиты на размер файлов" color="indigo">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Warning — push пройдёт, но Git CLI и GitHub предупредят">
+        <DataBox label="50 MB" className="border-amber-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>warning</div>
+            <div>push пройдёт</div>
+            <div>'Large file detected'</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Hard limit — push REJECTED. Никаких файлов больше 100MB в обычном Git">
+        <DataBox label="100 MB" className="border-rose-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>HARD REJECT</div>
+            <div>file is X.XX MB</div>
+            <div>'this exceeds 100MB limit'</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Soft repo limit — выше неудобно для clone/CI">
+        <DataBox label="1 GB repo" className="border-purple-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>recommended max</div>
+            <div>выше: проблемы UI, clone</div>
+            <div>5GB+ — GitHub support</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Что произойдёт реально:
+
+```bash
+# Попытка запушить 150MB файл
+$ git push origin main
+remote: error: File big.parquet is 150.00 MB; this exceeds GitHub's file size limit of 100.00 MB
+remote: error: GH001: Large files detected. You may want to try Git Large File Storage - https://git-lfs.github.com.
+To https://github.com/user/repo.git
+ ! [remote rejected] main -> main (pre-receive hook declined)
+error: failed to push some refs to 'https://github.com/user/repo.git'
+```
+
+push отклонён. GitHub советует Git LFS (об этом следующий урок). 50-100MB файлы push-ятся, но получаешь warning. И ты сам должен понимать — даже 30MB файл уже подозрителен для Git.
+
+<Callout type="warning">
+Для DE: 50MB csv = много. 200MB parquet = недопустимо. Перед `git add` любого data-файла спрашивай себя: "это код или данные?". Если данные — почти всегда не Git.
+</Callout>
+
+GitLab и Bitbucket имеют похожие лимиты. Self-hosted Gitea / GitLab можно настроить выше, но это не решение — клиенту всё равно придётся всё это скачивать.
+
+---
+
+## Что происходит с clone и push
+
+Допустим, репо разросся до 1GB из-за бинарей. Конкретные последствия:
+
+**1. `git clone` — медленно.**
+
+```bash
+$ git clone https://github.com/acme/heavy-repo.git
+Cloning into 'heavy-repo'...
+remote: Enumerating objects: 4521, done.
+remote: Counting objects: 100% (4521/4521), done.
+remote: Compressing objects: 100% (2103/2103), done.
+Receiving objects:   23% (1040/4521), 234.42 MiB | 1.23 MiB/s
+```
+
+При 1 MB/s на корпоративном VPN — 15 минут на клон. На хорошем home-интернете — пара минут, но всё равно ощутимо. У DE может быть 5 таких репо для разных проектов — экстраполируй.
+
+**2. CI/CD job startup — медленно.**
+
+GitHub Actions при каждом запуске делает clone. Если репо 1GB — каждый CI job начинается с 5-минутного clone-а. При 50 PR в день — 250 минут CI-времени уходит впустую.
+
+**3. Pack-files раздуваются — операции медленные.**
+
+`git log` сканирует объекты. `git status` сравнивает working tree с indexed blobs. На 50MB blob-ах это секунды вместо миллисекунд.
+
+**4. Disk usage — гигабайты на клиенте.**
+
+Каждый разработчик носит копию репо. 10 разработчиков × 1GB = 10GB размазано по машинам. Плюс по 1GB на каждый клон одного и того же репо (если кто-то клонирует в разные папки).
+
+---
+
+## Что считается "большим" в DE
+
+Шкала:
+
+<DiagramContainer title="Размер файла -> стратегия" color="rose">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="OK для Git — текст, конфиги, маленькие fixtures">
+        <DataBox label="< 1 MB" className="border-emerald-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>Git как обычно</div>
+            <div>код, YAML, JSON, маленький CSV</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Зона осторожности — много таких файлов или часто меняются — плохо">
+        <DataBox label="1-10 MB" className="border-amber-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>Git если очень редко меняется</div>
+            <div>sample data, fixtures</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="LFS или DVC — Git не справится с историей">
+        <DataBox label="10-100 MB" className="border-rose-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>Git LFS</div>
+            <div>parquet, dumps, images</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="DVC или external storage — даже LFS не оптимальный">
+        <DataBox label="100 MB+" className="border-purple-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>DVC, S3, MLflow</div>
+            <div>datasets, models</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Это эвристика. Точнее: главное не размер файла, а **частота изменений × размер**. Один 50MB файл, который не меняется — терпимо в обычном Git. Один 5MB файл, который меняется каждый день — за год превратит репо в гигабайт.
+
+---
+
+## Самый частый ляп: коммит venv или __pycache__
+
+Junior, не настроивший .gitignore, может закоммитить `.venv/` целиком — это 500MB-1GB Python packages с бинарными `.so` файлами. Или `node_modules/` — десятки тысяч файлов на сотни MB.
+
+Такая ошибка превращает репо в монстра. Удалить из истории — сложно (`git filter-repo`, см. модуль 17). Поэтому **профилактика через `.gitignore` критична**.
+
+```bash
+# Защита от коммита больших файлов (опциональный pre-commit hook)
+# В .pre-commit-config.yaml:
+hooks:
+  - id: check-added-large-files
+    args: ['--maxkb=1024']  # 1MB
+```
+
+Это hook из `pre-commit-hooks`, который кричит при попытке закоммитить файл больше указанного размера. См. модуль 15.
+
+---
+
+## Diagnostic команды
+
+Если ты не знаешь, насколько ваш репо плох, вот команды для аудита:
+
+```bash
+# 1. Общий размер .git/
+$ du -sh .git/
+1.2G .git
+
+# 2. Объекты по типу
+$ git count-objects -vH
+count: 0
+in-pack: 12453
+size-pack: 1.20 GiB
+prune-packable: 0
+garbage: 0
+
+# 3. Топ-10 самых больших объектов в истории
+$ git rev-list --objects --all \
+    | git cat-file --batch-check='%(objecttype) %(objectname) %(objectsize) %(rest)' \
+    | awk '/^blob/ {print $3, $4}' \
+    | sort -rn \
+    | head -10
+
+# Вывод:
+524288000 data/dump.sqlite       ← 500MB!
+167772160 models/lgbm_v3.pkl     ← 160MB
+83886080 data/features.parquet   ← 80MB
+```
+
+Эта команда — золото для аудита. Видишь топ-10 самых больших файлов **в истории** (не только сейчас). Если в топе — твои текстовые исходники, всё хорошо. Если — `dump.sqlite`, `model.pkl`, `dataset.parquet` — нужно чистить (модуль 17 — `git filter-repo`).
+
+```bash
+# 4. Сколько объектов в репо
+$ git rev-list --all --count
+1247    ← коммитов
+
+$ git rev-list --objects --all | wc -l
+15823   ← всего объектов (blobs + trees + commits)
+```
+
+---
+
+## Куда идём дальше
+
+Если в твоей работе есть большие файлы, у тебя три стратегии:
+
+1. **`.gitignore` всё data/** — данные не в Git вообще. Хранятся в S3/GCS, скачиваются скриптом. Самый чистый подход для production ETL.
+2. **Git LFS** — большие файлы в Git, но фактическое содержимое в отдельном LFS-storage. См. урок 2 этого модуля.
+3. **DVC** — внешнее хранилище data, метаданные (хеши) в Git. Идеально для ML/DE. См. урок 3.
+
+Никогда: **не пускай большие бинари в обычный Git**. Это технический долг, который сам по себе не исчезнет.
+
+---
+
+## Попробуй сам: посмотри свой репо
+
+```bash
+# В любом своём репо
+cd ~/some-project
+
+# Размер
+du -sh .git/
+
+# Топ-10 больших файлов в истории
+git rev-list --objects --all \
+  | git cat-file --batch-check='%(objecttype) %(objectname) %(objectsize) %(rest)' \
+  | awk '/^blob/ {print $3, $4}' \
+  | sort -rn \
+  | head -10
+
+# Если в топе - бинари размером >10MB, есть проблема
+```
+
+Если репо чистый — поздравляю, .gitignore работает. Если в топе — питон-пакет, parquet или sqlite, то ты в положении большинства DE: история репо засорена, надо разбираться. Следующие уроки — три способа жить с большими данными в Git-инфраструктуре.
+
+---
+
+<KnowledgeCheck
+  question="У тебя в репо лежит 100MB parquet с features. Ты обновляешь его 1 раз в неделю в течение года. Каков примерный размер .git/ через год и почему?"
+  answer="Примерно 5-6 GB (52 недели × 100MB ≈ 5.2GB), потому что Git хранит каждую версию parquet файла как отдельный blob полного размера. Delta compression не работает для parquet — сжатые форматы не имеют общих байт между версиями, и Git не может найти эффективную дельту. Каждый еженедельный update создаёт новый 100MB blob, старые остаются навсегда в .git/objects/. Последствия: clone репо через год — несколько часов на типичном интернете, CI/CD jobs медленные, git operations задумываются. Решение: вынести parquet из обычного Git — либо в .gitignore (хранить в S3, скачивать скриптом), либо в Git LFS (pointer файлы в Git, реальный контент в LFS storage), либо в DVC (метаданные в Git, data в external remote). Любой из трёх подходов снимает 99% проблемы. После года в обычном Git — для очистки нужен `git filter-repo --path features.parquet --invert-paths` + force-push + пересоздание клонов командой."
+/>

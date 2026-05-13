@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "09-undo-reflog/03-revert-vs-reset",
+  "moduleId": "09-undo-reflog",
+  "_meta": { "idPrefix": "git-m09-03" },
+  "questions": [
+    {
+      "id": "git-m09-03-q1",
+      "type": "multiple-choice",
+      "question": "Главная архитектурная разница между revert и reset?",
+      "options": [
+        { "id": "a", "text": "Revert работает только на main" },
+        { "id": "b", "text": "Reset двигает указатель ветки (переписывает историю — после force-push), revert создаёт НОВЫЙ inverse-коммит (история сохраняется, push обычный, безопасно для shared branches)" },
+        { "id": "c", "text": "Revert опаснее" },
+        { "id": "d", "text": "Они эквивалентны" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Reset переписывает указатель ветки — коммиты после нового HEAD исчезают из ветки. Чтобы синхронизировать сервер, нужен force-push, который ломает workflow для всех кто базируется на этой ветке. Revert добавляет inverse-коммит поверх — original commit остаётся на месте, плюс новый коммит с обратным патчем. История линейно растёт, push обычный, никто не пострадает. Это разница 'переписать прошлое' vs 'добавить корректирующий шаг в будущее'.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m09-03-q2",
+      "type": "multiple-choice",
+      "question": "Merged PR #234 на main сломал прод. Tech lead просит откатить. Правильное действие?",
+      "options": [
+        { "id": "a", "text": "git reset --hard HEAD~1 && git push --force origin main" },
+        { "id": "b", "text": "git revert -m 1 <merge-commit-sha> + git push origin main (или кнопка Revert в UI GitHub). Безопасно: добавляет inverse-коммит, никого не ломает, через 2 минуты прод восстановлен" },
+        { "id": "c", "text": "Удалить ветку из-под PR" },
+        { "id": "d", "text": "Откатить deployment без trogания git" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Стандартный production-incident response. Revert merge-коммита через -m 1 (отменить изменения из side branch, оставить main как до merge). На GitHub есть кнопка Revert на странице merged PR — она делает в точности это и создаёт новый PR с обратным патчем. Force-push на main — катастрофа: ломает 10 коллег у которых main теперь старее remote, force-push в защищённую ветку обычно запрещён GitHub branch protection. Действие (а) - reset с force-push - почти всегда red flag для junior, обсудить с tech lead.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m09-03-q3",
+      "type": "multiple-choice",
+      "question": "Что значит флаг `-m 1` в `git revert -m 1 <merge>`?",
+      "options": [
+        { "id": "a", "text": "Merge mode — 1=fast-forward" },
+        { "id": "b", "text": "Mainline parent: 1 = первый родитель merge-коммита = main, оставить main как было; отменить изменения которые пришли из side branch. -m 2 = второй родитель = feature branch, отменить main изменения. В 99% случаев нужен -m 1 (отмена замерженного PR)" },
+        { "id": "c", "text": "Message — 1=auto" },
+        { "id": "d", "text": "Mode — silent" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Merge-коммит имеет 2 родителя: первый — где был HEAD ветки до merge (обычно main), второй — feature branch. Revert без -m не может выбрать какую сторону отменить, ругается. -m N указывает: 'оставь N-го родителя как is, отмени всё что внёс другой'. -m 1 = вернуть main к состоянию до merge. Это default для 'откатить замерженный PR'. -m 2 редко нужен (странный edge case 'отменить main изменения в feature').",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m09-03-q4",
+      "type": "multiple-choice",
+      "question": "На каких ветках reset --hard безопасен и приемлем?",
+      "options": [
+        { "id": "a", "text": "На любых, если осторожен" },
+        { "id": "b", "text": "Только на локальных ветках которые не запушены, или на личных feature-ветках где ты единственный автор и нет open PR. Никогда — на main/master/develop, release-ветках, ветках с open PR (force-push сбивает review комментарии)" },
+        { "id": "c", "text": "Только на master" },
+        { "id": "d", "text": "Reset вообще нельзя использовать" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Reset безопасен ровно пока больше никто не видел коммитов. Локальная экспериментальная ветка — твоя территория, делай что хочешь. Личная feature/my-thing где никто не базируется и нет review — force-push с --force-with-lease приемлем. Команды ('публичные' ветки) — только revert. На PR с review: даже force-push в собственный feature сбивает inline-комментарии reviewer (он перечитывает заново — раздражает). Trunk-based teams часто запрещают force-push в любую ветку.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m09-03-q5",
+      "type": "true-false",
+      "question": "После git revert merge-коммита feature можно просто замержить заново чтобы вернуть фичу.",
+      "correctAnswer": false,
+      "explanation": "Нет, и это известная боль. Git думает: 'эти коммиты feature ветки уже мержились (есть в истории main), ничего нового нет', и merge станет no-op. Чтобы по-настоящему replay фичу, надо ещё ревертнуть revert (revert revert merge) — получится inverse от inverse = original. Альтернатива: rebase feature на новый main и заново merge как fresh ветку. Из-за этого нюанса лучше делать revert merge как новый PR, в его описании указать 'fix planned in follow-up PR' и дальше делать новую ветку с правильным кодом.",
+      "bloomLevel": "analytical"
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "07-rebase/04-golden-rule",
+  "moduleId": "07-rebase",
+  "_meta": { "idPrefix": "git-m07-04" },
+  "questions": [
+    {
+      "id": "git-m07-04-q1",
+      "type": "multiple-choice",
+      "question": "Что такое 'золотое правило rebase'?",
+      "options": [
+        { "id": "a", "text": "Всегда rebase перед merge" },
+        { "id": "b", "text": "Не переписывай опубликованную историю — то, что уже видели другие" },
+        { "id": "c", "text": "Никогда не использовать rebase" },
+        { "id": "d", "text": "rebase можно делать только в main" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Золотое правило: **не переписывать опубликованную историю**. 'Опубликованная' — это коммиты, которые могли видеть другие: запушенные в shared ветку, в feature ветку с открытым PR (ревьюер уже работал), коммиты, которые другие могли клонировать. При rebase меняются SHA — у других людей старые SHA становятся 'инвалидными', и они получают сложные операции восстановления. Безопасные сценарии: rebase локальной ветки до первого push, rebase своей feature ветки до открытия PR. Опасно: rebase main, develop, release/*, любых shared веток.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m07-04-q2",
+      "type": "multiple-choice",
+      "question": "В чём разница между `git push --force` и `git push --force-with-lease`?",
+      "options": [
+        { "id": "a", "text": "Никакой — синонимы" },
+        { "id": "b", "text": "--force слепо перезаписывает remote ветку. --force-with-lease проверяет: совпадает ли текущая remote ветка с тем, что ты последний раз скачал через fetch — если кто-то напушил между, push отвергнут" },
+        { "id": "c", "text": "--force только для main, --force-with-lease для всех остальных" },
+        { "id": "d", "text": "--force-with-lease требует токен, --force нет" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`--force` отправляет твою версию на сервер слепо, перезаписывая что бы там ни было. Опасность: если за минуту между твоим fetch и push кто-то напушил коммит, он будет уничтожен без предупреждения. `--force-with-lease` проверяет: 'Совпадает ли SHA remote-ветки с тем, что я последний раз видел через fetch?'. Если совпадает — push идёт. Если нет — push отвергнут с 'stale info' ошибкой, ты разбираешься. Правило: **используй --force-with-lease, не --force**. Дополнительная защита — `--force-if-includes` (Git 2.30+), включается через `push.useForceIfIncludes = true`.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m07-04-q3",
+      "type": "true-false",
+      "question": "Force-push в shared ветку (например, main) — безопасно, если использовать --force-with-lease.",
+      "correctAnswer": "false",
+      "explanation": "Нет. `--force-with-lease` помогает в работе на своей feature ветке, защищая от непредвиденных коммитов коллег. Но force-push в **shared ветку** (main, develop) — это всегда катастрофа: вы переписываете историю, на которой работают **все** в команде. Все локальные копии становятся desyncronized. CI builds теряют связь, PR на эту ветку ломаются, blame и bisect перестают работать корректно. Решение — branch protection на стороне платформы (GitHub/GitLab), которая физически запретит force-push в main. Force-push в main допустим только в исключительных случаях аварийного восстановления, с согласованием со всей командой.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m07-04-q4",
+      "type": "multiple-choice",
+      "question": "Команда DevOps настраивает branch protection в репозитории. Что должно быть для main?",
+      "options": [
+        { "id": "a", "text": "Все могут push напрямую, no restrictions" },
+        { "id": "b", "text": "Require PR before merging, require N approvals, require CI checks pass, restrict force pushes, restrict deletions" },
+        { "id": "c", "text": "Только force-push" },
+        { "id": "d", "text": "main удалить, работать в develop" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Стандартные branch protection rules для main: (1) **Require PR before merging** — нельзя push напрямую, только через Pull Request. (2) **Require N approvals** — минимум 1-2 апрува от коллег перед merge. (3) **Require status checks** — все CI checks должны быть зелёными. (4) **Restrict force pushes** — никаких `--force` в main. (5) **Restrict deletions** — нельзя удалить ветку (защита от случайного `git push origin :main`). (6) **Require linear history** (опционально) — нельзя merge commits, только rebase or squash. Дополнительно — required signed commits, restrict who can push. Это базовая гигиена. Если в твоей компании этого нет — это bug, предложи ввести.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m07-04-q5",
+      "type": "multiple-choice",
+      "question": "Ты случайно сделал force-push в main, который затёр последний коммит коллеги. Как восстановить?",
+      "options": [
+        { "id": "a", "text": "Никак, коммит потерян навсегда" },
+        { "id": "b", "text": "В локальном reflog (твоём или коллегином) есть запись 'forced-update' — перед ней старый top. git push origin <old-top-sha>:main --force-with-lease восстанавливает main к старому состоянию" },
+        { "id": "c", "text": "Восстановить из бэкапа сервера" },
+        { "id": "d", "text": "Откатить git реinitом" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Восстановление: (1) В чьём-то локальном reflog (твоём или коллеги, у кого до force-push был fetch с этой ветки) есть запись типа `origin/main@{1}: fetch origin: forced-update`. Перед ней — старая верхушка ветки. Найди: `git reflog origin/main`. (2) Restore: `git push origin <old-top-sha>:main --force-with-lease` — это перезаписывает main на сервере к старому коммиту. (3) Свои изменения (новые коммиты, которые ты пушил) остаются в `.git/objects/` как 'осиротевшие' — можно создать ветку из них: `git branch recovery-branch <new-top-sha>` и потом нормально создать PR. **Лучшая prevention**: branch protection с restrict force pushes — platform отвергнет force-push, не дав сломать main физически.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

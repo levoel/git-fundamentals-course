@@ -1,0 +1,70 @@
+{
+  "lessonSlug": "14-lfs-big-data/01-why-git-breaks-on-big-files",
+  "moduleId": "14-lfs-big-data",
+  "_meta": {
+    "idPrefix": "git-m14-01",
+    "description": "Quiz for lesson 01 of module 14 — Git и большие файлы"
+  },
+  "questions": [
+    {
+      "id": "git-m14-01-q1",
+      "type": "multiple-choice",
+      "question": "Почему delta compression в Git не работает эффективно для бинарных файлов (parquet, sqlite, PNG)?",
+      "options": [
+        { "id": "a", "text": "Git не пытается их сжимать вообще" },
+        { "id": "b", "text": "Эти форматы внутри содержат сжатие (gzip, snappy, deflate). Сжатие распределяет изменения по всему выходному файлу — изменение одного значения в данных переписывает целиком сжатые блоки. Git не находит общих байт между версиями, delta получается размером с исходный файл" },
+        { "id": "c", "text": "Git delta работает только для текста до 100 байт" },
+        { "id": "d", "text": "Бинарные файлы хранятся в zip, и Git не может их прочитать" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Алгоритмы сжатия (gzip, snappy, zstd, deflate, LZ4) кодируют входные данные так, что изменение одного байта во входе -> переписаны целиком блоки сжатия. У v1 и v2 parquet-файла после изменения одной ячейки практически нет общих байт. Git delta compression ищет похожие последовательности между blob-ами — для текста (Python, YAML, CSV нестжатые) находит, для сжатых форматов — нет. Результат: каждая версия 100MB parquet хранится как 100MB blob, repo разрастается линейно с числом коммитов. Аналогично для PNG/JPG (внутреннее сжатие), zip/tar.gz (архив), sqlite/duckdb (бинарный B-tree). Текстовые CSV и JSON хранятся эффективнее, но всё равно плохо если файлы большие.",
+      "studyHint": "Повторите урок 01 — раздел 'Почему бинарные файлы — катастрофа'",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m14-01-q2",
+      "type": "multiple-choice",
+      "question": "Какие лимиты на размер файлов у GitHub в 2026?",
+      "options": [
+        { "id": "a", "text": "Жёсткий лимит 10 MB на файл" },
+        { "id": "b", "text": "Warning при > 50 MB (push пройдёт с предупреждением), hard reject при > 100 MB (push отклонён, нужен Git LFS или DVC). Soft recommended max для всего репо — 1 GB" },
+        { "id": "c", "text": "Лимит 1 GB на файл" },
+        { "id": "d", "text": "Нет лимитов" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "GitHub лимиты в 2026: (1) > 50 MB — warning 'Large file detected', push проходит, но GitHub и git CLI предупреждают. (2) > 100 MB — HARD REJECT, push отклонён с сообщением 'this exceeds GitHub file size limit of 100MB. You may want to try Git LFS'. (3) Repo size — soft limit 1 GB recommended, выше — проблемы с UI/clone/CI, 5GB+ — GitHub support contacts you. GitLab имеет похожие лимиты, Bitbucket свои. Для DE: 50MB CSV — уже подозрительно (плохой признак), 100MB+ parquet — точно не в обычный Git, либо .gitignore + S3, либо LFS, либо DVC. Self-hosted Gitea/GitLab можно настроить выше, но проблема clone-time на клиентах остаётся.",
+      "studyHint": "Повторите урок 01 — раздел 'GitHub limits — где граница'",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m14-01-q3",
+      "type": "multiple-choice",
+      "question": "Какая команда покажет топ-10 самых больших файлов в ИСТОРИИ репо (не только в текущем working tree)?",
+      "options": [
+        { "id": "a", "text": "`du -sh .` — показывает текущий размер" },
+        { "id": "b", "text": "Pipeline: `git rev-list --objects --all | git cat-file --batch-check='%(objecttype) %(objectname) %(objectsize) %(rest)' | awk '/^blob/ {print $3, $4}' | sort -rn | head -10` — проходит по всем blob-ам в истории, выводит размер + путь, сортирует по убыванию" },
+        { "id": "c", "text": "`git log --stat`" },
+        { "id": "d", "text": "`git status --history`" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Эта команда — главный инструмент аудита 'нашего репо что-то много весит'. Разбор pipeline: (1) `git rev-list --objects --all` — все объекты во всех веках; (2) `git cat-file --batch-check` — получает type/sha/size/path для каждого; (3) `awk '/^blob/ {print $3, $4}'` — берём только blob-ы (не trees/commits), выводим размер и путь; (4) `sort -rn | head -10` — топ-10 по размеру. Вывод покажет: если в топе — `data/dump.sqlite 524MB`, `models/lgbm.pkl 167MB`, `data/features.parquet 80MB` — у вас history-проблема. Если в топе — твои исходники, всё OK. После аудита: 'плохие' файлы нужно убирать из истории через `git filter-repo` (модуль 17) или мигрировать в LFS через `git lfs migrate import`. Альтернатива - `git count-objects -vH` для общей статистики и `du -sh .git/`.",
+      "studyHint": "Повторите урок 01 — раздел 'Diagnostic команды'",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m14-01-q4",
+      "type": "multiple-choice",
+      "question": "При размере репо 1 GB какие 4 главные практические проблемы?",
+      "options": [
+        { "id": "a", "text": "Проблем нет, Git справляется" },
+        { "id": "b", "text": "(1) git clone медленный — 5-15 мин на нормальном интернете, часы на VPN; (2) CI/CD startup — каждый job начинается с clone, добавляет минуты к каждому запуску; (3) git операции (status, log) задумываются — на больших packfiles; (4) Disk usage у команды — 10 разработчиков × 1GB = 10GB только клоны" },
+        { "id": "c", "text": "Только медленный push" },
+        { "id": "d", "text": "Только размер на сервере GitHub" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Полная картина последствий разросшегося репо: (1) Clone time — clone скачивает весь pack history, не только текущее состояние. 1GB на 1 MB/s VPN = 17 минут, на корпоративном медленном WiFi — больше. Это onboarding каждого нового коллеги. (2) CI/CD — GitHub Actions, GitLab CI, любой pipeline делает clone на каждом run. При 50 PR в день × 5 мин clone = 4 часа CI-времени каждый день в trash. (3) Локальные операции — git status сравнивает working tree с index (на 50MB blob-ах работает медленно), git log сканирует objects (sluggish на больших packfiles), даже `git diff` на single file задерживается. (4) Multiplied by team — каждый разработчик носит копию, 10 человек = 10GB разбросано по machine-ам, плюс копии на разных папках. Решение всех четырёх — вынос больших файлов из истории (LFS migrate или filter-repo).",
+      "studyHint": "Повторите урок 01 — раздел 'Что происходит с clone и push'",
+      "bloomLevel": "analytical"
+    }
+  ]
+}

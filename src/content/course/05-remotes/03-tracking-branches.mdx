@@ -1,0 +1,379 @@
+---
+title: "Tracking branches: связь локального с remote"
+description: "Upstream tracking, git branch -vv, --set-upstream-to, и почему git status знает что ты ahead"
+order: 3
+difficulty: "beginner"
+estimatedTime: 18
+topics: ["Git", "tracking", "upstream", "branch"]
+---
+
+# Tracking branches: связь локального с remote
+
+Когда `git status` пишет "Your branch is ahead of `origin/main` by 3 commits" — он не угадывает. У твоей локальной `main` явно прописан **upstream** — ветка на remote, с которой её надо сравнивать. Это называется **tracking relationship**.
+
+Без понимания tracking невозможно разобраться, почему `git push` иногда требует `-u`, почему `git pull` без аргументов знает, что pull-ить, и почему `git status` показывает "ahead/behind" не для всех веток.
+
+---
+
+## Зачем нужен tracking
+
+Tracking — это сохранённая связь "локальная ветка X следит за remote-веткой Y". Сохраняется она в `.git/config`:
+
+```ini
+[branch "main"]
+    remote = origin
+    merge = refs/heads/main
+```
+
+Эта запись говорит Git: для ветки `main` upstream — это `main` на remote `origin`. Когда ты делаешь `git pull` на `main`, Git идёт в эту запись и понимает: fetch из `origin`, merge `origin/main`.
+
+<DiagramContainer title="Tracking: локальная main знает свой upstream" color="blue">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-6 justify-center flex-wrap">
+      <Tooltip content="Локальная ветка main в .git/refs/heads/main">
+        <DataBox label="local: main" className="border-blue-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>refs/heads/main</div>
+            <div>commit: f4e5d6c</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Запись в .git/config связывает их">
+        <FlowNode variant="default">tracks via config</FlowNode>
+      </Tooltip>
+      <Tooltip content="Remote-tracking branch origin/main — snapshot сервера">
+        <DataBox label="origin/main" className="border-green-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>refs/remotes/origin/main</div>
+            <div>commit: a1b2c3d</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+---
+
+## `git branch -vv`: посмотри все tracking
+
+Лучшая команда для обзора tracking — `git branch -vv` (два `v` для verbose+verbose):
+
+```bash
+$ git branch -vv
+* main                f4e5d6c [origin/main: ahead 3] feat: add spark job
+  develop             a1b2c3d [origin/develop] update readme
+  feature/spike       9876543 wip: experimenting
+  feature/bigquery    abc1234 [origin/feature/bigquery: behind 2] add gcp creds
+```
+
+Читай слева направо:
+
+- `*` — текущая ветка.
+- Имя ветки, hash верхнего коммита.
+- В квадратных скобках — **upstream** и его состояние:
+  - `[origin/main: ahead 3]` — твоя `main` на 3 коммита впереди `origin/main`.
+  - `[origin/develop]` — нет diverge, всё синхронно.
+  - `[origin/feature/bigquery: behind 2]` — на 2 коммита отстаёт от сервера.
+- Без скобок (как `feature/spike`) — **нет upstream**. Это локальная ветка, не привязанная ни к чему.
+
+<Callout type="tip">
+`git branch -vv` — твой основной инструмент диагностики. Если ты не понимаешь, почему `git pull` не работает на ветке — первым делом посмотри сюда.
+</Callout>
+
+---
+
+## Откуда берётся upstream
+
+Tracking появляется в трёх сценариях:
+
+### 1. Автоматически при `git clone`
+
+После `clone` локальная ветка (обычно `main`) автоматически трекает `origin/main`:
+
+```bash
+$ git clone git@github.com:acme/repo.git
+$ cd repo
+$ git branch -vv
+* main  f4e5d6c [origin/main] init commit
+```
+
+Все остальные ветки на сервере НЕ становятся локальными — они доступны как `origin/develop`, `origin/feature-x`. Это remote-tracking branches, но НЕ локальные.
+
+### 2. При `git switch <branch>` для existing remote ветки
+
+Если на сервере есть `develop`, и ты делаешь `git switch develop`, Git автоматически:
+
+- Создаёт локальную `develop` из `origin/develop`.
+- Настраивает её как трекающую `origin/develop`.
+
+```bash
+$ git switch develop
+branch 'develop' set up to track 'origin/develop'.
+Switched to a new branch 'develop'
+```
+
+Это поведение управляется настройкой `branch.autoSetupMerge` (по умолчанию `true`).
+
+### 3. При `git push -u origin <branch>`
+
+Когда ты создал локальную ветку и пушишь её первый раз с `-u`:
+
+```bash
+$ git switch -c feature/x
+$ git push -u origin feature/x
+* [new branch]      feature/x -> feature/x
+branch 'feature/x' set up to track 'origin/feature/x' from 'origin'.
+```
+
+Флаг `-u` (`--set-upstream`) после push настраивает tracking. Без него ты бы создал ветку на сервере, но локальная `feature/x` не знала бы своего upstream.
+
+---
+
+## Управлять tracking руками
+
+### Установить upstream для существующей ветки
+
+Сценарий: создал локальную ветку, поработал, потом понял, что на сервере уже есть аналогичная ветка от коллеги. Хочешь её трекать.
+
+```bash
+git branch --set-upstream-to=origin/feature/x feature/x
+
+# или короче, если ты на этой ветке
+git branch --set-upstream-to=origin/feature/x
+git branch -u origin/feature/x          # совсем коротко
+```
+
+### Убрать tracking
+
+```bash
+git branch --unset-upstream feature/x
+```
+
+После этого `git branch -vv` покажет ветку без квадратных скобок. `git pull`/`git push` без аргументов перестанут работать.
+
+### Переключить tracking на другой remote
+
+```bash
+git branch -u upstream/main main
+```
+
+Полезно при работе с fork: твоя локальная `main` отслеживает `upstream/main` (оригинал), а не `origin/main` (твой fork).
+
+---
+
+## Что значит "ahead" и "behind"
+
+Когда `git status` пишет:
+
+```
+Your branch is ahead of 'origin/main' by 3 commits.
+Your branch is behind 'origin/main' by 5 commits.
+Your branch and 'origin/main' have diverged, and have 3 and 5 different commits each.
+```
+
+Это вычисляется так:
+
+<DiagramContainer title="ahead / behind: считаем относительно общего предка" color="orange">
+  <FlowColumn className="p-4 gap-3">
+    <Tooltip content="C5 — общий предок (merge base)">
+      <FlowNode variant="default">C5 (merge base)</FlowNode>
+    </Tooltip>
+    <Arrow direction="down" />
+    <FlowRow className="gap-6 justify-center">
+      <Tooltip content="3 коммита есть у меня, нет на origin/main -> ahead 3">
+        <DataBox label="my main" className="border-blue-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>C5 -> C6 -> C7 -> C8</div>
+            <div className="text-blue-400">ahead: 3 commits</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="5 коммитов есть на origin/main, нет у меня -> behind 5">
+        <DataBox label="origin/main" className="border-green-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>C5 -> A1 -> A2 -> A3 -> A4 -> A5</div>
+            <div className="text-green-400">behind: 5 commits</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+То есть:
+
+- **ahead N** = N коммитов в твоей ветке, которых нет в upstream.
+- **behind N** = N коммитов в upstream, которых нет у тебя.
+
+Если оба числа ненулевые — `diverged`. Это значит, что ни fast-forward push, ни fast-forward pull невозможны. Нужен merge или rebase.
+
+Точно так же это можно посчитать руками:
+
+```bash
+$ git rev-list --left-right --count main...origin/main
+3       5
+```
+
+`3 5` — слева `ahead` (твоя сторона), справа `behind`.
+
+---
+
+## `push.default`: куда именно пушить
+
+Когда ты пишешь `git push` без аргументов, какая локальная ветка отправляется в какую remote-ветку? Это контролируется настройкой `push.default`.
+
+Современный дефолт (Git 2.0+) — `simple`:
+
+```bash
+git config --global push.default simple
+```
+
+Поведение `simple`:
+
+- `git push` отправляет текущую ветку в её upstream **с тем же именем**.
+- Если имена локальной и upstream не совпадают — ошибка.
+- Если нет upstream — ошибка с подсказкой `--set-upstream`.
+
+Это безопасно и предсказуемо. Не используй `matching` (старый дефолт) — он пушит **все** ветки с совпадающими именами, что иногда приводит к "ой, я случайно запушил три ветки".
+
+### `push.autoSetupRemote`
+
+Полезная настройка с Git 2.37+:
+
+```bash
+git config --global push.autoSetupRemote true
+```
+
+С ней `git push` для новой локальной ветки автоматически настраивает upstream — без флага `-u`. Удобно: один меньше шаг для запоминания.
+
+---
+
+## `branch.autoSetupMerge` и `branch.autoSetupRebase`
+
+При создании ветки от remote (`git switch develop` или `git switch -c x origin/main`) Git настраивает её для tracking. Контролируется через:
+
+```bash
+# По умолчанию: настраивать tracking при ветвлении ОТ remote-tracking
+git config --global branch.autoSetupMerge true
+
+# Чтобы pull всегда был rebase
+git config --global branch.autoSetupRebase always
+```
+
+`autoSetupRebase = always` интересный: при создании любой новой ветки она будет настроена для `pull --rebase`. Полезно для команд с rebase-first culture.
+
+---
+
+## Типичные диагностические сценарии
+
+### Сценарий 1: "Why does `git push` ask for upstream every time?"
+
+Признак — каждый push требует `-u`.
+
+```bash
+$ git push
+fatal: The current branch feature/x has no upstream branch.
+```
+
+Решение: либо запушить с `-u`, либо настроить `push.autoSetupRemote = true`.
+
+```bash
+git push -u origin feature/x
+# или раз и навсегда:
+git config --global push.autoSetupRemote true
+```
+
+### Сценарий 2: "Why does `git pull` say 'no tracking information'?"
+
+```bash
+$ git pull
+There is no tracking information for the current branch.
+Please specify which branch you want to merge with.
+```
+
+Ветка локальная, у неё нет upstream. Решение:
+
+```bash
+# Если на сервере уже есть аналогичная ветка
+git branch -u origin/feature/x
+
+# Если ещё нет — запушить
+git push -u origin feature/x
+```
+
+### Сценарий 3: "Why is my push rejected with non-fast-forward?"
+
+```bash
+$ git push
+ ! [rejected]   main -> main (non-fast-forward)
+```
+
+Твоя локальная `main` и `origin/main` разошлись. Скорее всего, коллега напушил, а ты сделал коммиты локально. Решение:
+
+```bash
+git fetch
+git rebase origin/main      # или git merge origin/main
+git push
+```
+
+<Callout type="warning">
+Никогда не "решай" проблему через `git push --force` без проверки. Это перезапишет коммиты коллеги. Сначала разберись, **что** ты конфликтуешь, и сделай явный rebase или merge.
+</Callout>
+
+---
+
+## Локальная ветка без upstream — это нормально?
+
+Да. Не всякая локальная ветка обязана иметь upstream:
+
+- **Экспериментальные ветки** — пока не уверен, что будешь пушить.
+- **Хранилище WIP** — личные ветки для черновиков.
+- **`detached HEAD` work** — переключение на коммит без создания ветки.
+
+Признак отсутствия upstream — пустые скобки в `git branch -vv`:
+
+```bash
+$ git branch -vv
+  feature/spike  9876543 wip experiment
+```
+
+Если потом захочешь запушить — `git push -u origin feature/spike` это исправит.
+
+---
+
+## Попробуй сам
+
+```bash
+# 1. Клонируй любой публичный репо
+git clone git@github.com:rails/rails.git
+cd rails
+
+# 2. Посмотри tracking
+git branch -vv
+# main отслеживает origin/main
+
+# 3. Создай локальную ветку без upstream
+git switch -c my-experiment
+
+# 4. Посмотри: нет upstream
+git branch -vv | grep my-experiment
+
+# 5. Попробуй push — получишь подсказку про -u
+git push
+# fatal: The current branch my-experiment has no upstream branch.
+
+# 6. Не пуша, а просто настрой tracking на main как пример
+git branch -u origin/main my-experiment
+git branch -vv
+
+# 7. Теперь git status покажет diverge (вероятно)
+git status
+```
+
+---
+
+<KnowledgeCheck
+  question="У тебя есть локальная ветка `data-cleanup`, на сервере она называется `dl/data-cleanup` (с префиксом имени пользователя). Ты делаешь `git push` — Git выдаёт ошибку про missing upstream. Как настроить tracking так, чтобы `git push` отправлял локальную `data-cleanup` в `dl/data-cleanup` на origin?"
+  answer="Нужно либо: (1) сделать первый push с явным указанием remote-ветки и `-u`: `git push -u origin data-cleanup:dl/data-cleanup` — это создаст remote-ветку с нужным именем и настроит tracking. (2) Если ветка `dl/data-cleanup` уже существует на origin: `git fetch && git branch -u origin/dl/data-cleanup data-cleanup`. После этого `git push` будет работать. Заметь: при `push.default = simple` Git требует, чтобы имена локальной и upstream ветки совпадали. Если имена разные, нужно либо переименовать локальную ветку (`git branch -m data-cleanup dl/data-cleanup`), либо использовать `push.default = upstream` (что менее безопасно — может пушить не туда, куда ожидаешь)."
+/>

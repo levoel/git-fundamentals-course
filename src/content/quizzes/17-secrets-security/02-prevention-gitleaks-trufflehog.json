@@ -1,0 +1,73 @@
+{
+  "lessonSlug": "17-secrets-security/02-prevention-gitleaks-trufflehog",
+  "moduleId": "17-secrets-security",
+  "_meta": {
+    "idPrefix": "git-m17-02"
+  },
+  "questions": [
+    {
+      "id": "git-m17-02-q1",
+      "type": "multiple-choice",
+      "question": "Junior настраивает pre-commit hook с gitleaks. Какая команда должна использоваться в hook, и почему?",
+      "options": [
+        {"id": "a", "text": "`gitleaks detect --source .` — сканирует всю историю репо, гарантирует чистоту"},
+        {"id": "b", "text": "`gitleaks protect --staged` — сканирует только staged изменения, быстро и блокирует commit с секретом"},
+        {"id": "c", "text": "`gitleaks detect --no-git` — сканирует working tree, ловит всё"},
+        {"id": "d", "text": "`gitleaks protect` без флагов — сканирует unstaged + staged, максимально безопасно"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Pre-commit hook должен быть быстрым (запускается на каждый commit) и проверять то, что попадает в commit. `gitleaks protect --staged` сканирует только staged (то, что в git diff --cached) — миллисекунды vs секунды для detect, и проверяет именно то, что будет закоммичено. `detect` сканирует историю (медленно, излишне для каждого commit). `protect` без флагов — проверяет working tree (включая un-staged изменения, которые не попадут в commit — false positive risk).",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m17-02-q2",
+      "type": "multiple-choice",
+      "question": "Чем principal-ом отличается GitHub Push Protection от GitHub Secret Scanning?",
+      "options": [
+        {"id": "a", "text": "Push Protection платная, Secret Scanning бесплатная"},
+        {"id": "b", "text": "Secret Scanning сканирует public репо, Push Protection — private"},
+        {"id": "c", "text": "Push Protection отклоняет push с секретом до того как он попал в репо. Secret Scanning ищет уже запушенные секреты постфактум и уведомляет провайдера"},
+        {"id": "d", "text": "Это разные названия одного механизма"}
+      ],
+      "correctAnswer": "c",
+      "explanation": "Push Protection — proactive: проверяет содержимое push на стороне сервера до того, как commit принят. Если найден известный паттерн (AWS, GitHub PAT, etc) — push rejected. Secret Scanning — reactive: сканирует уже пушнутый код, при находке уведомляет провайдера (AWS auto-revoke) и создаёт alert в репо. Оба бесплатны для public репо. Push Protection — сильнее (секрет вообще не попадает в репо), Secret Scanning — last resort.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m17-02-q3",
+      "type": "multiple-choice",
+      "question": "TruffleHog --only-verified отличается от gitleaks тем, что:",
+      "options": [
+        {"id": "a", "text": "Сканирует только последний commit"},
+        {"id": "b", "text": "Для каждого найденного потенциального секрета делает API call в реальный сервис (AWS sts:GetCallerIdentity и т.п.), чтобы убедиться, что ключ валиден"},
+        {"id": "c", "text": "Работает только с private репо"},
+        {"id": "d", "text": "Заменяет найденные секреты на placeholder автоматически"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Verified secrets — главная фича TruffleHog: после regex/entropy match он пытается реально использовать ключ через API сервиса (для AWS — sts:GetCallerIdentity; для GitHub PAT — GET /user, и т.д.). Если запрос успешен — ключ точно валиден, не пример из документации. Это снижает false positive rate до 5%. Полезно для audit существующего репо: точно знаешь, какие ключи прямо сейчас живы и должны быть rotated срочно. gitleaks делает только pattern match — не проверяет live status.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m17-02-q4",
+      "type": "true-false",
+      "question": "GitHub Secret Scanning автоматически уведомляет провайдера (AWS, Stripe, Slack) о найденном leaked ключе, и провайдер может auto-revoke ключ за считанные минуты — даже если разработчик ещё не заметил утечку.",
+      "correctAnswer": true,
+      "explanation": "Это secret scanning partnership program GitHub. Провайдеры (AWS, Stripe, Slack, Google, Snowflake, и т.д.) интегрированы через secure channel. Когда GitHub видит push с regex-match известного паттерна, он сразу posts to партнёрский endpoint. AWS получает push-уведомление и автоматически quarantine-ит ключ (создаёт IAM policy, которая запрещает любое использование). Это случается за минуты, обычно быстрее чем боты-сканеры могут эксплуатировать. Поэтому правило: всё равно rotate, не полагайся на auto-revoke (не все провайдеры в программе, не работает 100% случаев).",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m17-02-q5",
+      "type": "multiple-choice",
+      "question": "В .gitleaks.toml есть allowlist с `regexes = ['EXAMPLE', 'DUMMY']`. Какой риск этой конфигурации?",
+      "options": [
+        {"id": "a", "text": "Никакого — это стандартная практика подавления false positives для документации и тестов"},
+        {"id": "b", "text": "Если разработчик случайно закоммитит реальный секрет в файле, содержащем слово 'EXAMPLE' где-то рядом (например, '# EXAMPLE: AWS_KEY=AKIAreal...'), gitleaks может пропустить настоящий секрет"},
+        {"id": "c", "text": "Allowlist замедляет сканирование в 10x"},
+        {"id": "d", "text": "GitHub Secret Scanning перестанет работать"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Allowlist regex применяется к строкам с found match. Если найдено `AKIAreal1234567890` в строке `# EXAMPLE: AWS_KEY=AKIAreal1234567890`, и regexes содержит `'EXAMPLE'` — gitleaks решит, что это example и пропустит. Risk: real secret в файле с allowlisted словом. Best practice: использовать узкие, file-path-scoped allowlist (paths = ['docs/.*', 'tests/fixtures/.*']), не глобальный regex. Documentation/fixtures всегда в отдельных директориях, поэтому path-based safer.",
+      "bloomLevel": "analytical"
+    }
+  ]
+}

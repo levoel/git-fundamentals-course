@@ -1,0 +1,548 @@
+---
+title: "Conventional commits: feat, fix, chore и автоматизация"
+description: "Стандарт commit message — feat/fix/chore/docs/refactor/test. Зачем, как валидировать через commitlint, как генерить CHANGELOG автоматически"
+order: 3
+difficulty: "intermediate"
+estimatedTime: 22
+topics: ["conventional-commits", "commit-message", "commitlint", "semantic-versioning"]
+---
+
+# Conventional commits: feat, fix, chore и автоматизация
+
+Открой `git log` любого крупного open-source проекта — Airflow, dbt, Kubernetes, React, Vue. Заметишь pattern: commit messages выглядят как `feat: add support for X`, `fix: handle null case in Y`, `chore(deps): bump pandas to 2.2.0`. Это не случайность — это **Conventional Commits**, формальный стандарт сообщений, который превращает git log в structured database.
+
+В этом уроке: что такое conventional commits, зачем DE команды переходят на этот стандарт, какие типы существуют, как валидировать через `commitlint`, и как automated tools (semantic-release) превращают такие commits в CHANGELOG и автоматические релизы.
+
+---
+
+## Зачем нужен стандарт
+
+Стандартный `git log` без conventional commits:
+
+```
+abc123 fixed bug
+def456 wip
+789012 changes
+345678 more changes
+9abcde merge
+```
+
+Через месяц никто не помнит, что именно "fixed bug" или "changes". CHANGELOG генерировать вручную — времязатратно. Понимать impact релиза — невозможно. Версии bumping — ad hoc.
+
+Conventional commits превращают `git log` в:
+
+```
+feat: add transactions aggregation pipeline
+fix: handle DST edge case in date_to_partition
+chore(deps): bump dbt-core to 1.8.0
+docs: update README with new env vars
+refactor: extract common config to utils/
+test: add integration tests for s3_to_warehouse
+```
+
+Теперь:
+
+- Любой commit при беглом взгляде понятен: `feat:` — новый функционал, `fix:` — bugfix, `chore:` — обслуживание
+- CHANGELOG генерится автоматически: "v1.5.0 — feat: add..., feat: support... ; fix: ..."
+- Версия определяется по типам: feat -> minor bump, fix -> patch, BREAKING CHANGE -> major
+- Code review проще: PR с only `chore:` — низкий риск, с `feat:` — нужно внимательно
+
+<Callout type="tip">
+В Airflow, dbt, и других DE-flagship проектах conventional commits — обязательны. PR без правильного формата заголовка не мерджится. Это стандарт индустрии.
+</Callout>
+
+---
+
+## Формат: type, scope, description
+
+Базовая структура:
+
+```
+<type>[optional scope]: <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+Минимальный пример:
+
+```
+feat: add aggregation function
+```
+
+С scope-ом и body:
+
+```
+feat(transactions): aggregate by category daily
+
+Adds a new aggregation step in the pipeline that groups
+transactions by category and computes daily sums.
+
+Refs: JIRA-1234
+```
+
+С breaking change:
+
+```
+feat(api)!: change response format for /aggregations
+
+BREAKING CHANGE: response now returns array instead of dict.
+Clients need to update parsing logic.
+```
+
+`!` после type/scope = signal breaking change. Major version bump.
+
+---
+
+## Канонические типы
+
+<DiagramContainer title="Conventional commits типы" color="blue">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Новая функциональность для пользователя. Bumps MINOR version (1.5.0 -> 1.6.0)">
+        <DataBox label="feat" className="border-emerald-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>Новая фича</div>
+            <div>SemVer: MINOR</div>
+            <div>feat: add S3 connector</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Исправление бага. Bumps PATCH version (1.5.0 -> 1.5.1)">
+        <DataBox label="fix" className="border-blue-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>Bugfix</div>
+            <div>SemVer: PATCH</div>
+            <div>fix: handle timezone in parser</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Обслуживание — обновление deps, конфиги. Не bumping version">
+        <DataBox label="chore" className="border-zinc-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>Maintenance</div>
+            <div>SemVer: no bump</div>
+            <div>chore(deps): bump pandas</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Документация — README, docstrings, gh pages">
+        <DataBox label="docs" className="border-purple-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>Documentation</div>
+            <div>docs: update setup guide</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Рефакторинг без изменения функциональности">
+        <DataBox label="refactor" className="border-indigo-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>Refactor</div>
+            <div>refactor: extract config</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Добавление или изменение тестов">
+        <DataBox label="test" className="border-amber-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>Tests</div>
+            <div>test: add s3 integration</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Изменения формата/стиля кода — без логики">
+        <DataBox label="style" className="border-rose-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>Code style</div>
+            <div>style: format with ruff</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Performance улучшения">
+        <DataBox label="perf" className="border-emerald-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>Performance</div>
+            <div>perf: cache db queries</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Изменения в build-системе (Dockerfile, requirements)">
+        <DataBox label="build" className="border-blue-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>Build system</div>
+            <div>build: update Dockerfile</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="CI/CD конфиги — GitHub Actions, GitLab CI">
+        <DataBox label="ci" className="border-purple-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>CI/CD</div>
+            <div>ci: add lint workflow</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Отмена предыдущего commit-а">
+        <DataBox label="revert" className="border-rose-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>Revert</div>
+            <div>revert: feat: add S3 connector</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Полный канонический список типов: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `style`, `perf`, `build`, `ci`, `revert`.
+
+Каждая команда может расширять (например, добавить `data:` для data updates, `migration:` для DB-миграций), но базовые 11 типов — стандарт.
+
+---
+
+## Scope: добавляет контекст
+
+`scope` (в скобках после type) указывает на компонент:
+
+```
+feat(api): add /aggregations endpoint
+fix(parser): handle null timestamps
+chore(deps): bump airflow to 2.9
+docs(readme): update onboarding section
+test(s3): add multi-region tests
+```
+
+В DE-проекте scopes обычно:
+- Названия modules: `parser`, `api`, `transformers`
+- Названия pipelines: `transactions`, `users`, `events`
+- Layer: `dbt`, `airflow`, `etl`
+- Группы: `deps` для зависимостей
+
+Scope опционален. Если коммит затрагивает несколько scope-ов или непонятный — можно опустить.
+
+---
+
+## Body и footer
+
+Длинный коммит:
+
+```
+feat(transactions): add daily aggregation pipeline
+
+Implements aggregation step that groups transactions by
+category and computes daily sums. Uses pandas instead of
+SQL for cross-source flexibility.
+
+Closes JIRA-1234
+Co-authored-by: Alice <alice@acme.com>
+```
+
+Body — multi-line description, объясняет **почему** изменения, не **что** (что — видно в diff).
+
+Footer — служебная информация:
+- `Closes #123` или `Refs JIRA-1234` — связь с тикетами
+- `Co-authored-by:` — для нескольких авторов
+- `BREAKING CHANGE: <description>` — обязательно для major bump
+
+---
+
+## Валидация через commitlint
+
+Чтобы commit messages в команде следовали стандарту, используется `commitlint` — Node.js утилита, которая проверяет format. Через pre-commit:
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/alessandrojcm/commitlint-pre-commit-hook
+    rev: v9.16.0
+    hooks:
+      - id: commitlint
+        stages: [commit-msg]
+        additional_dependencies: ['@commitlint/config-conventional']
+```
+
+Этот hook запускается на `commit-msg` stage (после написания message, перед commit), и валидирует формат. Если не conventional — commit отменён.
+
+Конфиг `commitlint.config.js`:
+
+```javascript
+module.exports = {
+    extends: ['@commitlint/config-conventional'],
+    rules: {
+        'type-enum': [2, 'always', [
+            'feat', 'fix', 'docs', 'style', 'refactor',
+            'perf', 'test', 'build', 'ci', 'chore', 'revert',
+            'data',   // custom — для DE
+        ]],
+        'subject-case': [2, 'never', ['upper-case']],
+        'header-max-length': [2, 'always', 72],
+    },
+};
+```
+
+`extends: '@commitlint/config-conventional'` — стандартные правила (allowed types, format). `rules` — переопределения.
+
+После `pre-commit install`:
+
+```bash
+$ git commit -m "fixed bug"
+[INFO] Initializing environment for commitlint
+- subject may not be empty [subject-empty]
+- type may not be empty [type-empty]
+
+# Commit отменён
+
+$ git commit -m "fix: handle null timestamp in parser"
+# Hooks passed
+```
+
+---
+
+## commitizen: guided commit
+
+Если коллеги не привыкли к format, есть `commitizen` — CLI, который задаёт вопросы и формирует правильный commit:
+
+```bash
+pip install commitizen
+# или
+npm install -g commitizen
+
+# Вместо git commit
+$ cz commit
+? Select the type of change you are committing:
+  > fix: A bug fix
+    feat: A new feature
+    docs: Documentation only changes
+    style: Code style change
+    ...
+
+? What is the scope of this change? (e.g., parser, api): parser
+
+? Write a short description: handle null timestamp
+
+? Provide a longer description: (optional)
+The parser was failing when timestamp was None.
+Now it falls back to '1970-01-01' for null cases.
+
+? Are there any breaking changes? No
+? Does this change affect any open issues? Yes
+? If issues are closed, the commit requires a body. Please enter a longer description: ...
+? Add issue references: Closes JIRA-1234
+
+# commitizen формирует:
+fix(parser): handle null timestamp
+
+The parser was failing when timestamp was None.
+Now it falls back to '1970-01-01' for null cases.
+
+Closes JIRA-1234
+```
+
+Guided commit полезен для onboarding-периода. Через месяц коллеги привыкают и пишут вручную.
+
+---
+
+## CHANGELOG generation
+
+Главная польза conventional commits — автоматический CHANGELOG. Tool — `conventional-changelog` или `git-cliff` (Rust, быстрый):
+
+```bash
+# Установка git-cliff
+brew install git-cliff
+# или
+cargo install git-cliff
+
+# Сгенерировать CHANGELOG из commits
+git cliff -o CHANGELOG.md
+
+# Сгенерировать для конкретного релиза (между tags)
+git cliff v1.0.0..v1.1.0 -o CHANGELOG-v1.1.0.md
+```
+
+Результат:
+
+```markdown
+# Changelog
+
+## [1.1.0] - 2026-05-13
+
+### Features
+
+- **(transactions)** add daily aggregation pipeline (#123)
+- **(api)** add /aggregations endpoint (#125)
+
+### Bug Fixes
+
+- **(parser)** handle null timestamp (#127)
+- **(s3)** retry on transient errors (#128)
+
+### Chores
+
+- **(deps)** bump dbt-core to 1.8.0 (#130)
+- **(deps)** bump airflow to 2.9.1 (#131)
+```
+
+Все commit messages автоматически собрались в structured CHANGELOG. Никакой ручной работы.
+
+---
+
+## semantic-release: auto-versioning
+
+Дальше — **automatic version bumping** на основе commits. `semantic-release` — JS-tool, который читает commits с последнего тега, определяет тип релиза, bumps version, генерит CHANGELOG, делает Git tag, релиз на GitHub:
+
+```yaml
+# .github/workflows/release.yml
+name: Release
+on:
+  push:
+    branches: [main]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-node@v4
+      - run: npx semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
+После merge PR в main:
+
+1. semantic-release анализирует commits с прошлого release
+2. Если есть `feat:` — bumps MINOR (1.0.0 -> 1.1.0)
+3. Если только `fix:` — bumps PATCH (1.0.0 -> 1.0.1)
+4. Если есть `BREAKING CHANGE:` — bumps MAJOR (1.0.0 -> 2.0.0)
+5. Генерит CHANGELOG, commit-ит
+6. Создаёт Git tag (`v1.1.0`)
+7. Создаёт GitHub Release с release notes
+
+Это автоматизация end-to-end: написал conventional commit -> merge -> новый релиз.
+
+Для DE это особенно полезно в **shared libraries** — общие helpers, schemas, dbt macros packaged как pip/npm. Версии bumping автоматически, юзеры просто `pip install` новую версию.
+
+<Callout type="tip">
+Для airflow DAG проекта без релизов automatic versioning не критичен. Но conventional commits полезны просто для читаемого git log. Минимальный setup — commitlint через pre-commit.
+</Callout>
+
+---
+
+## Real-world examples
+
+Реальные commits из крупных DE проектов:
+
+**Apache Airflow:**
+```
+feat(api): Add update_mask to PATCH connections endpoint (#37874)
+fix(scheduler): Properly handle datasets after dag run finishes (#37879)
+chore(deps): bump cryptography from 41.0.7 to 42.0.4 (#37876)
+docs(providers): Update Azure provider docs structure (#37862)
+```
+
+**dbt-core:**
+```
+feat: Add new Snowflake auth methods (#5879)
+fix: Resolve table comparison error in incremental models (#5884)
+chore(deps): bump httpx to 0.27.0 (#5891)
+test: Add integration tests for Redshift (#5887)
+```
+
+Видно, что format строгий, scopes informative. PR title часто синхронизирован с commit message (или с первой строкой).
+
+---
+
+## Junior DE rules of thumb
+
+Самое практичное для DE-junior:
+
+1. **Тип всегда указывай** — `feat:`, `fix:`, `chore:`, `docs:` минимум.
+2. **Lowercase description** — `feat: add X`, не `feat: Add X` (не критично, но canonical).
+3. **Imperative mood** — "add X", не "added X" или "adds X" (как в git log официальном).
+4. **Header до 72 символов** — fit в один экран git log.
+5. **Не используй capslock или эмодзи** — это шум в structured tooling.
+
+Антипатаerns (так не надо):
+
+- `Updated stuff` (no type, vague)
+- `WIP` (тип не указан, не информативно)
+- `Fix` (no description)
+- `feat: ADD AMAZING NEW FEATURE!!!!1!` (capslock, exclamations)
+- `feat: implemented the new pipeline that aggregates by category daily with support for many edge cases and timezone handling, also fixed some bugs` (header слишком длинный)
+
+Хорошие примеры:
+
+- `feat(transactions): add daily aggregation by category`
+- `fix(parser): handle DST edge case in to_partition()`
+- `chore(deps): bump dbt-core to 1.8.0`
+- `docs: clarify env vars in README`
+
+---
+
+## Hands-on: настроить commitlint
+
+```bash
+# В тестовом репо
+mkdir cc-demo && cd cc-demo
+git init
+pip install pre-commit
+
+# Создать .pre-commit-config.yaml с commitlint
+cat > .pre-commit-config.yaml <<'EOF'
+repos:
+  - repo: https://github.com/alessandrojcm/commitlint-pre-commit-hook
+    rev: v9.16.0
+    hooks:
+      - id: commitlint
+        stages: [commit-msg]
+        additional_dependencies: ['@commitlint/config-conventional']
+EOF
+
+# Создать commitlint.config.js
+cat > commitlint.config.js <<'EOF'
+module.exports = {
+    extends: ['@commitlint/config-conventional'],
+};
+EOF
+
+# Install hooks
+pre-commit install --hook-type commit-msg
+
+# Test 1: bad message
+echo "x=1" > main.py
+git add main.py
+git commit -m "fixed bug"
+# commitlint Failed
+# - subject may not be empty
+# - type may not be empty
+
+# Test 2: good message
+git commit -m "fix: handle x edge case"
+# Passed
+```
+
+Дальше команда привыкает писать в правильном формате. Через месяц станет автоматическим.
+
+---
+
+## Cross-link
+
+- **Урок 02** — pre-commit framework (база для commitlint hook)
+- **Урок 04** — alternative frameworks (husky тоже умеет commitlint)
+- **Модуль 11** — Pull Requests; PR title часто использует тот же формат
+- **Модуль 18** — CI/CD; semantic-release запускается в GitHub Actions
+
+---
+
+<KnowledgeCheck
+  question="Ты переходишь Junior DE в команду, где коллеги пишут commit messages 'fixed thing', 'updated code', 'wip'. Какой план внедрения conventional commits и почему это важно?"
+  answer="План внедрения: (1) Документ — 'почему' и 'как' (можно использовать материал этого урока). Объяснить выгоды: читаемый git log, автоматический CHANGELOG, готовый semantic versioning, проще onboarding. (2) Соглашение в команде на 11 базовых типов (feat, fix, chore, docs, refactor, test, style, perf, build, ci, revert) + опциональные scopes. (3) Технические инструменты — добавить commitlint hook в pre-commit-config.yaml: `alessandrojcm/commitlint-pre-commit-hook` с config-conventional. После `pre-commit install --hook-type commit-msg` валидация автоматическая. (4) Onboarding инструмент — `commitizen` для guided commits в первые недели (`cz commit` задаёт вопросы и формирует правильное сообщение). (5) CI enforcement — в PR workflow проверять title (на GitHub PR title часто = squash commit, поэтому он должен следовать формату). (6) Через 2-3 месяца — добавить `git-cliff` для автоматического CHANGELOG generation, или `semantic-release` для libraries. Почему важно: (a) Понимание истории за 6 месяцев — без conventional log читать невозможно. (b) Code review проще — PR с `chore: bump deps` — low risk, с `feat: new pipeline` — внимательнее. (c) Indication of impact — `feat!:` сразу видно breaking. (d) Automation — без structured commits CHANGELOG и semantic versioning невозможны. (e) Industry standard — Airflow, dbt, Kubernetes используют — твой опыт переносится между проектами. (f) Demonstrates professionalism в собеседовании — показывает понимание инфраструктуры команды."
+/>

@@ -1,0 +1,482 @@
+---
+title: "Разрешение конфликтов вручную"
+description: "Workflow от status до commit; --ours/--theirs; когда регенерировать вместо мерджа"
+order: 3
+difficulty: "beginner"
+estimatedTime: 22
+topics: ["Git", "conflicts", "resolve", "merge", "abort"]
+---
+
+# Разрешение конфликтов вручную
+
+Когда `git merge` уперся в конфликт, Git останавливается и ждёт от тебя действий. Что именно делать — единый workflow на все случаи: посмотри `git status`, открой файл, удали маркеры, оставь нужный код, добавь в индекс, закоммить. В этом уроке мы разбираем этот workflow шаг за шагом, плюс хитрые случаи вроде `git checkout --ours/--theirs` для бинарных файлов и lock-файлов.
+
+---
+
+## Полный workflow разрешения
+
+<DiagramContainer title="Шесть шагов разрешения конфликта" color="blue">
+  <FlowColumn className="p-4 gap-3">
+    <Tooltip content="Git встал в состоянии 'You have unmerged paths'">
+      <FlowNode variant="input">1. CONFLICT: merge failed</FlowNode>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="git status показывает список конфликтных файлов">
+      <FlowNode variant="default">2. git status — что сломано</FlowNode>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="Открой каждый файл, найди маркеры, реши конфликт">
+      <FlowNode variant="default">3. edit file — убери маркеры</FlowNode>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="git add файлы, которые разрешил">
+      <FlowNode variant="default">4. git add — отметить разрешённым</FlowNode>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="git status: 'all conflicts fixed' — можно коммитить">
+      <FlowNode variant="default">5. git status — проверка</FlowNode>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="git commit завершает merge с автогенерированным сообщением">
+      <FlowNode variant="output">6. git commit — финализация</FlowNode>
+    </Tooltip>
+  </FlowColumn>
+</DiagramContainer>
+
+Разберём каждый шаг.
+
+---
+
+## Шаг 1: `git status` — что произошло
+
+После провалившегося merge всегда начинай со `status`. Он скажет, что ровно случилось и что делать дальше.
+
+```bash
+$ git merge feature
+Auto-merging src/etl.py
+CONFLICT (content): Merge conflict in src/etl.py
+Auto-merging src/config.py
+CONFLICT (content): Merge conflict in src/config.py
+Automatic merge failed; fix conflicts and then commit the result.
+
+$ git status
+On branch main
+You have unmerged paths.
+  (fix conflicts and run "git commit")
+  (use "git merge --abort" to abort the merge)
+
+Unmerged paths:
+  (use "git add <file>..." to mark resolution)
+        both modified:   src/config.py
+        both modified:   src/etl.py
+```
+
+Ключевые подсказки:
+
+- **"You have unmerged paths"** — состояние merge in progress.
+- **"both modified"** — обе ветки тронули этот файл.
+- В скобках Git подсказывает команды: `git merge --abort`, `git add` для разрешения.
+
+---
+
+## Шаг 2: открыть файл и разобраться
+
+Открой первый конфликтный файл в редакторе. Найди блоки с маркерами `≪≪≪≪≪≪≪ === ≫≫≫≫≫≫≫` (или `≪≪≪ ||| === ≫≫≫` с zdiff3).
+
+В каждом блоке у тебя есть несколько опций:
+
+### Опция A: оставить OURS
+
+Если ты понимаешь, что твоя версия правильная, удали маркеры и THEIRS-блок:
+
+```bash
+def fetch():
+<<<<<<< HEAD
+    return "v2-from-main"
+=======
+    return "v3-from-feature"
+>>>>>>> feature
+```
+
+Становится:
+
+```python
+def fetch():
+    return "v2-from-main"
+```
+
+### Опция B: оставить THEIRS
+
+Аналогично, если их версия правильнее:
+
+```python
+def fetch():
+    return "v3-from-feature"
+```
+
+### Опция C: объединить обе
+
+Самый частый случай: обе стороны внесли полезные изменения, нужно слить.
+
+```python
+def fetch():
+    # merged: оставили v2 из main, но добавили fallback из feature
+    try:
+        return "v2-from-main"
+    except Exception:
+        return "v3-from-feature"
+```
+
+### Опция D: третий путь
+
+Иногда правильный ответ не "OURS или THEIRS", а что-то третье:
+
+```python
+def fetch():
+    return os.environ.get("API_VERSION", "v2-from-main")
+```
+
+Это нормально. Git тебя ничем не ограничивает — главное, чтобы маркеры исчезли и код был валидный.
+
+<Callout type="warning">
+Перед `git add` обязательно поищи в файле все маркеры. Если хоть один блок остался — закоммитишь сломанный файл. Команда поиска (запускай в терминале):
+
+```bash
+grep -n "<<<<<<<\|=======\|>>>>>>>" src/etl.py
+```
+</Callout>
+
+---
+
+## Шаг 3: `git add` — отметить разрешённым
+
+После того, как файл выглядит как валидный код без маркеров, скажи Git'у "я разобрался":
+
+```bash
+git add src/etl.py
+```
+
+Это меняет состояние файла в index с "unmerged" на "ready". `git status` обновится:
+
+```bash
+$ git status
+On branch main
+All conflicts fixed but you are still merging.
+  (use "git commit" to conclude merge)
+
+Changes to be committed:
+        modified:   src/etl.py
+```
+
+Заметь: `git status` подскажет "All conflicts fixed". Это сигнал, что можно коммитить.
+
+Если файлов несколько, добавляй каждый по очереди (или все сразу через `git add -A` / `git add .`, но осторожно — это добавит и unrelated unstaged changes).
+
+---
+
+## Шаг 4: `git commit` — закрепить мердж
+
+После `git add` всех разрешённых файлов:
+
+```bash
+$ git commit
+```
+
+Git откроет редактор с автоматически предзаполненным сообщением:
+
+```
+Merge branch 'feature' into main
+
+# Conflicts:
+#	src/etl.py
+#	src/config.py
+#
+# It looks like you may be committing a merge.
+# If this is not correct, please run
+#	git update-ref -d MERGE_HEAD
+# and try again.
+```
+
+Стандарт — оставить дефолт и сохранить редактор (`:wq` в vim, Ctrl+S в VS Code). Если хочешь короче — `git commit --no-edit`.
+
+После коммита merge завершён. `git log` покажет merge commit с двумя родителями:
+
+```bash
+$ git log --oneline --graph
+*   abc1234 (HEAD -> main) Merge branch 'feature' into main
+|\
+| * def5678 (feature) feature: change v1 to v3
+* | 9876543 main: change v1 to v2
+|/
+* a1b2c3d init
+```
+
+---
+
+## `git merge --abort`: всё откатить
+
+Если на шаге 2 ты понял "ой, не хочу сейчас этим заниматься" — можно безопасно откатиться:
+
+```bash
+git merge --abort
+```
+
+Это вернёт твою ветку в состояние до `git merge`. Все локальные изменения, которые были до merge, сохранятся. Сам merge будто и не начинался.
+
+<Callout type="tip">
+`git merge --abort` — твой safety net. Если не уверен в разрешении конфликта, лучше abort, спросить коллегу, и попробовать снова. Не выкручивайся в потёмках.
+</Callout>
+
+Эквивалентные команды для других операций:
+
+```bash
+git rebase --abort
+git cherry-pick --abort
+git revert --abort
+```
+
+---
+
+## `git checkout --ours/--theirs` для целого файла
+
+Иногда понятно, что нужно полностью взять одну сторону, не вдаваясь в детали. Например:
+
+- Конфликт в `package-lock.json` / `poetry.lock` / `pdm.lock` / `Pipfile.lock` — нет смысла мерджить, проще регенерировать.
+- Конфликт в бинарном файле (PNG, PDF, parquet) — нет diff построчно, придётся выбрать целиком.
+- Конфликт в сгенерированном файле (миграции, схемы) — обычно перегенерируешь.
+
+Команды:
+
+```bash
+# Взять полностью версию из OURS (твоя ветка)
+git checkout --ours path/to/file
+git add path/to/file
+
+# Взять полностью версию из THEIRS (мерджимая ветка)
+git checkout --theirs path/to/file
+git add path/to/file
+```
+
+В современном Git есть аналог через `restore`:
+
+```bash
+git restore --ours path/to/file
+git restore --theirs path/to/file
+```
+
+### Специальный случай: lock-файлы
+
+Для `package-lock.json` и аналогов **не пытайся мерджить руками** — это бессмысленно, lock-файл регенерируется детерминированно из манифеста.
+
+```bash
+# Сохрани какую-то из версий
+git checkout --theirs package-lock.json
+
+# Регенерируй
+npm install
+# или
+poetry lock --no-update
+# или
+pdm lock
+
+# Добавь регенерированный
+git add package-lock.json
+```
+
+То же самое для Python — `requirements.txt` обычно мерджится руками (там читаемый текст), но `poetry.lock` / `uv.lock` всегда регенерируется.
+
+---
+
+## Что значит "unmerged paths"
+
+В шапке `git status` ты увидишь раздел **Unmerged paths**. Это файлы в особом состоянии конфликта. У них есть три stage в index (BASE, OURS, THEIRS), и Git ждёт, пока ты их схлопнешь в один.
+
+После `git add` файл переходит в обычный stage 0 — Git понимает, "разрешено". 
+
+```bash
+$ git status
+You have unmerged paths.
+Unmerged paths:
+        both modified:   src/etl.py
+
+$ git add src/etl.py
+$ git status
+All conflicts fixed but you are still merging.
+Changes to be committed:
+        modified:   src/etl.py
+```
+
+---
+
+## Хитрый случай: конфликт в файле, который ты не трогал
+
+Бывает странное: `git merge` падает с конфликтом в файле, в котором, как тебе кажется, ты ничего не менял. Возможные причины:
+
+1. **CRLF / LF** — Windows. Кто-то закоммитил файл с CRLF, ты с LF, или наоборот. Каждая строка считается изменённой. Решение: настройка `core.autocrlf` для команды (`.gitattributes` с `* text=auto` обычно решает).
+
+2. **Whitespace-only изменения**. Перформатирование (или прогон через линтер другой версии) меняет все строки, и любой merge становится конфликтом. Решение: договорённость про формат + pre-commit hooks.
+
+3. **Перемещения / rename**. Файл переименован, и Git не догадался отследить переименование. Тогда он видит "удалили один файл, создали другой с такими же изменениями". Решение: `git config --global merge.renames true` (включено по умолчанию в Git 2.18+).
+
+---
+
+## Сценарий: разрешение конфликтов пошагово
+
+Воспроизведём типичный конфликт и пройдём workflow:
+
+```bash
+# Создаём sandbox
+mkdir resolve-demo && cd resolve-demo
+git init -b main
+
+# Начальный файл
+cat > app.py <<EOF
+import os
+
+DB_HOST = "localhost"
+DB_PORT = 5432
+DB_TIMEOUT = 10
+
+def connect():
+    return f"db://{DB_HOST}:{DB_PORT}"
+EOF
+git add . && git commit -m "init"
+
+# Ветка production-config
+git switch -c production-config
+sed -i.bak 's/DB_HOST = "localhost"/DB_HOST = "prod.example.com"/' app.py
+sed -i.bak 's/DB_TIMEOUT = 10/DB_TIMEOUT = 30/' app.py
+rm app.py.bak
+git commit -am "config: production DB settings"
+
+# Ветка retry-logic от main
+git switch main
+git switch -c retry-logic
+sed -i.bak 's/DB_TIMEOUT = 10/DB_TIMEOUT = 60/' app.py
+rm app.py.bak
+git commit -am "config: increase timeout for retries"
+
+# Мерджим обе ветки в main
+git switch main
+git merge production-config    # этот пройдёт fast-forward
+git merge retry-logic          # тут будет CONFLICT
+
+# Смотрим статус
+git status
+# both modified: app.py
+
+# Открываем файл, видим:
+cat app.py
+# Заметим конфликт на DB_TIMEOUT
+```
+
+Что мы видим (с zdiff3):
+
+```bash
+DB_HOST = "prod.example.com"
+DB_PORT = 5432
+<<<<<<< HEAD
+DB_TIMEOUT = 30
+||||||| merged common ancestors
+DB_TIMEOUT = 10
+=======
+DB_TIMEOUT = 60
+>>>>>>> retry-logic
+```
+
+Решение: для production retry нужен максимум — берём 60.
+
+```bash
+cat > app.py <<EOF
+import os
+
+DB_HOST = "prod.example.com"
+DB_PORT = 5432
+DB_TIMEOUT = 60
+
+def connect():
+    return f"db://{DB_HOST}:{DB_PORT}"
+EOF
+
+# Проверяем, что маркеров не осталось
+grep -n "<<<<<<<\|=======\|>>>>>>>" app.py
+# (ничего не выводит)
+
+# Отмечаем разрешённым
+git add app.py
+
+# Завершаем merge
+git commit --no-edit
+
+# Проверяем результат
+git log --oneline --graph --all
+```
+
+---
+
+## Чек-лист перед `git commit` после конфликта
+
+1. `git status` показывает "All conflicts fixed".
+2. В файлах нет маркеров `≪≪≪≪≪≪≪`, `=======`, `≫≫≫≫≫≫≫`, `|||||||`.
+3. Код компилируется/проходит линтер локально.
+4. Тесты прошли (минимально — те, которые покрывают изменённые участки).
+5. Если был сложный merge — short проверка вручную, что мердж имеет смысл.
+
+`grep` для поиска маркеров — твой друг:
+
+```bash
+grep -rn "<<<<<<<" .
+```
+
+Если ничего не вернёт — маркеров не осталось.
+
+---
+
+## Попробуй сам
+
+```bash
+# Пройди полный цикл резолва
+mkdir conflict-practice && cd conflict-practice
+git init
+
+cat > settings.json <<'EOF'
+{
+  "name": "myapp",
+  "version": "1.0.0",
+  "timeout": 30,
+  "retries": 3
+}
+EOF
+git add . && git commit -m "init"
+
+# Ветка перфоманс: повышаем retries
+git switch -c perf-tune
+sed -i.bak 's/"retries": 3/"retries": 5/' settings.json && rm settings.json.bak
+git commit -am "perf: more retries"
+
+# Ветка stability: понижаем retries
+git switch main
+git switch -c stability
+sed -i.bak 's/"retries": 3/"retries": 2/' settings.json && rm settings.json.bak
+git commit -am "stability: fewer retries"
+
+# Мерджим
+git switch main
+git merge perf-tune    # fast-forward
+git merge stability    # CONFLICT
+
+# Дальше — твой ход:
+# - Открой settings.json в редакторе
+# - Реши конфликт (например, оставь 4 — компромисс)
+# - grep маркеры, чтобы убедиться что чисто
+# - git add settings.json
+# - git commit
+# - git log --oneline --graph
+```
+
+---
+
+<KnowledgeCheck
+  question="После `git merge feature` у тебя 12 конфликтов в разных файлах. В трёх из них — `requirements.txt`, `poetry.lock`, `package-lock.json`. Какая стратегия для каждого, и какая последовательность действий минимизирует риск ошибки?"
+  answer="Стратегия по типам файлов: (1) **`requirements.txt`** — это редактируемый текст. Открой, посмотри обе версии (с zdiff3 видно BASE), объедини список пакетов руками. Если пакет есть в обеих ветках с разными версиями — нужно решение: обычно более новая, но проверь changelog. (2) **`poetry.lock`** — НЕ мерджить руками. Это lock-файл с криптографическими хешами, ручной merge практически невозможен правильно. Решение: `git checkout --theirs poetry.lock && poetry lock --no-update && git add poetry.lock`. Это возьмёт version из feature как стартовую точку, потом регенерирует lock детерминированно. (3) **`package-lock.json`** — аналогично, `git checkout --theirs package-lock.json && npm install && git add package-lock.json`. Последовательность для минимизации ошибок: (a) сначала разрулить **редактируемые** файлы кода руками — там критично понимание логики. (b) Lock-файлы — в самом конце, после того, как все manifest-файлы (requirements.txt, pyproject.toml, package.json) приведены в финальное состояние. Иначе можешь регенерировать lock-файл, потом изменить manifest — и lock устареет, придётся регенерировать снова. (c) Перед `git add` каждого файла — `grep` маркеры конфликта в файле чтобы убедиться что их не осталось. (d) Запусти тесты локально перед `git commit`, чтобы поймать логические merge-ошибки."
+/>

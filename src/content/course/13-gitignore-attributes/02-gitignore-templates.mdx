@@ -1,0 +1,405 @@
+---
+title: "Шаблоны .gitignore: GitHub, gh gist и debugging"
+description: "Готовые шаблоны от github/gitignore, как их быстро вставить через gh gist gitignore или copy-paste, и debug команды git check-ignore и git ls-files --ignored для разбора проблем"
+order: 2
+difficulty: "beginner"
+estimatedTime: 18
+topics: ["Git", "gitignore", "GitHub", "debugging"]
+---
+
+# Шаблоны .gitignore: GitHub, gh gist и debugging
+
+Писать `.gitignore` с нуля для каждого проекта — это бесполезная работа. Тысячи людей до тебя уже писали "игнор для Python", "игнор для Node.js", "игнор для macOS". GitHub собрал эти шаблоны в один публичный репо, и каждый раз когда ты создаёшь репозиторий через UI, GitHub предлагает выбрать шаблон.
+
+В этом уроке: где брать готовые шаблоны, как их быстро вставить через `gh` CLI, как комбинировать несколько (Python + Jupyter + macOS), и как дебажить `.gitignore` через `git check-ignore` и `git ls-files`, когда что-то не работает.
+
+---
+
+## github/gitignore: каноничный источник
+
+Репо `github.com/github/gitignore` — это публичная коллекция шаблонов. В нём около 200 файлов вида `Python.gitignore`, `Node.gitignore`, `Go.gitignore`, `Rust.gitignore` и так далее.
+
+<DiagramContainer title="Структура github/gitignore" color="blue">
+  <FlowColumn className="p-4 gap-3">
+    <Tooltip content="Корневые шаблоны для популярных языков и фреймворков">
+      <DataBox label="root/" className="border-blue-500/30 w-96 mx-auto">
+        <div className="text-xs font-mono space-y-1">
+          <div>Python.gitignore</div>
+          <div>Node.gitignore</div>
+          <div>Java.gitignore, Go.gitignore</div>
+          <div>Rust.gitignore, Ruby.gitignore</div>
+        </div>
+      </DataBox>
+    </Tooltip>
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Global — для всей системы (macOS, Windows, Linux)">
+        <DataBox label="Global/" className="border-purple-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>macOS.gitignore</div>
+            <div>Windows.gitignore</div>
+            <div>JetBrains.gitignore</div>
+            <div>VisualStudioCode.gitignore</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Community — менее популярные стеки">
+        <DataBox label="community/" className="border-emerald-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>JupyterNotebooks.gitignore</div>
+            <div>dbt.gitignore</div>
+            <div>Terraform.gitignore</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Идея простая: один файл на язык/фреймворк, регулярно обновляется community, проверен тысячами проектов. Когда стартуешь новый Python-проект — берёшь `Python.gitignore`, комбинируешь с `Global/macOS.gitignore` и `community/JupyterNotebooks.gitignore`. Готово.
+
+---
+
+## Способ 1: GitHub UI при создании репо
+
+Когда ты создаёшь репо через `github.com/new`, в форме есть dropdown **"Add .gitignore"** с тем же списком шаблонов. Выбираешь Python — GitHub автоматически создаст в репо `.gitignore` с содержимым `Python.gitignore`.
+
+Это самый простой способ для нового проекта. Но у него ограничение: можно выбрать только **один** шаблон. Если нужно Python + macOS + Jupyter — придётся вручную доклеивать.
+
+---
+
+## Способ 2: gh gist gitignore
+
+GitHub CLI имеет extension для удобной работы с шаблонами. Через расширение `gh-gitignore` (или просто copy с github.com/github/gitignore):
+
+```bash
+# Установить расширение (один раз)
+gh extension install hectcastro/gh-gitignore
+
+# Получить шаблон Python в текущую директорию
+gh gitignore set Python > .gitignore
+
+# Скомбинировать несколько (просто конкатенация)
+gh gitignore set Python > .gitignore
+gh gitignore set Global/macOS >> .gitignore
+gh gitignore set community/JupyterNotebooks >> .gitignore
+```
+
+<Callout type="tip">
+Альтернатива без `gh extension`: просто `curl` напрямую из raw.githubusercontent.com.
+</Callout>
+
+```bash
+# Прямой curl — работает всегда
+curl -fsSL https://raw.githubusercontent.com/github/gitignore/main/Python.gitignore > .gitignore
+curl -fsSL https://raw.githubusercontent.com/github/gitignore/main/Global/macOS.gitignore >> .gitignore
+curl -fsSL https://raw.githubusercontent.com/github/gitignore/main/community/JupyterNotebooks.gitignore >> .gitignore
+```
+
+Или ещё проще — сервис `gitignore.io` (он же `toptal.com/developers/gitignore`):
+
+```bash
+# Скомбинировать сразу несколько шаблонов через API
+curl -fsSL "https://www.toptal.com/developers/gitignore/api/python,jupyternotebooks,macos,vscode,linux" > .gitignore
+```
+
+Это вернёт один файл, где аккуратно собраны все указанные шаблоны с заголовками-комментариями. Удобно для быстрого старта.
+
+---
+
+## Способ 3: copy-paste из GitHub UI
+
+Самый прямолинейный — открыть https://github.com/github/gitignore, найти нужный файл, нажать "Raw", скопировать содержимое.
+
+Это полезно когда:
+- Нет интернета в CLI окружении (например, корпоративный proxy)
+- Нужно сразу глазами посмотреть, что внутри, и адаптировать
+
+---
+
+## Hands-on: собрать .gitignore для Python DE проекта
+
+Возьмём пример Python ETL с Jupyter и DBT:
+
+```bash
+# Создаём новый репо
+mkdir my-de-project && cd my-de-project
+git init
+
+# Скачиваем шаблоны через gitignore.io
+curl -fsSL "https://www.toptal.com/developers/gitignore/api/python,jupyternotebooks,macos,vscode,linux,dbt" > .gitignore
+
+# Смотрим, что получилось
+head -30 .gitignore
+```
+
+Вывод (сокращённо):
+
+```
+# Created by https://www.toptal.com/developers/gitignore/api/python,jupyternotebooks,...
+
+### Python ###
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+...
+
+### JupyterNotebooks ###
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+...
+
+### macOS ###
+.DS_Store
+.AppleDouble
+...
+```
+
+Дальше — добавляем специфику нашего проекта:
+
+```bash
+# Дописываем то, что специфично для нашего ETL
+cat >> .gitignore <<'EOF'
+
+### Project-specific ###
+# Секреты
+.env
+.env.local
+!.env.example
+
+# Данные
+data/raw/
+data/interim/
+data/processed/
+!data/**/README.md
+
+# Локальные дампы
+*.duckdb
+*.sqlite
+*.parquet
+
+# Airflow
+airflow.db
+airflow.cfg
+EOF
+```
+
+Commit:
+
+```bash
+git add .gitignore
+git commit -m "chore: add .gitignore for Python ETL project"
+```
+
+Получаешь готовый стартовый .gitignore за минуту, не написав сам ни строки.
+
+---
+
+## git check-ignore: главный debug-инструмент
+
+Самая частая фраза джуна: "Я добавил файл в .gitignore, а Git его всё равно видит". `git check-ignore -v <file>` — твой друг.
+
+```bash
+# Базовое использование — какое правило игнорирует файл
+$ git check-ignore -v data/raw/dataset.csv
+.gitignore:42:data/raw/    data/raw/dataset.csv
+
+# Файл НЕ игнорируется — пустой output
+$ git check-ignore -v src/main.py
+# (тишина)
+$ echo $?
+1   # exit code 1 = не игнорируется
+```
+
+Структура вывода: `<source>:<line>:<pattern>    <file>`.
+
+- `source` — какой `.gitignore` сработал (может быть и global, и repo, и subdir)
+- `line` — на какой строке этого файла лежит правило
+- `pattern` — собственно сам паттерн
+
+Это бесценно когда правил много. Особенно когда подключены global и subdir .gitignore — без `-v` ты не поймёшь, кто матчит.
+
+```bash
+# Несколько файлов сразу
+$ git check-ignore -v data/raw/a.csv data/processed/b.parquet src/main.py
+.gitignore:42:data/raw/         data/raw/a.csv
+.gitignore:44:data/processed/   data/processed/b.parquet
+# src/main.py отсутствует — значит не игнорируется
+```
+
+<Callout type="tip">
+Привычка: когда .gitignore "не работает" — первая команда `git check-ignore -v <file>`. Не "печатать .gitignore руками и искать паттерн глазами". CLI делает это за тебя точно.
+</Callout>
+
+---
+
+## git ls-files: какие файлы УЖЕ отслеживаются
+
+Другой угол: `.gitignore` не работает на уже tracked файлы. То есть если ты случайно закоммитил `.env`, добавление его в `.gitignore` ничего не изменит — `.env` уже в индексе.
+
+`git ls-files` покажет, что **сейчас** отслеживается:
+
+```bash
+# Все tracked файлы
+$ git ls-files
+.gitignore
+README.md
+src/main.py
+
+# Только те, которые matched-бы .gitignore (но всё равно tracked — баг!)
+$ git ls-files --ignored --exclude-standard
+.env             ← УПС, закоммитили .env, теперь надо чистить
+```
+
+Если `git ls-files --ignored --exclude-standard` показывает файлы — это всегда проблема. Эти файлы матчат `.gitignore`, но всё равно отслеживаются Git-ом. Надо чистить:
+
+```bash
+# Убрать из индекса (но оставить в filesystem)
+$ git rm --cached .env
+
+$ git commit -m "chore: remove .env from tracking"
+
+# Проверь, что чисто
+$ git ls-files --ignored --exclude-standard
+# (пусто)
+```
+
+<Callout type="danger">
+Если в `.env` уже **попали** реальные секреты — `git rm --cached` НЕ удалит их из истории. Они останутся в старых коммитах, доступны через `git log`. Это тема модуля 17 — там разберём `git filter-repo` и BFG для очистки истории. Совет на сейчас: если секреты утекли в публичный репо — **немедленно rotate-нуть пароли/токены**.
+</Callout>
+
+---
+
+## git status --ignored: посмотреть, что Git скрывает
+
+По умолчанию `git status` НЕ показывает игнорированные файлы — это удобно для повседневной работы. Но иногда полезно посмотреть, что Git замёл под ковёр:
+
+```bash
+$ git status --ignored
+On branch main
+Untracked files:
+  src/new_module.py
+
+Ignored files:
+  .env
+  __pycache__/
+  data/raw/
+  .venv/
+
+# Короткая форма
+$ git status --ignored -s
+?? src/new_module.py
+!! .env
+!! __pycache__/
+!! data/raw/
+!! .venv/
+```
+
+`!!` — маркер ignored файлов. Это полезно при code review своих изменений: "не игнорирую ли я что-то важное случайно?".
+
+---
+
+## Антипаттерны: что НЕ класть в .gitignore
+
+Несколько частых ошибок junior-ов:
+
+<DiagramContainer title="Антипаттерны .gitignore" color="rose">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Идеологически неверно — это твой личный выбор IDE, а не правило проекта">
+        <DataBox label="IDE configs в repo" className="border-rose-500/30 w-72">
+          <div className="text-xs">.idea/, .vscode/ в team .gitignore</div>
+          <div className="text-xs text-zinc-500">-> положи в global, коллеги могут использовать другую IDE</div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Документация конфига нужна команде. .env.example должен быть в Git">
+        <DataBox label=".env.example скрыт" className="border-rose-500/30 w-72">
+          <div className="text-xs">.env* без исключения для .env.example</div>
+          <div className="text-xs text-zinc-500">-> добавь !.env.example</div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Logs нужны для debugging локально, но в Git раздувают репо без пользы">
+        <DataBox label="logs/ забыт" className="border-rose-500/30 w-72">
+          <div className="text-xs">логи приложения попадают в коммиты</div>
+          <div className="text-xs text-zinc-500">-> всегда logs/ в .gitignore</div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Полный путь до файла на твоей машине не имеет смысла для коллег">
+        <DataBox label="абсолютные пути" className="border-rose-500/30 w-72">
+          <div className="text-xs">/Users/me/data/cache.csv</div>
+          <div className="text-xs text-zinc-500">-> паттерны должны быть относительные</div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Особенно важно: **не клади в repo .gitignore то, что специфично для твоей машины или IDE**. Это засирает чужие .gitignore. Используй global для личного.
+
+---
+
+## Попробуй сам: дебаг реального случая
+
+Создадим ситуацию, которая ломает джунов:
+
+```bash
+mkdir debug-demo && cd debug-demo
+git init
+
+# Закоммитили .env (опечатка в команде)
+echo "DB_PASSWORD=secret123" > .env
+git add .env
+git commit -m "oops, committed .env"
+
+# Поздно понял — добавил в .gitignore
+echo ".env" > .gitignore
+git add .gitignore && git commit -m "add .env to gitignore"
+
+# Изменили .env
+echo "DB_PASSWORD=secret456" >> .env
+
+# Git всё равно видит изменения!
+git status
+# modified:   .env
+
+# Проверь — игнорируется ли .env по правилам?
+git check-ignore -v .env
+# .gitignore:1:.env    .env  ← да, паттерн матчит
+
+# Но он tracked!
+git ls-files --ignored --exclude-standard
+# .env  ← вот в чём проблема
+
+# Решение — убрать из индекса
+git rm --cached .env
+git commit -m "untrack .env"
+
+# Теперь .env не tracked и игнорируется
+git status
+# nothing to commit, working tree clean
+
+git ls-files --ignored --exclude-standard
+# (пусто — чисто)
+
+# Но! Если он был запушен — его уже видели коллеги.
+# Секрет нужно ротировать, а историю чистить через filter-repo (модуль 17)
+```
+
+Этот сценарий — главная "ловушка .gitignore". Запомни два правила:
+
+1. `.gitignore` действует только на untracked файлы. Tracked игнорируются после `git rm --cached`.
+2. Удаление из индекса **не удаляет из истории**. Если секрет утёк — ротация + filter-repo, см. модуль 17.
+
+---
+
+<KnowledgeCheck
+  question="Ты добавил `data/raw/` в .gitignore, но `git status` всё равно показывает `data/raw/dataset.csv` как modified. Какой алгоритм debugging?"
+  answer="Алгоритм такой: (1) `git check-ignore -v data/raw/dataset.csv` — если показывает паттерн, значит правило работает, но файл уже tracked. Если молчит — паттерн не матчит, проверяй синтаксис. (2) `git ls-files --ignored --exclude-standard` — покажет, какие файлы и tracked, и подпадают под .gitignore. Если файл там есть — нужно `git rm --cached data/raw/dataset.csv` чтобы убрать из индекса. (3) После `git rm --cached` + commit файл перестанет отслеживаться, и .gitignore начнёт работать. Главный gotcha: `git rm --cached` не удаляет файл из старых коммитов — если там были секреты, нужна очистка истории через `git filter-repo` (модуль 17)."
+/>

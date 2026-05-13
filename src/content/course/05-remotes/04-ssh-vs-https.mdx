@@ -1,0 +1,394 @@
+---
+title: "SSH vs HTTPS: как соединиться с remote"
+description: "Два транспорта для Git: SSH с ed25519 ключами и HTTPS с personal access tokens"
+order: 4
+difficulty: "beginner"
+estimatedTime: 22
+topics: ["Git", "SSH", "HTTPS", "PAT", "credentials"]
+---
+
+# SSH vs HTTPS: как соединиться с remote
+
+Когда ты делаешь `git push`, Git открывает соединение с сервером и доказывает, что имеет право писать в этот репо. Доказать можно двумя способами: через **SSH-ключ** или через **HTTPS + токен**. С 2021 года GitHub отменил пароли, и теперь "обычный пароль от аккаунта" больше не работает — нужно либо SSH, либо **Personal Access Token (PAT)**.
+
+В этом уроке мы разбираем оба способа: как они работают, как настроить, что безопаснее, и почему credential helpers (osxkeychain, libsecret, manager-core) — твои друзья.
+
+---
+
+## Как Git выбирает транспорт
+
+Транспорт определяется по URL remote:
+
+```
+git@github.com:acme/repo.git           -> SSH
+ssh://git@github.com/acme/repo.git     -> SSH (полная форма)
+https://github.com/acme/repo.git       -> HTTPS
+http://github.com/acme/repo.git        -> HTTP (плохо, без шифрования)
+```
+
+Посмотреть текущий URL:
+
+```bash
+$ git remote get-url origin
+git@github.com:acme/repo.git
+```
+
+Сменить — переключиться с HTTPS на SSH:
+
+```bash
+git remote set-url origin git@github.com:acme/repo.git
+```
+
+<Callout type="tip">
+Если изначально склонировал по HTTPS, а потом настроил SSH-ключ — поменяй URL через `set-url`. Иначе Git продолжит просить токен.
+</Callout>
+
+---
+
+## SSH: ключи и доверие
+
+SSH (Secure Shell) — это протокол криптографически защищённого соединения. В контексте Git ты создаёшь **пару ключей**:
+
+- **Private key** — лежит у тебя локально (`~/.ssh/id_ed25519`), **никогда** не покидает компьютер.
+- **Public key** — добавляется на GitHub/GitLab (`~/.ssh/id_ed25519.pub`), безопасно показывать.
+
+<DiagramContainer title="SSH authentication: проверка через challenge-response" color="green">
+  <FlowColumn className="p-4 gap-3">
+    <Tooltip content="У тебя на диске — приватный ключ">
+      <DataBox label="local: ~/.ssh/id_ed25519" className="border-blue-500/30 w-72 mx-auto">
+        <div className="text-xs">private key (secret)</div>
+      </DataBox>
+    </Tooltip>
+    <Arrow direction="down" />
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="1. git push открывает SSH соединение">
+        <FlowNode variant="input">1. connect</FlowNode>
+      </Tooltip>
+      <Tooltip content="2. сервер шлёт challenge — случайные байты">
+        <FlowNode variant="default">2. challenge</FlowNode>
+      </Tooltip>
+      <Tooltip content="3. ты подписываешь challenge приватным ключом">
+        <FlowNode variant="default">3. sign</FlowNode>
+      </Tooltip>
+      <Tooltip content="4. сервер проверяет подпись публичным ключом">
+        <FlowNode variant="output">4. verify</FlowNode>
+      </Tooltip>
+    </FlowRow>
+    <Arrow direction="down" />
+    <Tooltip content="На сервере — публичный ключ из настроек GitHub">
+      <DataBox label="github.com: your public key" className="border-purple-500/30 w-72 mx-auto">
+        <div className="text-xs">ssh-ed25519 AAAA... your@email</div>
+      </DataBox>
+    </Tooltip>
+  </FlowColumn>
+</DiagramContainer>
+
+### Генерация ed25519 ключа
+
+В 2026 году правильный выбор алгоритма — **ed25519**. Это современный elliptic-curve алгоритм: маленький ключ (256 бит), быстрая подпись, хорошая безопасность. RSA-2048 — устаревший legacy, используй ed25519.
+
+```bash
+$ ssh-keygen -t ed25519 -C "your-email@example.com"
+
+Generating public/private ed25519 key pair.
+Enter file in which to save the key (/Users/you/.ssh/id_ed25519): [Enter]
+Enter passphrase (empty for no passphrase): ****
+Enter same passphrase again: ****
+
+Your identification has been saved in /Users/you/.ssh/id_ed25519
+Your public key has been saved in /Users/you/.ssh/id_ed25519.pub
+```
+
+- `-t ed25519` — алгоритм.
+- `-C "comment"` — комментарий в ключе (обычно email; помогает помнить, где этот ключ используется).
+- Passphrase — **поставь**. Это пароль на сам ключ. Без него любой, кто украдёт `id_ed25519`, сможет пушить от твоего имени.
+
+После генерации:
+
+```bash
+$ ls ~/.ssh/
+id_ed25519       # private — НИКОГДА не делись
+id_ed25519.pub   # public — добавишь на GitHub
+known_hosts      # список доверенных серверов
+```
+
+### Добавление публичного ключа на GitHub
+
+```bash
+# macOS — скопируй в буфер
+$ pbcopy < ~/.ssh/id_ed25519.pub
+
+# Linux
+$ xclip -sel clip < ~/.ssh/id_ed25519.pub
+
+# или просто посмотри и скопируй вручную
+$ cat ~/.ssh/id_ed25519.pub
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... your-email@example.com
+```
+
+GitHub: Settings -> SSH and GPG keys -> New SSH key -> вставь содержимое .pub файла. Дай ему понятное имя (`MacBook Pro 2026`).
+
+### Проверка
+
+```bash
+$ ssh -T git@github.com
+The authenticity of host 'github.com' can't be established.
+ED25519 key fingerprint is SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU.
+Are you sure you want to continue connecting (yes/no/[fingerprint])? yes
+
+Hi your-username! You've successfully authenticated, but GitHub does not provide shell access.
+```
+
+Видишь "Hi your-username!" — всё работает.
+
+### ssh-agent: чтобы не вводить passphrase каждый раз
+
+Если ты поставил passphrase, Git будет просить её при каждом push/pull. Это раздражает. Решение — `ssh-agent`, который держит расшифрованный ключ в памяти.
+
+```bash
+# Запустить агент
+$ eval "$(ssh-agent -s)"
+Agent pid 12345
+
+# Добавить ключ (запросит passphrase один раз)
+$ ssh-add ~/.ssh/id_ed25519
+Enter passphrase: ****
+Identity added: /Users/you/.ssh/id_ed25519
+```
+
+На macOS можно прописать ключ в Keychain раз и навсегда:
+
+```bash
+$ ssh-add --apple-use-keychain ~/.ssh/id_ed25519
+```
+
+И добавить в `~/.ssh/config`:
+
+```
+Host *
+  UseKeychain yes
+  AddKeysToAgent yes
+  IdentityFile ~/.ssh/id_ed25519
+```
+
+После этого ключ автоматически разблокируется при логине, и Git его использует.
+
+---
+
+## HTTPS + PAT: токены вместо паролей
+
+Альтернатива SSH — HTTPS-транспорт. URL выглядит так:
+
+```
+https://github.com/acme/repo.git
+```
+
+При первом push Git спросит логин и пароль:
+
+```bash
+$ git push
+Username for 'https://github.com': your-username
+Password for 'https://your-username@github.com': ****
+```
+
+**Важно (с августа 2021):** в поле "Password" нельзя ввести пароль от GitHub-аккаунта. Это не работает. Нужно ввести **Personal Access Token (PAT)**.
+
+### Создание PAT
+
+GitHub: Settings -> Developer settings -> Personal access tokens -> Tokens (classic) -> Generate new token.
+
+Современная альтернатива — **Fine-grained tokens**: точечные права на конкретные репозитории. Это безопаснее. С 2026 года GitHub продвигает их как дефолт.
+
+Опции при генерации:
+
+- **Name/note** — описание токена (например, `Macbook git CLI`).
+- **Expiration** — срок жизни. **Не выбирай "No expiration"** — это плохая практика. Поставь 90 дней.
+- **Repository access** — конкретные репозитории или все.
+- **Permissions / scopes**:
+  - Для базового `git push`: Contents: Read and Write.
+  - Для PR через CLI (`gh`): + Pull Requests: Read and Write.
+  - НЕ давай `admin:*` или `delete_repo` без необходимости.
+
+После генерации GitHub покажет токен **один раз**:
+
+```
+ghp_AbCdEfGhIjKlMnOpQrStUvWxYz1234567890
+```
+
+Сохрани его в менеджер паролей. Если потеряешь — придётся регенерировать.
+
+### Использование PAT
+
+При следующем push:
+
+```bash
+$ git push
+Username for 'https://github.com': your-username
+Password for 'https://your-username@github.com': ghp_AbCdEfGhIjKl...
+```
+
+Вместо `Password` вводишь токен. Готово.
+
+<Callout type="warning">
+Не пуш PAT в код, не вставляй в Slack, не отправляй коллеге в DM. Это credentials с правами на твои репо. Если случайно засветил — иди в Settings -> revoke токен и регенерируй.
+</Callout>
+
+---
+
+## Credential helpers: запомнить токен
+
+Каждый раз вводить токен — это пытка. Поэтому Git поддерживает **credential helpers** — программы, которые хранят credentials и подставляют их автоматически.
+
+### macOS: osxkeychain
+
+```bash
+git config --global credential.helper osxkeychain
+```
+
+После первого ввода токена Git сохранит его в системный Keychain. Дальше push/pull будут работать без запросов.
+
+### Linux: libsecret
+
+```bash
+# Установить
+sudo apt install libsecret-1-0 libsecret-1-dev
+cd /usr/share/doc/git/contrib/credential/libsecret
+sudo make
+
+# Настроить
+git config --global credential.helper /usr/share/doc/git/contrib/credential/libsecret/git-credential-libsecret
+```
+
+Токен попадёт в GNOME Keyring / KWallet.
+
+### Windows: manager-core / Git Credential Manager
+
+В современном Git for Windows (от 2.39+) встроен GCM. Он использует Windows Credential Manager и поддерживает OAuth-флоу с GitHub — даже без ручной генерации PAT.
+
+```bash
+git config --global credential.helper manager-core
+```
+
+### Кросс-платформенно: GitHub CLI (`gh`)
+
+Утилита `gh auth login` авторизуется через браузер (OAuth) и автоматически настраивает credential helper.
+
+```bash
+$ gh auth login
+? What account do you want to log into?  GitHub.com
+? What is your preferred protocol for Git operations?  HTTPS
+? Authenticate Git with your GitHub credentials? Yes
+? How would you like to authenticate GitHub CLI?  Login with a web browser
+
+! First copy your one-time code: ABCD-1234
+Press Enter to open github.com in your browser...
+```
+
+Это самый дружелюбный для начинающего вариант — никаких ручных PAT.
+
+---
+
+## SSH или HTTPS — что выбрать
+
+| Параметр | SSH | HTTPS + PAT |
+|----------|-----|-------------|
+| Setup | Генерация ключей, добавление на GitHub | Создание PAT в UI |
+| Port | 22 | 443 |
+| Corporate firewalls | Часто заблокирован | Почти всегда открыт |
+| Per-repo permissions | Нет (ключ на весь аккаунт) | Да (fine-grained PAT) |
+| Аудит активности | Через GitHub logs | Через GitHub logs |
+| Удобство | Лучше после setup | OAuth через `gh` тоже удобно |
+
+**Рекомендация для джуна:**
+
+- На личном Mac/Linux: **SSH с ed25519** + passphrase + Keychain. Один раз настроил — забыл.
+- В корпоративной сети с ограничениями: **HTTPS + Git Credential Manager / `gh auth`**. Часто SSH-порт 22 закрыт firewall'ом.
+- На рабочем компе для работы с приватными корпоративными репозиториями: то, что рекомендует команда DevOps.
+
+<Callout type="note">
+Многие команды Open Source предпочитают SSH для контрибьюторов: это быстрее и меньше вопросов о PAT scope. GitHub Enterprise админы часто наоборот предпочитают HTTPS — там SSO и SCIM работают нативно через HTTPS.
+</Callout>
+
+---
+
+## Несколько SSH ключей: `~/.ssh/config`
+
+Сценарий: один ключ для личного GitHub (`personal`), другой для рабочего (`work`). Решение — `~/.ssh/config`:
+
+```
+Host github.com-personal
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/id_ed25519_personal
+    IdentitiesOnly yes
+
+Host github.com-work
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/id_ed25519_work
+    IdentitiesOnly yes
+```
+
+Используешь как:
+
+```bash
+git clone git@github.com-personal:my-name/blog.git
+git clone git@github.com-work:acme-corp/etl.git
+```
+
+Git подставляет правильный ключ в зависимости от Host.
+
+---
+
+## Безопасность: что делать НЕ надо
+
+1. **Не используй один SSH-ключ на нескольких компах.** Сгенерируй отдельный на каждом устройстве. Если потеряешь ноутбук — отзовёшь только его ключ.
+
+2. **Не отключай passphrase**, чтобы "не вводить". Используй ssh-agent / Keychain.
+
+3. **PAT с `No expiration`** — это бомба замедленного действия. Если кто-то получит доступ через утечку — навсегда.
+
+4. **Не коммить SSH-ключи и токены в код.** Если случайно — иммедиатно revoke и регенерируй. Никакого `git reset` не хватит, потому что репо мог уже быть склонирован.
+
+5. **`.ssh/config` с `StrictHostKeyChecking no`** — отключать проверку хоста на staging-серверах ОК, на GitHub.com — никогда. Это открывает дверь для MITM-атак.
+
+---
+
+## Попробуй сам
+
+```bash
+# 1. Сгенерируй SSH-ключ (если ещё нет)
+ssh-keygen -t ed25519 -C "test@example.com"
+
+# 2. Запусти агент и добавь ключ
+eval "$(ssh-agent -s)"
+ssh-add ~/.ssh/id_ed25519
+
+# 3. Добавь .pub на тестовый GitHub аккаунт
+cat ~/.ssh/id_ed25519.pub
+# (скопировать в GitHub Settings -> SSH keys)
+
+# 4. Проверка
+ssh -T git@github.com
+# Hi <your-name>! You've successfully authenticated
+
+# 5. Сравни: клонируй один репо по SSH и HTTPS
+git clone git@github.com:octocat/Hello-World.git ssh-clone
+git clone https://github.com/octocat/Hello-World.git https-clone
+
+# Посмотри URL
+cd ssh-clone && git remote -v && cd ..
+cd https-clone && git remote -v && cd ..
+
+# 6. Конвертируй HTTPS -> SSH
+cd https-clone
+git remote set-url origin git@github.com:octocat/Hello-World.git
+git remote -v
+```
+
+---
+
+<KnowledgeCheck
+  question="Коллега жалуется: 'У меня перестал работать git push, GitHub просит пароль, я ввожу пароль от аккаунта, он не принимает.' Что объяснить и какие два пути решения дать?"
+  answer="GitHub отключил аутентификацию по паролю аккаунта для Git-операций в августе 2021 года. Пароль работает только для входа в веб-интерфейс, а не для `git push`. Два пути: (1) **HTTPS + PAT**: создать Personal Access Token в Settings -> Developer settings -> Personal access tokens. Поставить срок жизни (например, 90 дней), скоупы Contents: read+write. Использовать токен вместо пароля при `git push`. Настроить `git config --global credential.helper osxkeychain` (macOS) / `manager-core` (Windows) / `libsecret` (Linux), чтобы не вводить каждый раз. Или ещё проще — `gh auth login` через GitHub CLI, который сделает OAuth через браузер. (2) **SSH**: сгенерировать ed25519 ключ (`ssh-keygen -t ed25519`), добавить публичный ключ в GitHub Settings -> SSH keys, переключить URL remote через `git remote set-url origin git@github.com:user/repo.git`. SSH удобнее в долгосроке: один раз настроил — забыл, ключ не истекает (но можно/нужно ротировать)."
+/>

@@ -1,0 +1,309 @@
+---
+title: "git format-patch и git am — email-based workflow"
+description: "git format-patch -1 HEAD создаёт .patch файл. git am < file.patch применяет. Email-based workflow Linux kernel. Обмен исправлениями без push доступа."
+order: 4
+difficulty: "intermediate"
+estimatedTime: 20
+topics: ["format-patch", "am", "email-workflow", "patches", "linux-kernel"]
+---
+
+# git format-patch и git am — patches как файлы
+
+Большинство современных DE команд используют GitHub / GitLab PR-workflow. Но есть **другой Git** — email-based, исторически основной для Linux kernel и многих open-source проектов. Здесь нет «push доступа», нет PR-кнопок: контрибьюторы посылают **email с патчем** мейнтейнерам, те **применяют патчи руками**.
+
+Это не legacy экзотика — Linux kernel в 2026 всё ещё работает так. В DE-мире пригодится в двух кейсах: (1) ты contributing в Apache Airflow / Spark (старые контрибьюшн guidelines иногда упоминают), (2) тебе надо передать изменения коллеге без общего remote (например, через chat/email на изолированных сетях).
+
+В этом уроке: `git format-patch` (создать патч-файл из коммита) и `git am` (применить патч обратно).
+
+---
+
+## Зачем patches
+
+GitHub PR — это удобная абстракция. Под капотом всё равно происходит: contributor говорит maintainer-у «вот мой набор коммитов, мерджи их». Email-workflow делает это **явно**: сами коммиты сериализуются в текст (формат patch), пересылаются как файлы.
+
+Сценарий: пишешь fix для Spark, в jira указано «send patch to mailing list». Что это значит:
+
+1. У тебя локально коммит с fix-ом.
+2. `git format-patch -1 HEAD` -> создаёт файл `0001-Fix-bug.patch` с этим коммитом в формате email.
+3. Прикладываешь к письму, отправляешь в mailing list.
+4. Maintainer получает, делает `git am 0001-Fix-bug.patch` -> patch применяется как обычный commit, со всеми метаданными (твоё имя, email, message, timestamp).
+
+---
+
+## format-patch — создание patch файла
+
+```bash
+$ git log --oneline -3
+abc1234 (HEAD) fix: handle null in user_id
+def5678 feat: new pipeline
+ghi9012 docs: update README
+
+# Создать patch для последнего коммита (1 — count back from HEAD)
+$ git format-patch -1 HEAD
+0001-fix-handle-null-in-user-id.patch
+
+# Создать patches для последних 3 коммитов
+$ git format-patch -3 HEAD
+0001-docs-update-README.patch
+0002-feat-new-pipeline.patch
+0003-fix-handle-null-in-user-id.patch
+
+# Patches для всех коммитов с main до HEAD
+$ git format-patch main..HEAD
+```
+
+Каждый patch — обычный текстовый файл:
+
+```
+From abc1234567890abcdef Mon Sep 17 00:00:00 2001
+From: Иван Иванов <ivan@example.com>
+Date: Mon, 13 May 2026 12:00:00 +0300
+Subject: [PATCH] fix: handle null in user_id
+
+When user_id is null in source DB, the DAG was crashing.
+Added validation step.
+
+---
+ dags/etl_users.py | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/dags/etl_users.py b/dags/etl_users.py
+index abc1234..def5678 100644
+--- a/dags/etl_users.py
++++ b/dags/etl_users.py
+@@ -10,3 +10,8 @@ def transform_users(df):
++    if df['user_id'].isnull().any():
++        df = df.dropna(subset=['user_id'])
+     return df
+--
+2.54.0
+```
+
+Структура:
+- **Email header**: From, Date, Subject — патч имитирует email message.
+- **Commit message**: Subject + body.
+- **Diffstat** + **diff** — изменения файлов.
+- Footer с версией Git.
+
+Этот файл можно прикрепить к email-у, передать в Slack, сохранить в bug tracker.
+
+---
+
+## Полезные флаги format-patch
+
+| Флаг | Что делает |
+|---|---|
+| `-N` | Создать N patches для последних N коммитов |
+| `-o <dir>` | Сохранить patches в директорию |
+| `--cover-letter` | Создать дополнительный 0000-cover-letter.patch с общим описанием |
+| `--subject-prefix="..."` | Изменить `[PATCH]` на свой префикс, например `[PATCH v2]` |
+| `-v 2` | Версионирование: `[PATCH v2]` — для second iteration после review feedback |
+
+Пример с cover letter:
+
+```bash
+$ git format-patch -3 HEAD --cover-letter -o patches/
+patches/0000-cover-letter.patch
+patches/0001-feat-add-validation.patch
+patches/0002-test-add-validation-tests.patch
+patches/0003-docs-update-validation-docs.patch
+```
+
+Открываешь `0000-cover-letter.patch`, дописываешь общий контекст («Это серия из 3 патчей для feature X...»), отправляешь mailing list с этим обзором + 3 патча.
+
+---
+
+## am — применение patch
+
+```bash
+$ git am 0001-fix-handle-null-in-user-id.patch
+Applying: fix: handle null in user_id
+
+$ git log -1 --format="%h %an %s"
+fff7777 Иван Иванов fix: handle null in user_id
+```
+
+`git am` (apply mailbox):
+1. Парсит patch файл как email.
+2. Извлекает author, date, subject, body, diff.
+3. Применяет diff к working tree.
+4. Создаёт **commit с оригинальными метаданными** (твоё имя, дата, message).
+
+Важно — **commit message сохраняется**, author тоже. Это не «patch написал maintainer», а полноценный contribution с твоим именем в `git log`.
+
+### am для нескольких patches
+
+```bash
+$ git am patches/*.patch
+Applying: feat: add validation
+Applying: test: add validation tests
+Applying: docs: update validation docs
+```
+
+Применяет по порядку. Если на одном конфликт — останавливается.
+
+### Конфликты при am
+
+```bash
+$ git am patches/0001.patch
+Applying: feat: add validation
+error: patch failed: dags/etl.py:10
+error: dags/etl.py: patch does not apply
+Patch failed at 0001 feat: add validation
+hint: Use 'git am --show-current-patch' to see the failed patch
+hint: When you have resolved this problem, run "git am --continue".
+hint: If you prefer to skip this patch, run "git am --skip" instead.
+hint: To restore the original branch and stop patching, run "git am --abort".
+```
+
+Дальше:
+
+```bash
+$ git am --show-current-patch    # увидеть конкретный patch
+$ vim dags/etl.py                # разрулить
+$ git add dags/etl.py
+$ git am --continue              # продолжить
+```
+
+Или `--skip` (пропустить этот patch), `--abort` (откатить всё).
+
+---
+
+## Patch vs diff: важная разница
+
+Часто путают `git format-patch` с `git diff`. Это **разные** вещи:
+
+| | `git diff` | `git format-patch` |
+|---|---|---|
+| Содержит метаданные коммита | нет | да (author, date, message) |
+| Можно применить через `git am` | нет | да |
+| Можно применить через `git apply` | да | да (только diff часть) |
+| Использование | вижуально посмотреть изменения | передать коммит как файл |
+
+`git apply` применяет **только diff**, не создавая коммит. `git am` применяет patch **с созданием коммита** (с original metadata).
+
+```bash
+$ git diff > my.diff        # просто diff, для просмотра
+$ git apply my.diff         # применить как unstaged changes, без коммита
+
+$ git format-patch -1 > my.patch    # полный patch
+$ git am < my.patch         # применить + создать commit
+```
+
+---
+
+## DE-сценарий: contributing в Apache Spark
+
+Apache Spark mailing list (`dev@spark.apache.org`) исторически принимал patches по email. Хотя сейчас Spark использует GitHub PR (как и Airflow), некоторые старые проекты Apache до сих пор email-based.
+
+Workflow:
+
+```bash
+# 1. Клонировал репо, сделал ветку
+$ git switch -c fix-spark-1234
+
+# 2. Сделал fix, закоммитил
+$ vim core/src/...
+$ git commit -m "[SPARK-1234] Fix null handling in DataFrame"
+
+# 3. Сгенерировал patch с cover letter
+$ git format-patch -1 --cover-letter
+
+# 4. Edit cover-letter с context, JIRA ссылкой
+$ vim 0000-cover-letter.patch
+
+# 5. Отправил mailing list через git send-email
+$ git send-email --to=dev@spark.apache.org *.patch
+```
+
+`git send-email` — отдельный инструмент Git для отправки patches напрямую. Использует SMTP, конфигурируется через `~/.gitconfig`. Подробности — `man git-send-email`.
+
+---
+
+## DE-сценарий: передача fix без shared remote
+
+Иногда нужно передать fix коллеге, не пушая в общий repo:
+
+- Изолированная сеть, нет доступа к GitHub.
+- Sensitive fix (security), не хочется ставить публичный PR.
+- Тест-репо у коллеги локально, нет remote.
+
+```bash
+# Ты
+$ git format-patch -1 HEAD -o ~/Downloads/
+~/Downloads/0001-fix-critical-bug.patch
+
+# Послал коллеге через Slack/Telegram/email
+
+# Коллега
+$ git am ~/Downloads/0001-fix-critical-bug.patch
+Applying: fix: critical bug
+
+$ git log -1
+fff7777 fix: critical bug
+Author: Ты <ты@team.com>     # твоё имя в author!
+```
+
+Полностью offline workflow. Удобно когда «GitHub лежит, но fix нужен сейчас».
+
+---
+
+## Когда НЕ использовать patches
+
+Современный DE workflow (Airflow, dbt, Spark с 2018+, любые SaaS компании) — это **GitHub Pull Requests** (модуль 11). Patches заменены PR-ами. Преимущества PR:
+
+- Inline-комментарии review.
+- CI автозапуск.
+- История обсуждения.
+- Линейный merge через UI.
+
+Patches уместны только в:
+- Linux kernel / GNU projects (исторически).
+- Старые Apache projects (часть до сих пор).
+- Edge cases offline collaboration.
+
+Junior DE 99% времени работает с PR. Знать `format-patch` / `am` полезно как **способ передать коммит как файл** — пригодится 1-2 раза в год.
+
+---
+
+## Попробуй сам
+
+```bash
+$ mkdir patch-demo && cd patch-demo
+$ git init && echo "v1" > app.py && git add . && git commit -m "Initial"
+
+# Делаем коммит
+$ echo "v2 with fix" > app.py
+$ git commit -am "fix: critical bug in app"
+
+# Создаём patch
+$ git format-patch -1 HEAD
+0001-fix-critical-bug-in-app.patch
+
+$ cat 0001-fix-critical-bug-in-app.patch
+# Смотри формат: From, Date, Subject, diff
+
+# Откатываем коммит
+$ git reset --hard HEAD~1
+$ git log --oneline
+abc1111 Initial
+
+# Применяем patch
+$ git am 0001-fix-critical-bug-in-app.patch
+Applying: fix: critical bug in app
+
+$ git log --oneline
+fff7777 fix: critical bug in app
+abc1111 Initial
+
+$ cat app.py
+v2 with fix             # patch применился
+```
+
+---
+
+## Killer takeaway
+
+`git format-patch -N HEAD` создаёт N файлов с коммитами в email-формате. `git am < file.patch` применяет patch с original metadata (author, date, message). Это **email-based workflow** — основной в Linux kernel, рудимент в некоторых Apache проектах. В современном DE мире (Airflow, dbt, SaaS) — заменено GitHub PR. Junior уровень: знай что есть, использовать будешь 1-2 раза в год для offline transfer.
+
+<KnowledgeCheck quizSlug="10-stash-tags-cherry-pick/04-patches-format-am" />

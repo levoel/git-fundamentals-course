@@ -1,0 +1,70 @@
+{
+  "lessonSlug": "13-gitignore-attributes/04-line-endings",
+  "moduleId": "13-gitignore-attributes",
+  "_meta": {
+    "idPrefix": "git-m13-04",
+    "description": "Quiz for lesson 04 of module 13 — line endings"
+  },
+  "questions": [
+    {
+      "id": "git-m13-04-q1",
+      "type": "multiple-choice",
+      "question": "Какова разница между LF и CRLF и где они используются?",
+      "options": [
+        { "id": "a", "text": "LF — 0x0A (один байт, \\n), используется Unix/Linux/macOS. CRLF — 0x0D 0x0A (два байта, \\r\\n), используется DOS/Windows. Разные символы в конце каждой строки в текстовом файле" },
+        { "id": "b", "text": "LF — большая буква, CRLF — маленькая" },
+        { "id": "c", "text": "Они идентичны, просто разные имена" },
+        { "id": "d", "text": "LF только для бинарей, CRLF для текста" }
+      ],
+      "correctAnswer": "a",
+      "explanation": "Исторически: телетайпы XX века требовали двух физических действий — возврат каретки (CR, 0x0D) и подача строки (LF, 0x0A). DOS/Windows сохранили оба байта. Unix решил: одного LF (0x0A) достаточно, и стал базой для Linux, macOS. В 2026 это всё ещё актуально: Notepad на Windows пишет CRLF, Visual Studio пишет CRLF, Linux/macOS tools — LF. Третий вариант — одинокий CR (0x0D, '\\r') — был на classic Mac OS (≤ 9), сейчас почти не встречается. Для Git это критично: shell-скрипты с CRLF не запускаются на Linux ('command not found: $\\r'), и diff-ы загромождаются 'изменением всех строк' если кто-то сохранил файл в другой ОС.",
+      "studyHint": "Повторите урок 04 — раздел 'История: откуда взялись LF и CRLF'",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m13-04-q2",
+      "type": "multiple-choice",
+      "question": "Какой каноничный setup line endings для cross-platform Git-репо в 2026?",
+      "options": [
+        { "id": "a", "text": "Только `core.autocrlf=true` глобально — Git сам разберётся" },
+        { "id": "b", "text": "`.gitattributes` в репо: `* text=auto eol=lf` как fallback, плюс конкретные правила (*.sh text eol=lf, *.bat text eol=crlf, *.png binary). Это переопределяет per-user core.autocrlf для tracked файлов и гарантирует одинаковое поведение у всех" },
+        { "id": "c", "text": "Каждый разработчик настраивает core.autocrlf на своей машине индивидуально" },
+        { "id": "d", "text": "Использовать только LF везде, включая .bat файлы" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Каноничный подход 2026 — `.gitattributes` в корне репо с `* text=auto eol=lf` плюс конкретные правила. Преимущества: (1) Правила commit-ятся в репо — все участники получают одинаковое поведение. (2) Не зависит от per-user `core.autocrlf` (который у каждого может быть свой). (3) Явно: что есть text, что binary, какие исключения (CRLF для .bat). Старый подход через `core.autocrlf` ненадёжен: эвристическое определение 'text vs binary' иногда ломает бинари, разные машины имеют разные настройки. .gitattributes — single source of truth. После добавления — `git add --renormalize .` чтобы применить ко всем уже tracked файлам. Дополнение — `.editorconfig` с `end_of_line = lf` чтобы редакторы изначально создавали правильные файлы.",
+      "studyHint": "Повторите урок 04 — раздел 'Решение №2 (каноничное 2026): .gitattributes'",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m13-04-q3",
+      "type": "multiple-choice",
+      "question": "После добавления `.gitattributes` с `* text=auto eol=lf` в существующий репо нужно одну команду, чтобы перенормализовать все уже tracked файлы. Какую?",
+      "options": [
+        { "id": "a", "text": "`git fetch --all` — синхронизация" },
+        { "id": "b", "text": "`git add --renormalize .` — применит правила .gitattributes ко всем tracked файлам, после чего нужен commit изменений" },
+        { "id": "c", "text": "`git push --force` — переотправит" },
+        { "id": "d", "text": "Ничего — .gitattributes сам применится при следующем pull" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`git add --renormalize .` — специальная команда, которая повторно прогоняет все уже tracked файлы через правила .gitattributes. Без неё .gitattributes действует только на новые/изменённые файлы — старые остаются как были (включая старые line endings). Workflow: (1) Создать .gitattributes. (2) `git add .gitattributes && git commit -m 'chore: add .gitattributes'`. (3) `git add --renormalize .` — массовая перенормализация. (4) `git status` — может показать modified во многих файлах (те, где были CRLF, стали LF). (5) `git commit -m 'chore: normalize line endings'`. Это создаст один большой 'normalize' commit. Лучше делать в момент 'тишины' (нет открытых PR), чтобы не ломать чужие ветки.",
+      "studyHint": "Повторите урок 04 — раздел 'Что делать после изменения .gitattributes в существующем репо'",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m13-04-q4",
+      "type": "multiple-choice",
+      "question": "Какие файлы — единственное исключение из общего правила LF и должны быть CRLF в репо?",
+      "options": [
+        { "id": "a", "text": "Все Windows-файлы — .docx, .xlsx, .png" },
+        { "id": "b", "text": "Только Windows-batch скрипты: .bat, .cmd, .ps1 — иначе они не запустятся на Windows. Все остальные текстовые файлы (включая Python, shell, YAML, JSON) должны быть LF" },
+        { "id": "c", "text": "Все .txt файлы" },
+        { "id": "d", "text": "Исключений нет — всё должно быть LF" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Единственные файлы, которые ДОЛЖНЫ быть CRLF — это Windows-batch скрипты: `.bat`, `.cmd`, `.ps1`. Windows cmd.exe и PowerShell не будут корректно работать с LF в этих файлах (особенно с многострочными командами). В .gitattributes пишем: `*.bat text eol=crlf`, `*.cmd text eol=crlf`, `*.ps1 text eol=crlf`. Всё остальное — LF: Python (.py), shell (.sh, .bash), YAML, JSON, Markdown, SQL, HTML, CSS, JS — LF делает их portable между ОС, не ломает Bash-скрипты на Linux, не загромождает diff-ы при mixed-team. На самом деле .ps1 (PowerShell) умеет работать с LF в современных версиях, но традиционно CRLF — безопаснее. Бинари (PNG, parquet, sqlite) — `binary`, чтобы Git их вообще не трогал.",
+      "studyHint": "Повторите урок 04 — раздел 'Полный canonical setup 2026'",
+      "bloomLevel": "applied"
+    }
+  ]
+}

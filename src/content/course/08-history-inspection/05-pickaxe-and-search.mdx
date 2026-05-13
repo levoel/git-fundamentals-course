@@ -1,0 +1,402 @@
+---
+title: "Pickaxe и продвинутый поиск в истории"
+description: "git log -S, -G, --all --source; DE-сценарии: 'когда добавили этот SQL', 'кто менял схему'"
+order: 5
+difficulty: "intermediate"
+estimatedTime: 18
+topics: ["Git", "pickaxe", "search", "history"]
+---
+
+# Pickaxe и продвинутый поиск в истории
+
+В предыдущих уроках мы уже встречали `-S` ("pickaxe") как часть `git log`. В этом уроке смотрим на него глубже, изучаем `-G` (regex pickaxe), `--all --source` для поиска по всем веткам, и собираем набор DE-сценариев: "когда мы добавили этот SQL запрос", "кто менял схему таблицы", "был ли этот код раньше где-то ещё".
+
+Pickaxe — это один из самых полезных и недооценённых инструментов для DE, которые часто разбираются в legacy кодовых базах с pipelines, SQL и configs.
+
+---
+
+## `-S "string"`: точное вхождение
+
+`-S` ищет коммиты, в которых **изменилось количество вхождений** заданной строки в файлы.
+
+```bash
+git log -S "SELECT * FROM orders" --oneline
+```
+
+Это найдёт все коммиты, где строка `SELECT * FROM orders`:
+
+- Появилась (добавили эту строку).
+- Исчезла (удалили).
+- Изменилось количество (было 1 вхождение, стало 3).
+
+То есть `-S` ловит **появление и удаление**, а не каждое касание соседних строк.
+
+<DiagramContainer title="Логика git log -S" color="blue">
+  <FlowColumn className="p-4 gap-3">
+    <Tooltip content="Для каждого коммита Git считает вхождения строки в файле ДО и ПОСЛЕ">
+      <DataBox label="алгоритм -S 'string'" className="border-blue-500/30 w-full max-w-xl mx-auto">
+        <div className="text-xs space-y-1">
+          <div>1. Для каждого коммита: сравни parent и this</div>
+          <div>2. count_before = вхождения 'string' в parent</div>
+          <div>3. count_after = вхождения 'string' в this</div>
+          <div>4. if count_before != count_after: ДА это релевантный коммит</div>
+        </div>
+      </DataBox>
+    </Tooltip>
+  </FlowColumn>
+</DiagramContainer>
+
+### Преимущество перед grep
+
+Можно искать так:
+
+```bash
+grep -rn "SELECT * FROM orders" .
+```
+
+Это найдёт **текущие** вхождения в working tree. Но не покажет:
+
+- Когда строка была добавлена.
+- Когда удалена в прошлом.
+- В какой ветке.
+
+Pickaxe смотрит **в историю**, не текущее состояние.
+
+---
+
+## `-S` с `-p`: увидеть контекст
+
+`-p` добавит diff каждого найденного коммита:
+
+```bash
+$ git log -S "SELECT * FROM orders" -p --oneline
+abc1234 feat: add orders dashboard query
+
+diff --git a/sql/dashboard.sql b/sql/dashboard.sql
+@@ -10,0 +11,3 @@
++
++SELECT * FROM orders
++WHERE created_at > NOW() - INTERVAL 7 DAY
+
+def5678 refactor: replace orders query
+
+diff --git a/sql/dashboard.sql b/sql/dashboard.sql
+@@ -11,3 +11,0 @@
+-SELECT * FROM orders
+-WHERE created_at > NOW() - INTERVAL 7 DAY
+-
++SELECT id, total FROM orders ...
+```
+
+Ты сразу видишь: коммит abc1234 добавил, def5678 заменил.
+
+---
+
+## `-G "regex"`: regex pickaxe
+
+`-G` похож на `-S`, но:
+
+- Принимает **regex**, не точную строку.
+- Ловит **любое касание** строки, соответствующей regex — даже без изменения количества вхождений.
+
+```bash
+# Все коммиты, которые трогали строки с DB_TIMEOUT = <число>
+git log -G "DB_TIMEOUT\s*=\s*[0-9]+" --oneline -p
+
+# Все коммиты с любым `SELECT` из orders таблицы
+git log -G "SELECT.*FROM orders" --oneline
+```
+
+`-G` мощнее, но медленнее (regex matching на каждом diff'е).
+
+### `-S` vs `-G`: когда что
+
+| Сценарий | Выбор |
+|----------|-------|
+| Знаешь точную строку, ищешь "когда добавили" | `-S "exact string"` |
+| Ищешь паттерн (любая версия timeout) | `-G "DB_TIMEOUT\s*=.*"` |
+| Не нужно ловить cosmetic touches | `-S` |
+| Нужно поймать каждое изменение, даже если строка осталась | `-G` |
+| Быстрее | `-S` |
+
+---
+
+## `--all`: поиск по всем веткам
+
+По дефолту `git log` показывает историю только текущей ветки. Чтобы искать **во всех** ветках:
+
+```bash
+git log -S "magic_value" --all --oneline
+```
+
+`--all` включает в поиск все локальные и remote-tracking branches. Полезно, когда не знаешь, в какой ветке могла появиться строка.
+
+### `--source`: показать, где найдено
+
+`--source` добавляет к каждому коммиту имя ref'а (ветка, тег), где он находится:
+
+```bash
+$ git log -S "magic_value" --all --source --oneline
+abc1234 refs/heads/feature/x feat: add magic
+def5678 refs/heads/main feat: backport magic
+```
+
+Видишь: одна и та же строка появлялась в двух разных ветках.
+
+---
+
+## `--diff-filter`: фильтр по типу изменения
+
+Часто хочется только "когда **добавлен**" или только "когда **удалён**".
+
+```bash
+# Только коммиты, добавившие новый файл со строкой
+git log -S "magic" --diff-filter=A --oneline
+
+# Только коммиты, удалившие файл со строкой
+git log -S "magic" --diff-filter=D --oneline
+
+# Modified
+git log -S "magic" --diff-filter=M --oneline
+```
+
+Буквы: A=added, M=modified, D=deleted, R=renamed, C=copied.
+
+---
+
+## Path filtering: только в определённых файлах
+
+```bash
+# Pickaxe только в SQL файлах
+git log -S "FROM orders" -- '*.sql'
+
+# В директории
+git log -S "magic" -- src/dags/
+
+# В файле
+git log -S "magic" -- src/etl.py
+```
+
+Полезно, когда повторяющаяся строка может быть в разных местах, а ты хочешь только конкретные.
+
+---
+
+## DE-сценарии
+
+### Сценарий 1: "Когда добавился этот SQL запрос?"
+
+```bash
+git log -S "SELECT user_id, SUM(amount)" -p -- 'sql/'
+```
+
+Найдёт коммит, добавивший этот запрос, и покажет полный контекст diff'а — увидишь, в какой файл он попал и почему.
+
+### Сценарий 2: "Кто менял схему таблицы users"
+
+```bash
+# Найди все миграции, трогавшие таблицу users
+git log -G "(CREATE|ALTER|DROP)\s+TABLE.*users" --oneline -- 'migrations/'
+
+# Или для DBT
+git log -G "users" --oneline -- 'models/'
+```
+
+### Сценарий 3: "Был ли этот код в legacy ветке"
+
+```bash
+# Кросс-branch поиск
+git log -S "legacy_function" --all --source --oneline
+# legacy/v1: a1b2c3d feat: implement legacy_function
+# main: rebased version
+
+# Открой коммит из legacy
+git show a1b2c3d
+```
+
+### Сценарий 4: "Когда мы заменили pandas на polars"
+
+```bash
+git log -S "import pandas" --diff-filter=D --oneline
+# Найдёт коммит, в котором импорт pandas удалили
+
+git log -S "import polars" --diff-filter=A --oneline
+# Когда добавили polars
+```
+
+### Сценарий 5: "Найди все коммиты, трогавшие connection strings"
+
+```bash
+# Будь осторожен: pickaxe найдёт даже коммиты с secrets!
+git log -G "postgres://[^/]+:[^/]+@" --all --oneline
+```
+
+Если найдётся — это сигнал, что где-то в истории был запушен пароль. Действуй: revoke credentials, rotate, и BFG repo-cleaner для полной чистки. Подробно про секреты в Module 17 курса.
+
+### Сценарий 6: "Какие SQL запросы менялись чаще всего"
+
+Это уже не pickaxe, но в тему — топ-меняющиеся файлы:
+
+```bash
+git log --pretty=format: --name-only --since="6 months ago" -- 'sql/' | \
+    sort | uniq -c | sort -rn | head -10
+```
+
+Дополнительно ranjа `git log -S` по каждому из этих файлов покажет, какие конкретные строки/запросы меняются.
+
+---
+
+## `--follow`: проследить переименования
+
+`-S` с `--follow` следит за переименованиями файлов. Это **только** работает для одного файла, не директории:
+
+```bash
+git log -S "magic" --follow --oneline -- src/etl.py
+```
+
+Если `src/etl.py` раньше назывался `src/extract.py`, поиск пройдёт и в старом имени тоже.
+
+---
+
+## Limit by commit count
+
+При работе с большими репо `--all` может быть очень медленным. Ограничения:
+
+```bash
+# Только последние 100 коммитов
+git log -S "magic" -100 --oneline
+
+# Последний месяц
+git log -S "magic" --since="1 month ago" --oneline
+
+# Между двумя SHA
+git log -S "magic" abc1234..HEAD --oneline
+```
+
+---
+
+## `git grep`: поиск в текущем состоянии
+
+Дополнительная команда, не путать с `git log -S`. `git grep` ищет в working tree или в указанной revision:
+
+```bash
+# Текущее состояние — как grep, но быстрее (использует Git index)
+git grep "SELECT * FROM"
+
+# В конкретном коммите
+git grep "SELECT * FROM" abc1234
+
+# Во всех файлах конкретной revision
+git grep "magic" main
+
+# Игнор case
+git grep -i "SELECT"
+
+# Show line numbers
+git grep -n "magic"
+
+# Path filter
+git grep "magic" -- '*.py'
+```
+
+Это инструмент "что СЕЙЧАС в коде". `git log -S` — "что было/появилось в истории".
+
+Часто используют комбинацию:
+
+```bash
+# 1. Где сейчас есть строка
+git grep "DB_TIMEOUT"
+
+# 2. Когда она появилась
+git log -S "DB_TIMEOUT" --oneline
+```
+
+---
+
+## Поиск среди удалённых файлов
+
+`git log -S` найдёт упоминания и в удалённых файлах:
+
+```bash
+git log -S "old_function" --all --oneline
+```
+
+Найдёт коммит, который "удалил" — то есть последний коммит, где `old_function` уменьшила вхождения до 0.
+
+Можно увидеть содержимое удалённого файла:
+
+```bash
+# Найди коммит до удаления
+git log --diff-filter=D --oneline -- src/old.py
+# abc1234 chore: remove old module
+
+# Посмотри коммит-родитель удаления — там файл ещё существовал
+git show abc1234^:src/old.py
+```
+
+---
+
+## Performance tips
+
+Pickaxe на больших репо может занимать минуты. Способы ускорить:
+
+1. **Ограничь по path**: `git log -S "magic" -- src/etl.py` намного быстрее, чем по всему репо.
+
+2. **Ограничь по дате**: `--since="6 months ago"` сильно режет диапазон.
+
+3. **Используй `-S` вместо `-G` где возможно**: regex дороже.
+
+4. **Используй `--max-count=N`**: остановиться после N результатов.
+
+5. **`--no-renames`**: отключает detection переименований, ускоряет.
+
+```bash
+git log -S "magic" --since="3 months ago" --no-renames --max-count=20 --oneline -- src/
+```
+
+---
+
+## GUI alternatives
+
+В IDE поиск истории часто проще:
+
+- **VS Code GitLens**: команда "Search Commits" — UI с filters и preview.
+- **PyCharm**: Git -> Show History -> встроенный pickaxe (вкладка Filter -> Contains).
+- **GitHub UI**: `https://github.com/<org>/<repo>/search?q=magic+language%3APython&type=code` ищет в текущем состоянии. История по строке — open issue, GitHub Search ограничен.
+
+CLI всё ещё мощнее для сложных запросов.
+
+---
+
+## Попробуй сам
+
+```bash
+# Клонируй большой репо
+git clone https://github.com/apache/airflow.git
+cd airflow
+
+# Найди когда добавили kubernetes executor
+git log -S "KubernetesExecutor" --diff-filter=A --oneline | head -3
+
+# Когда удаляли что-то связанное с Python 2
+git log -G "python.?2" --since="3 years ago" --oneline | head -5
+
+# История изменений в конкретном файле
+git log --oneline --follow -- airflow/models/dag.py | head -10
+
+# Pickaxe по двум критериям комбинированно
+git log -S "DagBag" --grep="fix" --oneline | head -10
+# Только коммиты, в которых менялся DagBag И слово 'fix' в сообщении
+
+# Поиск в одной директории, недавнее
+git log -G "celery" --since="1 year ago" --oneline -- airflow/executors/ | head -10
+
+# Кросс-branch проверка
+git log -S "PythonOperator" --all --source --oneline | head -10
+```
+
+---
+
+<KnowledgeCheck
+  question={`В вашем data lake есть параметр parquet.compression в десятке Spark jobs (значения: snappy, gzip и т.п.). За последний год его несколько раз меняли. Тимлид спрашивает: «покажи мне всю историю изменений этого параметра по всем job-ам, кто и когда что менял». Опиши последовательность команд.`}
+  answer={`План: (1) Базовый pickaxe с regex для поиска любого варианта значения: git log -G "parquet\\.compression" --oneline -p -- 'jobs/' — найдёт все коммиты, где менялся параметр (любое значение). -G нужен, потому что хотим поймать любое значение, не только snappy. -p покажет diff каждого коммита — увидишь конкретные изменения. -- 'jobs/' ограничивает директорией. (2) Чтобы добавить инфу про автора и дату: git log -G '...' --pretty=format:'%h %an %ad : %s' --date=short --oneline -p -- 'jobs/'. (3) Если интересно только когда переходили с одного значения на другое: git log -S "compression = 'snappy'" --oneline -p -- 'jobs/' — точно поймает только переключения на snappy (изменение количества вхождений). Аналогично для gzip. (4) Если файлы переименовывались (например, jobs организованы в подпапки и недавно перенесли): добавь --follow, но это работает только для одного файла. Альтернатива — --all для поиска по всем веткам, что может найти изменения в feature-branches. (5) Группировка результата: можно сделать ad-hoc анализ через bash. (6) Контекст каждого изменения: для каждого найденного коммита — git show <sha> для полного контекста (commit message + diff). Часто в commit message есть объяснение: «PR-1234: switch to gzip for compatibility with Trino». Это полный backstory. (7) Альтернатива через grep + log: если знаешь, где сейчас параметр находится в коде, git grep 'parquet.compression' -- 'jobs/' — найдёшь файлы с параметром, потом git log -p -- <each_file> для истории изменений каждого. (8) Bonus: если хочешь визуализировать тренд — Python script, который парсит вывод git log и строит график «на каком значении был параметр в каждый момент времени». Полезно для retrospective.`}
+/>

@@ -1,0 +1,95 @@
+{
+  "lessonSlug": "18-ci-cd-github-actions/_exam",
+  "moduleId": "18-ci-cd-github-actions",
+  "examTitle": "Экзамен: CI/CD с GitHub Actions",
+  "passThreshold": 70,
+  "_meta": {
+    "idPrefix": "git-m18-exam"
+  },
+  "questions": [
+    {
+      "id": "git-m18-exam-q1",
+      "type": "multiple-choice",
+      "question": "В DE-команде PR трогает 3 файла: `models/customers.sql` (dbt), `dags/pipeline.py` (Airflow), `docs/README.md`. Какой WORKFLOW дизайн оптимален для CI minutes?",
+      "options": [
+        {"id": "a", "text": "Один workflow ci.yml, который запускает ВСЕ checks (dbt-ci, airflow-ci, docs-check) на каждом PR"},
+        {"id": "b", "text": "Три отдельных workflow с path filters: dbt-ci.yml on paths [models/**], airflow-ci.yml on paths [dags/**], docs-ci.yml on paths [docs/**]. Каждый запускается только если изменения в соответствующих paths"},
+        {"id": "c", "text": "Workflow для main only, feature ветки без CI"},
+        {"id": "d", "text": "Запускать CI только manually через workflow_dispatch"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Path filters — стандартный pattern для monorepo. PR с изменениями только в docs/ не должен тратить 20 минут на запуск dbt-CI (Snowflake compute) и Airflow-CI. Три workflow со своими path filters позволяют параллельную работу. PR может trigger все три (если меняются файлы во всех paths) или один, в зависимости от scope changes. Один workflow для всего — wasteful (path filters работают только на уровне workflow триггера, не отдельных jobs внутри workflow без сложных conditionals).",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m18-exam-q2",
+      "type": "multiple-choice",
+      "question": "Чтобы в required status checks **branch protection** добавить один meta-check вместо пяти отдельных, какая стратегия используется?",
+      "options": [
+        {"id": "a", "text": "В CI workflow есть финальный job `all-checks-passed` с `needs: [lint, type-check, test, secret-scan, dbt-compile]` и `if: always()`, проверяющий success всех нужных jobs. В branch protection required = [all-checks-passed]"},
+        {"id": "b", "text": "GitHub автоматически объединяет all checks в один"},
+        {"id": "c", "text": "Используется один большой job со всеми steps подряд"},
+        {"id": "d", "text": "Branch protection не поддерживает множественные required checks"}
+      ],
+      "correctAnswer": "a",
+      "explanation": "Meta-job pattern: `all-checks-passed` зависит от всех других jobs через `needs:`. С `if: always()` запускается даже если зависимые упали (чтобы мог явно проверить). Внутри проверяет `needs.*.result == 'success'`, exit 1 если что-то не успешно. В branch protection required = только `all-checks-passed` — это **один** check, который транзитивно требует success всех. Преимущество: добавление нового check в CI не требует update branch protection rule. Без meta-job: required check list нужно вручную обновлять.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m18-exam-q3",
+      "type": "multiple-choice",
+      "question": "В чём заключается `services:` ключ в jobs определения, и для DE какой типичный use case?",
+      "options": [
+        {"id": "a", "text": "Список actions из marketplace"},
+        {"id": "b", "text": "Docker контейнеры, запущенные параллельно с job — например, postgres:16 для integration tests, доступный через localhost:5432"},
+        {"id": "c", "text": "Список GitHub API permissions"},
+        {"id": "d", "text": "Cron jobs для periodic running"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "services: запускает Docker-контейнеры на одном runner с job. Сeti — внутри job через localhost:PORT. Типичные DE use cases: postgres:16 (для тестов с реальной БД через PostgresHook), redis:7 (для streaming app), localstack (mock AWS), kafka (для Flink test). Контейнер health-checked перед стартом steps. Auto-cleanup после job. Это аналог docker-compose в CI. Альтернатива (медленнее, более flexible): `services` через `docker run` в `run:` step.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m18-exam-q4",
+      "type": "multiple-choice",
+      "question": "После force push в PR ветку (например, после rebase) GitHub запускает CI заново. В этот момент уже approved review:",
+      "options": [
+        {"id": "a", "text": "Сохраняется — approval действителен"},
+        {"id": "b", "text": "Если в branch protection включён 'Dismiss stale approvals on new commits' — approval снимается, нужен новый review. Без этой опции — approval сохраняется (potential security risk)"},
+        {"id": "c", "text": "GitHub автоматически отправляет email reviewer"},
+        {"id": "d", "text": "PR закрывается"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Force push добавляет новые commits в PR (с новыми SHA после rebase). Если включён `dismiss_stale_reviews: true` — все approvals автоматически dismissed на каждый push. Это обязательно для security: после approval нельзя через force push добавить malicious commit и merge с старым approval. Без dismiss-stale — approval действителен после force push (опасно). Также есть 'Require approval of the most recent reviewable push' — более строгое: каждый push требует нового review независимо от content.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m18-exam-q5",
+      "type": "multiple-choice",
+      "question": "Workflow содержит `permissions: contents: read, id-token: write`. Что это даёт и почему важно?",
+      "options": [
+        {"id": "a", "text": "Workflow получает full admin access — нужно для деплоя"},
+        {"id": "b", "text": "contents: read — read-only доступ к коду (checkout); id-token: write — workflow может запросить OIDC JWT для OIDC trust с AWS/GCP/Azure (cloud auth без long-lived secrets). Принцип least privilege"},
+        {"id": "c", "text": "Эти permissions необязательны, можно не указывать"},
+        {"id": "d", "text": "Эта permissions нужны для написания CSS"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "GitHub Actions имеет explicit permissions model. По default — read для public репо, write для private. Lock down к least privilege: workflow для CI обычно нуждается только в `contents: read` (checkout). `id-token: write` — для OIDC: позволяет workflow запросить JWT, который AWS/GCP может verify и обменять на temporary credentials (без хранения long-lived keys в Secrets). Не давать write-доступ к contents если workflow не делает push/release. Это защита от compromised workflow: даже если злоумышленник внедрит код, он не сможет push в репо.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m18-exam-q6",
+      "type": "multiple-choice",
+      "question": "В CODEOWNERS файле порядок правил matters. Какое правило выиграет для файла `/dags/marts/customers.py`?",
+      "options": [
+        {"id": "a", "text": "Первое правило что match"},
+        {"id": "b", "text": "Последнее правило что match — то есть наиболее specific (deeper path) winsнее"},
+        {"id": "c", "text": "Все правила применяются одновременно, нужны approvals от всех owners"},
+        {"id": "d", "text": "GitHub выбирает случайно"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "CODEOWNERS: last matching rule wins. Если у тебя: \n```\n* @tech-leads\n/dags/ @data-engineering\n/dags/marts/ @data-engineering @analytics-engineering\n```\nДля файла `/dags/marts/customers.py` — последнее правило `/dags/marts/` побеждает: required = data-engineering ИЛИ analytics-engineering approve. Глобальное `*` правило не отменяется, но не applies для этого pattern matching — последний specific overrides. Best practice: иерархическая структура от общего к specific.",
+      "bloomLevel": "analytical"
+    }
+  ]
+}

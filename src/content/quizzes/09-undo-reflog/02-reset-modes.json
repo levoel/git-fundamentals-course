@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "09-undo-reflog/02-reset-modes",
+  "moduleId": "09-undo-reflog",
+  "_meta": { "idPrefix": "git-m09-02" },
+  "questions": [
+    {
+      "id": "git-m09-02-q1",
+      "type": "multiple-choice",
+      "question": "Что точно меняет `git reset --soft HEAD~2`?",
+      "options": [
+        { "id": "a", "text": "Только HEAD сдвигается на 2 коммита назад. Index и working tree НЕ трогаются — изменения из двух snесённых коммитов остаются в index как готовые к новому коммиту. Полезно для squash" },
+        { "id": "b", "text": "HEAD, index и working tree — всё сдвигается" },
+        { "id": "c", "text": "Только index перезаписывается" },
+        { "id": "d", "text": "Удаляет 2 последних коммита из репозитория полностью" }
+      ],
+      "correctAnswer": "a",
+      "explanation": "--soft — самый щадящий режим. Только HEAD движется. Index по-прежнему содержит снапшот того состояния, что было до reset, и working tree тоже. Эффект: изменения 2 коммитов теперь висят в index как 'готовы к новому коммиту'. Это idiomatic способ squash N коммитов в один: reset --soft origin/main + git commit -m 'big squashed commit'.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m09-02-q2",
+      "type": "multiple-choice",
+      "question": "Чем отличаются `git reset HEAD~2` и `git reset --mixed HEAD~2`?",
+      "options": [
+        { "id": "a", "text": "Это разные команды с разным эффектом" },
+        { "id": "b", "text": "Ничем — --mixed это default режим, `git reset HEAD~2` = `git reset --mixed HEAD~2`. Двигают HEAD и перезаписывают index, working tree не трогают" },
+        { "id": "c", "text": "--mixed опаснее" },
+        { "id": "d", "text": "Без флага = soft" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "--mixed — режим по умолчанию для git reset. Команда без флага работает как --mixed. Эффект: HEAD двигается, index перезаписывается состоянием нового HEAD, working tree не трогается. Изменения из снесённых коммитов оказываются в working tree как 'не staged'. По сути это reset + auto-unstage всего.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m09-02-q3",
+      "type": "multiple-choice",
+      "question": "Опасная команда `git reset --hard origin/main` на твоей локальной ветке. Что произойдёт?",
+      "options": [
+        { "id": "a", "text": "Безопасный синк с origin" },
+        { "id": "b", "text": "HEAD ветки сдвинется на коммит origin/main. Index и working tree синхронизируются — все локальные не-запушенные коммиты исчезают из ветки (но восстановимы через reflog), а несохранённые изменения в working tree уничтожаются БЕЗ возможности восстановления" },
+        { "id": "c", "text": "Только локальная история переписывается, working tree остаётся" },
+        { "id": "d", "text": "Origin/main обновится с твоей версии" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "--hard синхронизирует все три области с целевым коммитом. Коммиты, которые перестали быть reachable из ветки (твои локальные после origin/main) — попадают в reflog, можно восстановить 90 дней. Но несохранённые изменения в working tree (то что редактировал но не git add) — это не commit, это просто содержимое файла, reflog их не знает. Они навсегда стёрты. Поэтому перед --hard всегда `git stash` или `git add .` если есть что-то ценное.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m09-02-q4",
+      "type": "multiple-choice",
+      "question": "Хочется сжать 5 последних коммитов в один (squash). Способ через reset?",
+      "options": [
+        { "id": "a", "text": "git reset --hard HEAD~5 + git commit" },
+        { "id": "b", "text": "git reset --soft HEAD~5 + git commit -m 'squashed message'. --soft двигает HEAD назад, оставляя все изменения в index. git commit создаёт новый коммит с этими изменениями. Альтернатива git rebase -i squash" },
+        { "id": "c", "text": "git reset --mixed HEAD~5 + git commit -am" },
+        { "id": "d", "text": "Только через interactive rebase" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "--soft idiomatic для squash: HEAD назад на 5, index сохраняет все накопленные изменения, ты делаешь git commit и получаешь один коммит вместо 5. Альтернативы: (a) --hard уничтожит изменения, нечего коммитить. (c) --mixed работает, но потребует git add . перед commit (изменения в working tree, не в index). (d) интерактивный rebase — другой valid путь, но reset --soft проще для случая 'сжать N последних коммитов'.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m09-02-q5",
+      "type": "true-false",
+      "question": "После git reset --hard коммиты которые перестали быть на ветке — навсегда удалены из репозитория.",
+      "correctAnswer": false,
+      "explanation": "Нет. Reset двигает указатель ветки, но сами коммиты остаются в .git/objects. Они становятся unreachable (ни одна ветка/тег/HEAD не указывает на них), но reflog хранит их хэши. Garbage collection (gc) удалит unreachable объекты после ~30 дней. До этого можно восстановить: git reflog -> найти хэш -> git reset --hard <hash> или git branch backup <hash>. Поэтому reset --hard страшнее на untracked working tree (это правда уничтожается), чем на коммитах.",
+      "bloomLevel": "analytical"
+    }
+  ]
+}

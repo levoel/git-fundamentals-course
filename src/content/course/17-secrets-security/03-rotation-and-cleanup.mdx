@@ -1,0 +1,500 @@
+---
+title: "Утечка произошла: rotate first, потом cleanup истории"
+description: "Если секрет уже в Git: (1) IMMEDIATELY rotate — отзови ключ в провайдере; (2) только потом cleanup через git filter-repo (новый стандарт) или BFG (legacy). git filter-branch deprecated — не используй. После force push коллеги делают force-clone. Это травматично — отсюда правило rotate-first."
+order: 3
+difficulty: "intermediate"
+estimatedTime: 35
+topics: ["filter-repo", "bfg", "history-rewrite", "force-push", "incident-response", "secret-rotation"]
+---
+
+# Утечка произошла: rotate first, потом cleanup истории
+
+Ситуация: ты заметил, что AWS-ключ ушёл в commit на public репо. Или CI вдруг написал «secret detected». Или коллега посмотрел и сказал «эй, а это что у тебя в config.py?». Что делать?
+
+**Первое правило**: НЕ начинай чистить историю. Это инстинктивный неправильный ход. Открой документацию провайдера и **rotate the key first**. Только потом — cleanup.
+
+В этом уроке разберём:
+
+1. Почему rotate должен быть **первым** шагом.
+2. Как rotate ключей в типичных провайдерах (AWS, GitHub, Snowflake).
+3. Как чистить историю через `git filter-repo` (современный стандарт).
+4. Когда использовать BFG Repo-Cleaner (legacy, но всё ещё рабочий).
+5. Что **не делать** (`git filter-branch`, `git rebase`).
+6. После cleanup: force push, коллеги, CI — как минимизировать collateral damage.
+
+---
+
+## Почему rotate — первый шаг (не cleanup)
+
+Junior intuition: «надо стереть ключ из истории, чтобы никто не увидел». Это **неправильно**, и вот почему.
+
+В момент когда ты заметил утечку:
+
+1. **Ключ уже скопирован**. Если он попал в public репо — боты его уже видели, скачали, проверили валидность. Может быть, прямо сейчас используется.
+2. **Чистка истории занимает 10-60 минут**. За это время бот может потратить $10k.
+3. **Чистка не отзывает ключ.** Даже если ты идеально вычистил и force-push-нул — ключ **всё ещё валиден на стороне AWS**. Атакующий продолжает им пользоваться.
+
+Поэтому workflow incident response:
+
+<DiagramContainer title="Incident response: правильный порядок действий">
+  <FlowColumn>
+    <FlowNode tooltip="Обнаружил утечку: GitHub alert, gitleaks CI, коллега указал">{'0. Detected'}</FlowNode>
+    <Arrow direction="down" />
+    <FlowNode tooltip="Открой console AWS / GitHub / etc и revoke/disable ключ NOW">{'1. ROTATE: отзови ключ в провайдере'}</FlowNode>
+    <Arrow direction="down" />
+    <FlowNode tooltip="Сгенерируй новый ключ, обнови ENV/Secrets Manager">{'2. Replace: новый ключ в secure storage'}</FlowNode>
+    <Arrow direction="down" />
+    <FlowNode tooltip="Проверь CloudTrail/audit log: что делали со старым ключом?">{'3. Investigate: что ключом успели сделать?'}</FlowNode>
+    <Arrow direction="down" />
+    <FlowNode tooltip="Только теперь — git filter-repo или BFG">{'4. Cleanup: переписать историю Git'}</FlowNode>
+    <Arrow direction="down" />
+    <FlowNode tooltip="force push, уведоми команду — все force-clone репо">{'5. Force push + team comms'}</FlowNode>
+    <Arrow direction="down" />
+    <FlowNode tooltip="Post-mortem: как не допустить снова — pre-commit, push protection">{'6. Post-mortem'}</FlowNode>
+  </FlowColumn>
+</DiagramContainer>
+
+Шаг 4 — cleanup — не первый и **необязательный**. Если ключ отозван, атакующий им уже не воспользуется. Cleanup делается чтобы:
+- Не оставлять «приманку» для следующих атакующих, которые могут попробовать использовать.
+- Соответствовать compliance требованиям (PCI, HIPAA — могут требовать удаление).
+- Audit log выглядел чище.
+
+Но **отзыв** — это что **спасает компанию от убытков**, а cleanup — косметика.
+
+<Callout type="danger">
+Если ты junior и нашёл утечку — НЕ начинай в одиночку. Скажи tech lead немедленно (Slack/звонок). Они могут уже знать процедуру, иметь права отозвать ключ через корпоративный console, и должны включить incident protocol. Соло-героика тут не нужна.
+</Callout>
+
+---
+
+## Конкретно: как rotate ключи
+
+### AWS IAM Access Key
+
+```bash
+# Через CLI
+$ aws iam list-access-keys --user-name dbt-runner
+{
+    "AccessKeyMetadata": [
+        {
+            "AccessKeyId": "AKIAIOSFODNN7LEAKED",
+            "Status": "Active",
+            "CreateDate": "2026-03-15T..."
+        }
+    ]
+}
+
+# Деактивируем (не удаляем сразу — для recovery)
+$ aws iam update-access-key \
+    --access-key-id AKIAIOSFODNN7LEAKED \
+    --status Inactive \
+    --user-name dbt-runner
+
+# Создаём новый
+$ aws iam create-access-key --user-name dbt-runner
+{
+    "AccessKey": {
+        "AccessKeyId": "AKIA...NEW",
+        "SecretAccessKey": "...",
+        "Status": "Active"
+    }
+}
+
+# Через 24 часа (убедившись что всё работает) — удаляем старый окончательно
+$ aws iam delete-access-key \
+    --access-key-id AKIAIOSFODNN7LEAKED \
+    --user-name dbt-runner
+```
+
+### GitHub Personal Access Token
+
+GitHub -> Settings -> Developer settings -> Personal access tokens -> Revoke. Через UI быстрее, чем CLI.
+
+Если PAT использовался в Airflow/dbt — обнови `secrets backend` (Secrets Manager) **до** revoke, иначе jobs упадут.
+
+### Snowflake Key-Pair
+
+```sql
+-- Удаляем старый public key
+ALTER USER dbt_runner UNSET RSA_PUBLIC_KEY;
+
+-- Грузим новый (после генерации новой пары openssl)
+ALTER USER dbt_runner SET RSA_PUBLIC_KEY='MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIB...';
+```
+
+Если key-pair использовался — старый `.p8` файл локально сразу `rm -f`.
+
+### Slack webhook
+
+UI -> App settings -> Incoming Webhooks -> Revoke. Сгенерируй новый.
+
+### Database password
+
+```sql
+-- PostgreSQL
+ALTER USER dbt_runner PASSWORD 'new-strong-password-here';
+```
+
+И **обнови всё** где этот пароль использовался: secrets backend, dbt profiles, Airflow Connections.
+
+---
+
+## CloudTrail / audit: что ключом делали
+
+После отзыва — посмотри, что атакующий успел. Для AWS:
+
+```bash
+# Что делали с этим ключом в последние 24 часа?
+$ aws cloudtrail lookup-events \
+    --lookup-attributes AttributeKey=AccessKeyId,AttributeValue=AKIAIOSFODNN7LEAKED \
+    --start-time "2026-05-12T00:00:00Z" \
+    --max-results 50 \
+    --output json | jq '.Events[] | {EventTime, EventName, SourceIPAddress, UserIdentity}'
+```
+
+Что искать:
+
+- `RunInstances` — запускали ли EC2 (crypto mining).
+- `CreateBucket`, `PutObject` — заливали ли данные в свой S3.
+- `GetObject` с большим объёмом — exfiltration данных.
+- `IAM:CreateUser/CreateRole` — попытка persistence (создать свой аккаунт).
+
+Если ключом ничего вредного не делали — повезло, GitHub Secret Scanning успел уведомить AWS до атаки. Если делали — это уже security incident, эскалируй security team.
+
+---
+
+## Cleanup истории: git filter-repo
+
+### Что такое git filter-repo
+
+`git filter-repo` — современный инструмент для переписывания истории. Написан Elijah Newren. С 2020 года — **официальная замена** `git filter-branch` (она deprecated, медленная, с гнилыми edge cases).
+
+Установка:
+
+```bash
+# macOS
+$ brew install git-filter-repo
+
+# Linux
+$ pip install git-filter-repo
+
+# Проверка
+$ git filter-repo --version
+git-filter-repo 2.45.0
+```
+
+### Удаляем файл из всей истории
+
+Самый частый сценарий: «удали `config.py` из всех коммитов».
+
+```bash
+# КРИТИЧНО: сделай свежий клон, не работай на основной копии
+$ cd /tmp
+$ git clone --mirror git@github.com:org/repo.git
+$ cd repo.git
+
+# Удаляем файл из всей истории
+$ git filter-repo --path config.py --invert-paths
+
+# --path config.py — целевой файл
+# --invert-paths — удалить указанные (без флага — оставит только указанные)
+```
+
+Что произошло:
+- Все commit-ы пересозданы без `config.py`.
+- SHA всех commit-ов **изменился** (это новые commits!).
+- Origin remote удалён (filter-repo делает это намеренно — чтобы ты не запушил случайно в неправильный remote).
+
+Возвращаем remote и пушим:
+
+```bash
+$ git remote add origin git@github.com:org/repo.git
+$ git push --force --all
+$ git push --force --tags
+```
+
+### Удаляем только определённую строку из всех файлов
+
+Если секрет лежит в одной строке (`AWS_KEY=AKIA...`), но сам файл нужен — используй `--replace-text`:
+
+```bash
+$ cat > /tmp/replacements.txt << 'EOF'
+AKIAIOSFODNN7LEAKED==>REMOVED
+wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY==>REMOVED
+EOF
+
+$ git filter-repo --replace-text /tmp/replacements.txt
+```
+
+Формат `pattern==>replacement`. По умолчанию — literal string match. Можно regex через `regex:` префикс:
+
+```
+regex:AKIA[A-Z0-9]{16}==>AKIA_REDACTED
+```
+
+После filter-repo все вхождения этих строк заменены на `REMOVED` или `AKIA_REDACTED` в **каждом коммите истории**. Файл остался, но без секрета.
+
+### Удаляем большой бинарный файл
+
+Тот же flow, если случайно закоммитили `.duckdb` файл на 2GB или `.parquet` с production данными:
+
+```bash
+$ git filter-repo --path data/customers.parquet --invert-paths
+```
+
+Можно по pattern:
+
+```bash
+$ git filter-repo --path-glob '*.parquet' --invert-paths
+$ git filter-repo --path-regex '.*\.(parquet|duckdb|sqlite)$' --invert-paths
+```
+
+### Проверка: gitleaks после filter-repo
+
+После cleanup обязательно перепроверь:
+
+```bash
+$ gitleaks detect --source . --verbose
+10:30AM INF scan completed in 1.2s
+10:30AM INF no leaks found
+```
+
+Если ничего не нашли — cleanup successful. Если нашли — повтори с другими паттернами.
+
+---
+
+## BFG Repo-Cleaner: legacy, но рабочий
+
+`BFG Repo-Cleaner` — Java-инструмент от Roberto Tyley, был стандартом до filter-repo. Иногда удобнее (специально для удаления крупных blob-ов).
+
+Установка:
+
+```bash
+$ brew install bfg
+# или скачать jar: https://rtyley.github.io/bfg-repo-cleaner/
+```
+
+Удалить blob больше 50MB из всей истории:
+
+```bash
+$ cd /tmp
+$ git clone --mirror git@github.com:org/repo.git
+$ cd repo.git
+
+$ bfg --strip-blobs-bigger-than 50M
+$ git reflog expire --expire=now --all && git gc --prune=now --aggressive
+
+$ git push --force
+```
+
+Удалить файл:
+
+```bash
+$ bfg --delete-files config.py
+```
+
+Удалить строки:
+
+```bash
+$ cat > /tmp/passwords.txt << 'EOF'
+AKIAIOSFODNN7LEAKED
+wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+EOF
+
+$ bfg --replace-text /tmp/passwords.txt
+```
+
+| Когда BFG, когда filter-repo |
+|---|
+| BFG быстрее для простых задач (удалить файл, удалить blob > X MB) |
+| filter-repo гибче (regex paths, callbacks на коммиты, merge-эквивалент) |
+| filter-repo поддерживается официально Git project, BFG — нет (последний release 2021) |
+| BFG **не трогает** последний commit на каждой ветке — нужно сначала почистить HEAD вручную |
+
+**Для DE и большинства случаев в 2026 — рекомендуется filter-repo**.
+
+---
+
+## Что НЕ делать
+
+### git filter-branch — deprecated с 2018
+
+Старый стандартный способ. Был встроен в Git, никаких внешних зависимостей. Но:
+
+- Чудовищно медленный (десятки минут на репо в 10k коммитов).
+- Куча edge cases (rename detection, mailmap, etc).
+- Plumbing-команда, плохо документирована.
+
+С Git 2.30+ при попытке запустить `git filter-branch` Git выдаёт warning:
+
+```
+WARNING: git-filter-branch has a glut of gotchas generating mangled history
+         rewrites.  Hit Ctrl-C before proceeding to abort, then use an
+         alternative filtering tool such as 'git filter-repo'
+         (https://github.com/newren/git-filter-repo/) instead.
+```
+
+**Не используй**. Существует только для backward compat в скриптах.
+
+### git rebase — не для cleanup секретов
+
+`git rebase -i` позволяет переписать последние N коммитов. Технически можно использовать для удаления коммита с секретом, **если секрет в одном недавнем коммите**. Но:
+
+- Не работает для секретов в старых коммитах (rebase от корня сложно).
+- Не удаляет blob объекты автоматически — они остаются в `.git/objects/` до `git gc`.
+- На больших командах rebase публичной ветки — катастрофа (см. модуль 07).
+
+Используй для **локальной** очистки до push (то есть до того, как утечка стала реальной).
+
+### git rm + commit
+
+Это **вообще не cleanup**. Это «удалить файл следующим commit-ом». Старый blob остался в истории. Урок 01 этого модуля.
+
+```bash
+# НЕ РАБОТАЕТ как cleanup
+$ git rm secrets.py
+$ git commit -m "Remove secrets"
+$ git push
+# секрет всё ещё доступен через `git log -p secrets.py`
+```
+
+---
+
+## Force push: травматичный шаг
+
+После filter-repo все SHA коммитов **изменились**. История remote больше не совпадает с локальной у коллег:
+
+```
+До:    A -> B -> C -> D (main)
+После: A' -> B' -> C' -> D' (main)  # те же логические commit, но новые SHA
+```
+
+`git push --force` (или `--force-with-lease` для безопасности) перезаписывает remote. И тут начинаются проблемы:
+
+### Что произойдёт у коллег
+
+Они делают обычный `git pull`:
+
+```bash
+$ git pull
+remote: ...
+Auto-merging...
+CONFLICT (content): Merge conflict in dag.py
+```
+
+Git попытался **merge** локальной истории (со старыми SHA) с remote (с новыми SHA). Это даёт конфликты во всех файлах, которые были тронуты cleanup-ом. Если коллега так смержит — он **вернёт секрет обратно** в историю.
+
+### Правильная процедура для коллег
+
+После force push **все** должны сделать:
+
+```bash
+# Сохрани локальные изменения (если есть)
+$ git stash
+
+# Сбрось локальный main к remote
+$ git fetch origin
+$ git reset --hard origin/main
+
+# Прибей все остальные ветки и заново clone их
+$ git branch -D feature/old-branch
+$ git checkout -b feature/new-branch origin/feature/new-branch
+
+# Восстанови stash, если нужно
+$ git stash pop
+```
+
+Или **проще**: re-clone весь репо в новую папку, перенести только uncommitted локальные изменения.
+
+### Communication: что писать команде
+
+Сразу после force push — **обязательно** уведомление в Slack/Teams:
+
+```
+@channel SECURITY: Repository <repo-name> has been rewritten to remove a leaked secret.
+
+ACTION REQUIRED:
+1. Stash any uncommitted changes (`git stash`)
+2. Re-clone the repository OR run:
+     git fetch origin
+     git reset --hard origin/main
+3. Re-base any feature branches onto the new main:
+     git rebase origin/main
+4. DO NOT do a regular `git pull` — it will merge the old history back.
+
+The leaked key has been rotated (no action needed for AWS).
+CI pipelines may need re-run.
+
+Details: <link to incident report>
+```
+
+Без этого коммуникейшна — коллега сделает `git pull`, конфликты, force-resolve, и секрет вернётся.
+
+<Callout type="warning">
+Open Pull Requests на момент force push — **они сломаются**. Старые коммиты ушли, PR ссылается на несуществующие SHA. Решение: PR закрыть, ветку перебазировать на новый main, открыть новый PR. Это травматично — отсюда правило «cleanup не первый шаг».
+</Callout>
+
+---
+
+## Альтернатива cleanup: жить с прошлым
+
+Реалистичный сценарий 2026: **многие команды не делают history cleanup после rotate**. Аргумент:
+
+- Ключ отозван -> не валиден -> атакующему бесполезен.
+- Cleanup ломает workflow всей команды на день.
+- Open PR-ы и forks всё равно сохраняют старую историю — full cleanup невозможен.
+
+Решение — оставить «historical secret» в репо как audit trail, главное — что он невалиден. Это нормальный подход, особенно для большого репо.
+
+Cleanup делается, когда:
+- Compliance требует (PCI-DSS, HIPAA, audit аудиторов).
+- Это очень крупный secret (root credentials, master encryption key).
+- Это очень популярный публичный репо (привлекает script kiddies).
+- Срочная reputation-проблема.
+
+---
+
+## Попробуй сам
+
+Полный цикл «leak -> rotate -> cleanup» на безопасном тестовом репо:
+
+```bash
+$ mkdir leak-cleanup-test && cd leak-cleanup-test
+$ git init
+
+# Симулируем утечку
+$ echo 'AWS_KEY="AKIAIOSFODNN7TEST"' > config.py
+$ git add config.py && git commit -m "Add config"
+$ echo 'AWS_KEY="AKIAIOSFODNN7TEST"' >> config.py
+$ git add config.py && git commit -m "Update config"
+$ echo "import os; os.environ.get('AWS_KEY')" > config.py
+$ git add config.py && git commit -m "Move to env"
+
+# Проверим: ключ всё ещё в истории
+$ git log -p config.py | grep AKIA
++AWS_KEY="AKIAIOSFODNN7TEST"
+-AWS_KEY="AKIAIOSFODNN7TEST"
++AWS_KEY="AKIAIOSFODNN7TEST"
+
+# Cleanup
+$ git filter-repo --replace-text <(echo 'AKIAIOSFODNN7TEST==>REMOVED') --force
+
+# Проверим
+$ git log -p config.py | grep AKIA
+# (пусто)
+
+$ git log -p config.py | grep REMOVED
++AWS_KEY="REMOVED"
+-AWS_KEY="REMOVED"
++AWS_KEY="REMOVED"
+```
+
+`--force` нужен потому что filter-repo требует «fresh clone» по умолчанию (защита от ошибок). На тестовой репе ок.
+
+---
+
+## Killer takeaway
+
+При утечке секрета: **rotate first, cleanup later**. Отзыв ключа в AWS/GitHub/Snowflake — это что спасает от убытков. Cleanup истории — это косметика и compliance. Используй `git filter-repo` (современный стандарт), не `git filter-branch` (deprecated). BFG — для простых случаев и больших файлов. После cleanup — обязательная коммуникация команде: они делают `git reset --hard origin/main`, не `git pull`. Open PR ломаются. Поэтому правило: **prevention** (модуль 02 - gitleaks, push protection) **дешевле в десять раз**, чем cleanup.
+
+<KnowledgeCheck quizSlug="17-secrets-security/03-rotation-and-cleanup" />

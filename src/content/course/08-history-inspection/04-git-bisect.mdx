@@ -1,0 +1,472 @@
+---
+title: "git bisect: бинарный поиск bug-introducing commit"
+description: "Когда регрессия проявилась — bisect находит коммит-причину быстрее всего"
+order: 4
+difficulty: "intermediate"
+estimatedTime: 20
+topics: ["Git", "bisect", "debugging", "regression"]
+---
+
+# git bisect: бинарный поиск bug-introducing commit
+
+Сценарий: ETL pipeline работал на прошлой неделе, а сегодня падает. С тех пор было 100 коммитов. Какой именно сломал? Ручной перебор займёт часы. **`git bisect`** — это бинарный поиск по истории: за log₂(100) ≈ 7 шагов ты найдёшь конкретный коммит, в котором появилась регрессия.
+
+Это один из самых мощных и недооценённых инструментов Git. Многие DE не знают про него, и зря — он экономит часы при поиске регрессий.
+
+---
+
+## Идея бинарного поиска
+
+У тебя есть последовательность коммитов от "good" (работает) до "bad" (сломан). Git берёт средний коммит, ты тестируешь — good или bad? Если good — баг в правой половине. Если bad — в левой. И так далее, пока не останется один коммит.
+
+<DiagramContainer title="Bisect: бинарный поиск по истории коммитов" color="blue">
+  <FlowColumn className="p-4 gap-3">
+    <Tooltip content="Начальное состояние: 100 коммитов между good и bad">
+      <DataBox label="итерация 0" className="border-zinc-500/30 w-full max-w-xl mx-auto">
+        <div className="text-xs font-mono">{'[good] -- 50 commits -- [middle] -- 50 commits -- [bad]'}</div>
+        <div className="text-xs text-zinc-500">диапазон поиска: 100 коммитов</div>
+      </DataBox>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="После 1 теста: остаётся 50 коммитов">
+      <DataBox label="итерация 1" className="border-zinc-500/30 w-full max-w-xl mx-auto">
+        <div className="text-xs font-mono">{'[middle, was good] -- 25 -- [new middle] -- 25 -- [bad]'}</div>
+        <div className="text-xs text-zinc-500">диапазон: 50 коммитов</div>
+      </DataBox>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="Через log₂(100) ≈ 7 шагов — найден единственный коммит">
+      <DataBox label="итерация 7" className="border-green-500/30 w-full max-w-xl mx-auto">
+        <div className="text-xs font-mono">{'[bad-introducing commit]'}</div>
+      </DataBox>
+    </Tooltip>
+  </FlowColumn>
+</DiagramContainer>
+
+100 коммитов -> 7 итераций. 1000 коммитов -> 10 итераций. Это math, и она offload'итс на Git.
+
+---
+
+## Базовый workflow
+
+```bash
+# 1. Начни bisect
+git bisect start
+
+# 2. Скажи: вот текущий коммит — bad
+git bisect bad
+
+# 3. Скажи: вот last known good коммит
+git bisect good v1.2.0
+# или
+git bisect good abc1234
+# или
+git bisect good HEAD~50
+
+# Bisecting: 50 revisions left to test after this (roughly 6 steps)
+# [middle-sha] some commit message
+```
+
+Git автоматически делает checkout на средний коммит. Теперь твоя задача — **протестировать**: воспроизводится ли баг.
+
+```bash
+# 4. Прогоняешь тесты
+$ pytest tests/test_etl.py
+# (или вручную, или твой запуск pipeline)
+
+# 5a. Если баг есть:
+git bisect bad
+
+# 5b. Если бага нет:
+git bisect good
+
+# 6. Git берёт следующий средний коммит — повторяй до конца
+```
+
+В конце Git скажет:
+
+```
+abc1234 is the first bad commit
+commit abc1234
+Author: Bob
+Date: ...
+
+    refactor: extract config loader
+
+# diff коммита
+```
+
+Это коммит, в котором баг появился. Можно посмотреть его и понять причину.
+
+### Завершить bisect
+
+```bash
+git bisect reset
+```
+
+Возвращает HEAD на ветку, на которой ты был до bisect.
+
+---
+
+## Что значит good и bad
+
+Это просто метки. Обычно:
+
+- **bad** = "тут баг есть".
+- **good** = "тут бага нет".
+
+Но термины можно сменить, если контекст не "баг":
+
+```bash
+git bisect start --term-old=fast --term-new=slow
+git bisect slow
+git bisect fast v1.0
+```
+
+Полезно для поиска "когда стало медленнее", "когда сломались тесты", "когда добавился deprecation warning".
+
+---
+
+## `git bisect run`: автоматизация
+
+Если у тебя есть **скрипт**, который воспроизводит баг (возвращает exit 0 = good, non-zero = bad), bisect делает всё сам.
+
+```bash
+git bisect start
+git bisect bad
+git bisect good v1.2.0
+git bisect run ./test.sh
+```
+
+Git будет:
+
+1. Делать checkout на средний коммит.
+2. Запускать `./test.sh`.
+3. Если exit 0 — `git bisect good`. Иначе — `git bisect bad`.
+4. Двигаться к следующему среднему.
+5. Завершится, когда найден bad-introducing commit.
+
+Полный пример: предположим, твой ETL pipeline падает на новом партишене.
+
+```bash
+#!/bin/bash
+# test.sh
+
+# Setup
+pip install -r requirements.txt > /dev/null 2>&1
+
+# Run the failing operation
+python -c "from src.etl import process; process('/data/sample.parquet')" 
+EXIT=$?
+
+# Cleanup
+exit $EXIT
+```
+
+Запуск:
+
+```bash
+git bisect start HEAD v1.2.0
+git bisect run ./test.sh
+```
+
+Git за несколько минут найдёт нужный коммит, и ты увидишь:
+
+```
+fff8888 is the first bad commit
+commit fff8888
+Author: Alice
+Date: 2026-05-08
+
+    fix: handle special characters in path
+```
+
+<Callout type="tip">
+Для bisect run скрипт должен быть **детерминированным**. Если иногда зелёное, иногда красное — bisect запутается. Если есть flaky tests, отдели их в bisect-friendly subset, или используй ретрай: `for i in 1 2 3; do ./test.sh && exit 0; done; exit 1`.
+</Callout>
+
+---
+
+## `git bisect skip`: проскочить коммит
+
+Иногда средний коммит — broken в некотором смысле, не позволяющем протестировать (например, не компилируется, отсутствуют зависимости).
+
+```bash
+git bisect skip
+```
+
+Git попросит протестировать другой коммит рядом. Если несколько коммитов подряд проблемные — `bisect skip` для каждого. В конце Git может выдать "первый плохой коммит — один из этих", и тебе придётся разобраться вручную.
+
+---
+
+## Сценарий 1: регрессия в тестах
+
+```bash
+# Контекст: pytest tests/test_etl.py падает на main, всё работало на v1.2.0
+git bisect start
+git bisect bad HEAD
+git bisect good v1.2.0
+
+# Git: Bisecting: 50 revisions left to test (roughly 6 steps)
+# [abc1234] some commit
+# Test:
+pytest tests/test_etl.py
+
+# Падает
+git bisect bad
+
+# Git: Bisecting: 25 revisions left (roughly 5 steps)
+# [def5678] another commit
+# Test:
+pytest tests/test_etl.py
+
+# Прошло
+git bisect good
+
+# ... ещё несколько итераций ...
+
+# Git: fff7777 is the first bad commit
+git show fff7777
+# Видишь: коллега обновил pandas с 2.0 до 2.1, изменился API
+```
+
+Дальше: либо откатываешь конкретное изменение, либо адаптируешь свой код под новый API.
+
+---
+
+## Сценарий 2: автоматизированный bisect run
+
+```bash
+# Test-скрипт
+cat > test-regression.sh <<'EOF'
+#!/bin/bash
+# Returns 0 if good, 1 if bad
+
+# Set up environment
+poetry install --quiet
+
+# Run the specific test
+poetry run pytest tests/test_aggregation.py::test_hourly_rollup -x --no-header 2>&1 > /dev/null
+EOF
+chmod +x test-regression.sh
+
+# Run bisect
+git bisect start
+git bisect bad HEAD
+git bisect good v1.2.0
+git bisect run ./test-regression.sh
+
+# Output после нескольких минут:
+# fff8888 is the first bad commit
+# ...
+# bisect found first bad commit
+```
+
+---
+
+## Сценарий 3: bisect performance regression
+
+Bisect работает не только для "сломалось/работает", но и для "стало медленнее".
+
+```bash
+# Скрипт измеряет время и возвращает 0 если быстро, 1 если медленно
+cat > perf-test.sh <<'EOF'
+#!/bin/bash
+
+# Запускаем pipeline, замеряем время
+TIME_MS=$(python -c "
+import time
+from src.etl import process
+start = time.time()
+process('large_dataset.parquet')
+print(int((time.time() - start) * 1000))
+")
+
+# Threshold: 5000ms = быстро, больше = медленно
+if [ "$TIME_MS" -gt 5000 ]; then
+    exit 1   # bad (slow)
+else
+    exit 0   # good (fast)
+fi
+EOF
+chmod +x perf-test.sh
+
+git bisect start --term-old=fast --term-new=slow
+git bisect slow HEAD
+git bisect fast v1.2.0
+git bisect run ./perf-test.sh
+```
+
+Так находишь коммит, в котором pipeline стал тормозным.
+
+---
+
+## Когда bisect не работает (хорошо)
+
+### Сложные регрессии "появилось, потом исчезло"
+
+Если баг был в коммите X, потом исправлен в Y, потом снова появился в Z — bisect найдёт Y как "первый good", и пропустит X. Bisect строится на монотонности: после первого "bad" все следующие тоже bad.
+
+В реальной жизни такое редко, но возможно.
+
+### Множественные изменения в одном коммите
+
+Если bisect нашёл "monster commit" с 500 файлами, виновник где-то в 500 файлах. Дальше нужно расследование вручную (часто `git log -p` для конкретных файлов).
+
+### Flaky tests
+
+Тест то проходит, то падает. Bisect двинется не туда. Нужно сначала стабилизировать тест, потом bisect.
+
+---
+
+## Альтернатива: `git log --bisect`
+
+Менее известная команда — показать "средний" коммит без официального bisect:
+
+```bash
+git log --bisect main..HEAD
+```
+
+Не интерактивный bisect, но полезно для исследования "что находится примерно в середине диапазона".
+
+---
+
+## Что делать после нахождения
+
+Bisect нашёл коммит. Что дальше?
+
+### Опция 1: revert
+
+Если изменение было ненужное или ошибочное:
+
+```bash
+git revert <bad-sha>
+```
+
+Это создаст коммит, который отменяет изменения.
+
+### Опция 2: fix forward
+
+Если изменение нужно, но содержит баг — почини его новым коммитом:
+
+```bash
+# Посмотри что делал коммит
+git show <bad-sha>
+
+# Реши, как починить
+# Создай fix commit
+git commit -m "fix: handle X edge case introduced in fff8888"
+```
+
+### Опция 3: разобрать коммит
+
+Если "bad commit" слишком жирный (rebase squashed много логических изменений), может быть нужно разделить его на части, чтобы локализовать проблему:
+
+```bash
+git checkout -b investigate-bug <bad-sha>
+# Сам анализируй diff, тестируй разделённые куски
+```
+
+---
+
+## Полезные подкоманды
+
+### `git bisect log`
+
+Показывает историю bisect-сессии:
+
+```bash
+$ git bisect log
+# bad: [abc1234] some commit
+# good: [v1.2.0] another commit
+git bisect start
+git bisect bad abc1234
+git bisect good v1.2.0
+# bad: [def5678] middle commit
+git bisect bad def5678
+# good: [fff7777] another middle
+git bisect good fff7777
+```
+
+### `git bisect replay`
+
+Воспроизвести bisect из лога — полезно если хочешь поделиться с коллегой.
+
+```bash
+git bisect log > bisect.log
+
+# Передал коллеге
+
+git bisect replay bisect.log
+```
+
+### `git bisect visualize`
+
+Показывает оставшиеся коммиты для тестирования (открывает gitk):
+
+```bash
+git bisect visualize
+```
+
+Удобно для понимания, где ты в процессе.
+
+---
+
+## Попробуй сам
+
+```bash
+# Создай sandbox с искусственным багом
+mkdir bisect-demo && cd bisect-demo
+git init
+
+# Создаём чистую функцию
+cat > app.py <<EOF
+def calc():
+    return 2 + 2
+EOF
+git add . && git commit -m "C0: init"
+
+# 20 безобидных коммитов
+for i in {1..20}; do
+    echo "# comment $i" >> app.py
+    git commit -am "C$i: comment"
+done
+
+# Введём баг
+sed -i.bak 's/return 2 + 2/return 2 + 3/' app.py && rm app.py.bak
+git commit -am "C21: BUG introduced"
+
+# Ещё несколько коммитов после
+for i in {22..30}; do
+    echo "# more $i" >> app.py
+    git commit -am "C$i: more"
+done
+
+# Создадим тест
+cat > test.sh <<'EOF'
+#!/bin/bash
+RESULT=$(python -c "exec(open('app.py').read()); print(calc())")
+if [ "$RESULT" = "4" ]; then
+    exit 0   # good
+else
+    exit 1   # bad
+fi
+EOF
+chmod +x test.sh
+
+# Старт bisect — мы знаем v0 (C0) хороший, HEAD плохой
+git bisect start HEAD HEAD~30   # bad = HEAD, good = HEAD~30 (т.е. C0)
+git bisect run ./test.sh
+
+# Git за несколько секунд найдёт коммит "C21: BUG introduced"
+
+# Закончить
+git bisect reset
+```
+
+---
+
+<KnowledgeCheck
+  question="У вас в команде сегодня обнаружили, что Airflow DAG `daily_etl` стал падать с ошибкой в task `transform_orders`. Точно работало месяц назад. С тех пор было ~80 коммитов от 5 разных людей. Опиши план bisect, включая что использовать как 'good', 'bad', и как написать test script если воспроизведение зависит от Airflow окружения."
+  answer="План bisect: (1) **Установить границы**: 'good' — последний известный рабочий коммит. Если месяц назад точно работало, можно взять commit на дату месяц назад (`git log --until='1 month ago' --oneline | head -1` — возьми этот SHA). Или, если был tagged release `v1.2.0` от прошлого месяца — используй его. 'bad' — HEAD (или конкретный коммит, на котором сегодня воспроизводится). (2) **Стабилизировать воспроизведение**: для DAG-а нужно воспроизвести именно конкретный task. Не запускать весь DAG через UI — слишком медленно для bisect. Идеально: вытащить логику `transform_orders` в standalone Python скрипт или unit test, который можно запустить `python -m pytest dags/test_transform_orders.py::test_basic`. Если task сильно завязан на Airflow context (XCom, variables, connections), можно использовать `airflow tasks test daily_etl transform_orders 2026-05-13` — CLI команда, которая запустит task standalone, без scheduler. (3) **Test script для bisect run**: ```#!/bin/bash # Setup: stable Python env, потому что dependencies могут отличаться между коммитами cd /repo poetry install --quiet 2>&1 > /dev/null # Run the failing task in isolation airflow tasks test daily_etl transform_orders 2026-05-13 2>&1 > /tmp/airflow.log EXIT=$? exit $EXIT``` Сделать `chmod +x`. (4) **Запуск**: `git bisect start && git bisect bad HEAD && git bisect good <month-ago-sha> && git bisect run ./test-transform-orders.sh`. (5) **Сложности**: (a) Если за месяц **обновились зависимости** в `pyproject.toml`/`requirements.txt`, может оказаться, что старые коммиты не запускаются с current poetry.lock. Решение: `git bisect run` будет делать `poetry install` на каждой итерации, или закрепить lock-файл, или подменять только код DAG-ов на коммите. (b) Если task **зависит от external state** (data в S3, table в Snowflake) — нужно зафиксировать тестовые данные на input, чтобы каждый прогон был одинаков. (c) Если **миграции БД** менялись — bisect усложняется. Может оказаться, что коммит-виновник — это применённая миграция, а откатывать миграции в production-like среде сложно. В этом случае bisect делается в изолированной dev-среде с снимком БД. (d) Если test script сам не детерминированный — bisect выдаст бессмыслицу. Сначала добиться стабильности. (e) Использовать `git bisect skip` если попадаешь на коммит, где Airflow вообще не запускается (например, syntax error)."
+/>

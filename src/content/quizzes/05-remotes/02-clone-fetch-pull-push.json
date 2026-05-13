@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "05-remotes/02-clone-fetch-pull-push",
+  "moduleId": "05-remotes",
+  "_meta": { "idPrefix": "git-m05-02" },
+  "questions": [
+    {
+      "id": "git-m05-02-q1",
+      "type": "multiple-choice",
+      "question": "Что делает `git clone <url>` под капотом?",
+      "options": [
+        { "id": "a", "text": "Только копирует файлы с сервера на диск" },
+        { "id": "b", "text": "git init + git remote add origin + git fetch + git checkout main" },
+        { "id": "c", "text": "Делает snapshot файлов без истории" },
+        { "id": "d", "text": "git pull в новую папку" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`git clone` — это удобный wrapper над четырьмя командами: (1) `git init` создаёт пустой `.git/`, (2) `git remote add origin <url>` добавляет remote, (3) `git fetch origin` скачивает все объекты и refs, (4) `git checkout main` (или default branch) создаёт локальную main и заполняет working tree. Это можно сделать руками — результат идентичный. Знание это полезно для нестандартных setup'ов (например, --bare clone или с pre-checkout hooks).",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m05-02-q2",
+      "type": "multiple-choice",
+      "question": "Чем `git fetch` отличается от `git pull`?",
+      "options": [
+        { "id": "a", "text": "fetch быстрее, pull медленнее, но результат одинаковый" },
+        { "id": "b", "text": "fetch только обновляет remote-tracking branches (origin/main), не трогает рабочую ветку; pull = fetch + merge/rebase" },
+        { "id": "c", "text": "fetch для приватных репо, pull для публичных" },
+        { "id": "d", "text": "fetch синхронизирует только текущую ветку, pull — все" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`git fetch` — безопасная операция: только тянет данные в `.git/objects/` и обновляет remote-tracking refs (`origin/main`, `origin/develop`...). Working tree и локальная ветка не трогаются. `git pull` = `git fetch` + интеграция (merge или rebase, в зависимости от настроек). Pull может вызвать конфликты и менять файлы в working tree, fetch — нет. Привычка делать `git fetch` перед `git status` — здоровая, потому что показывает реальное состояние сервера без рисков.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m05-02-q3",
+      "type": "multiple-choice",
+      "question": "При первом push новой локальной ветки `feature/x` Git говорит: 'no upstream branch'. Какая команда правильная?",
+      "options": [
+        { "id": "a", "text": "git push origin --force" },
+        { "id": "b", "text": "git push --new-branch" },
+        { "id": "c", "text": "git push -u origin feature/x" },
+        { "id": "d", "text": "git remote add upstream origin" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "`git push -u origin feature/x` (или `--set-upstream`) делает две вещи: пушит ветку на сервер И настраивает tracking — связь между локальной `feature/x` и `origin/feature/x`. После этого `git push` и `git pull` без аргументов работают на этой ветке. Альтернатива — настроить `push.autoSetupRemote = true` глобально, тогда `git push` для новой ветки автоматически создаст её на сервере.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m05-02-q4",
+      "type": "true-false",
+      "question": "`git push --force-with-lease` безопаснее `git push --force`, потому что проверяет, что remote-ветка совпадает с тем, что ты последний раз видел через fetch.",
+      "correctAnswer": "true",
+      "explanation": "`--force-with-lease` проверяет: на сервере сейчас тот же SHA, что был при последнем fetch? Если совпадает — push идёт. Если кто-то напушил в это время — push отвергнут с 'stale info'. Это спасает от ситуации, когда ты слепо затираешь чужие коммиты. `--force` делает это без проверки, что опасно в командной работе. Дополнительная защита — `--force-if-includes` (Git 2.30+), которая ещё проверяет, что у тебя есть все коммиты из локального reflog. Включи `push.useForceIfIncludes = true` для безопасности.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m05-02-q5",
+      "type": "multiple-choice",
+      "question": "При попытке `git push` Git ругается: 'rejected (non-fast-forward)'. Что произошло и как правильно решить?",
+      "options": [
+        { "id": "a", "text": "Сделать git push --force, чтобы перезаписать сервер" },
+        { "id": "b", "text": "Удалить и заново склонировать репо" },
+        { "id": "c", "text": "git fetch + git rebase origin/<branch> (или merge), потом git push — это безопасно сохранит чужие коммиты" },
+        { "id": "d", "text": "Игнорировать ошибку, рано или поздно push пройдёт" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "Non-fast-forward означает: на сервере появились коммиты, которых у тебя нет. Если просто запушить --force, ты затрёшь чужую работу. Правильно: (1) `git fetch` — узнать что появилось, (2) `git rebase origin/<branch>` (или merge) — интегрировать чужие изменения с твоими локальными, разрешить конфликты если есть, (3) `git push` — теперь это fast-forward, идёт без проблем. Если ты на своей feature-ветке и точно знаешь, что rebase переписал history (например, после `git rebase -i`), используй `git push --force-with-lease`, а не `--force`.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "12-workflows/03-trunk-based-development",
+  "moduleId": "12-workflows",
+  "_meta": { "idPrefix": "git-m12-03" },
+  "questions": [
+    {
+      "id": "git-m12-03-q1",
+      "type": "multiple-choice",
+      "question": "Главные принципы Trunk-Based Development?",
+      "options": [
+        { "id": "a", "text": "Только feature branches" },
+        { "id": "b", "text": "(1) Все коммитят в main (trunk), short-lived branches на часы max 1 day; (2) Main всегда деплоится в любой момент; (3) Незавершённая работа за feature flags (код в main, behavior controlled); (4) Маленькие коммиты часто (3-4 PR/day per dev); (5) Continuous integration в полном смысле — integrated несколько раз в день" },
+        { "id": "c", "text": "Никаких commits в main" },
+        { "id": "d", "text": "Просто push в main" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "TBD evolves GitHub Flow для very high velocity teams. Short branches -> no conflicts. Feature flags -> unfinished work safely в main. Маленькие коммиты -> smaller blast radius (один commit revert не ломает другие фичи). Continuous integration literally — integrated to main multiple times per day per developer. Google/Netflix/Facebook стандарт. Требует mature infrastructure (тесты, flags, CD, monitoring).",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m12-03-q2",
+      "type": "multiple-choice",
+      "question": "Почему feature flags критичны для TBD?",
+      "options": [
+        { "id": "a", "text": "Для UI customization" },
+        { "id": "b", "text": "Без flags невозможно safely коммитить unfinished work в main (которая всегда production). Flag OFF в prod = код в main, но не выполняется -> не ломает. Постепенный rollout (1% -> 10% -> 100%) с metrics monitoring. Без flags TBD не работает — main быстро ломается. Provider: LaunchDarkly, Statsig, Flagsmith, или self-hosted" },
+        { "id": "c", "text": "Они опциональны" },
+        { "id": "d", "text": "Только для A/B тестов" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Flags решают core проблему TBD: 'как продолжать коммитить в main, если фича не готова?'. Flag OFF — код inert. Включить через config server (не redeploy). Postepenный rollout — canary 1% -> 10% -> 100% с metrics — обнаруживает problems раньше. Без flags TBD = постоянно сломанная main. Provider: managed (LaunchDarkly, Statsig — feature-rich) или self-hosted (env vars, config files — простой start).",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m12-03-q3",
+      "type": "multiple-choice",
+      "question": "Anti-pattern в TBD который ломает кодбаз через год?",
+      "options": [
+        { "id": "a", "text": "Слишком много тестов" },
+        { "id": "b", "text": "Забывать удалять feature flags после 100% rollout. Год спустя кодбаз содержит сотни флагов, dead code branches в if/else, никто не помнит зачем каждый. Code maintenance becomes nightmare. Best practice: flag должен иметь expiry date, после 100% rollout удалять в течение недель через chore PR" },
+        { "id": "c", "text": "Маленькие коммиты" },
+        { "id": "d", "text": "Direct push в main" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Tech debt от flag accumulation — known pitfall TBD. После 100% rollout flag и old code branch dead, но если не убрать — навсегда. Через год: сотни флагов, никто не помнит origin, removing risky (что если depends on?). Right approach: track flags в registry с owner + expiry date. После 100% rollout — chore PR на removal в течение 2-4 weeks. Disciplined teams (Google, Netflix) имеют automation для flag lifecycle.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m12-03-q4",
+      "type": "multiple-choice",
+      "question": "Какая infrastructure обязательна для TBD?",
+      "options": [
+        { "id": "a", "text": "Только Git" },
+        { "id": "b", "text": "(1) Comprehensive tests (unit + integration + E2E, run < 10 min); (2) Feature flag service (self-hosted или managed); (3) CI/CD pipeline (auto-deploy on merge, auto-rollback on errors); (4) Monitoring + alerting (metrics-based rollout decisions); (5) Staging environment с full data; (6) Команда дисциплинированная (понимает 'small PRs', 'use flags', 'remove flags after rollout')" },
+        { "id": "c", "text": "Просто хороший CI" },
+        { "id": "d", "text": "Только Slack для коммуникации" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "TBD требует heavy investment в infrastructure ДО adoption. Без всей stack — TBD ломается: main быстро сломан, deploys лагают, rollback ручной. Это **culturally driven**, не tooling — но tooling enables culture. Junior-heavy team без mature infra не должна пытаться TBD: сначала invest в tests + CI/CD + monitoring, потом мигрировать. GitHub Flow с feature flags — intermediate шаг к TBD.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m12-03-q5",
+      "type": "true-false",
+      "question": "TBD подходит начинающему DE в junior-heavy команде из 5 человек без feature flag service.",
+      "correctAnswer": false,
+      "explanation": "Нет, mismatch на нескольких уровнях. (1) Junior-heavy — TBD требует disciplined culture, junior без опыта easily ломают main; (2) Маленькая команда — overhead infra investment не оправдан, простота GitHub Flow лучше; (3) Нет feature flag service — невозможно safely коммитить unfinished work в main. Правильный path: начать с GitHub Flow, выстроить CI/CD culture, добавить feature flags для больших changes, через год-два evaluate переход на TBD если scale требует.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

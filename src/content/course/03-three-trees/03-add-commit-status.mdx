@@ -1,0 +1,453 @@
+---
+title: "git add, commit, status, diff — ежедневная рутина"
+description: "Основные команды для работы с index и HEAD. git status (porcelain vs short), git add -p, git commit --amend, git diff vs git diff --staged"
+order: 3
+difficulty: "beginner"
+estimatedTime: 20
+topics: ["Git", "git add", "git commit", "git status", "git diff", "amend"]
+---
+
+# git add, commit, status, diff — ежедневная рутина
+
+Это команды, которые вы будете запускать каждый день, по несколько раз в час. К концу карьеры опытный разработчик набирает `git status` десятки тысяч раз — настолько часто, что пальцы делают это автоматически. В этом уроке разберём их в деталях: не «команда делает X», а «команда работает с такими-то деревьями, типичные опции, типичные ошибки».
+
+После урока вы будете спокойно делать commits, проверять состояние, смотреть diff между разными состояниями, и иметь привычку использовать `git status` после каждой команды.
+
+---
+
+## git status: ваш главный друг
+
+`git status` отвечает на вопрос «что у меня сейчас?». Покажет три вещи:
+
+1. На какой ветке вы (и куда направлен HEAD)
+2. Что в index, ожидает коммита
+3. Что в working tree, ещё не в index
+
+Полный пример:
+
+```bash
+git status
+# On branch main
+# Your branch is up to date with 'origin/main'.
+#
+# Changes to be committed:
+#   (use "git restore --staged <file>..." to unstage)
+# 	modified:   src/auth.py
+# 	new file:   src/oauth.py
+#
+# Changes not staged for commit:
+#   (use "git add <file>..." to update what will be committed)
+#   (use "git restore <file>..." to discard changes in working directory)
+# 	modified:   src/auth.py
+#
+# Untracked files:
+#   (use "git add <file>..." to include in what will be committed)
+# 	docs/auth.md
+```
+
+Здесь много информации:
+
+- **Ветка**: `On branch main` + статус относительно origin/main
+- **Changes to be committed** — то, что в index (готово к коммиту)
+- **Changes not staged** — то, что в working tree, но не в index (изменено, но не добавлено)
+- **Untracked files** — файлы, которые Git вообще не отслеживает (не в index никогда не был)
+
+Обратите внимание: `src/auth.py` появляется ДВАЖДЫ — в Changes to be committed (одна версия в index) и в Changes not staged (другая версия в working tree). Это нормальная ситуация, мы её видели в уроке 1 этого модуля.
+
+### Короткий вывод: -s или --short
+
+```bash
+git status -s
+# M  src/auth.py        ← M в первой колонке: modified в index
+#  M src/auth.py        ← M во второй колонке: modified в WT
+# A  src/oauth.py       ← A: added в index
+# ?? docs/auth.md       ← ??: untracked
+```
+
+Две колонки символов:
+
+- **Первая колонка** — изменение в **index** (между HEAD и index)
+- **Вторая колонка** — изменение в **working tree** (между index и WT)
+
+Коды:
+
+- `M` — modified
+- `A` — added (новый файл, добавлен в index)
+- `D` — deleted
+- `R` — renamed
+- `??` — untracked
+
+`MM` означает «и в index изменён, и в WT тоже» — то есть две разные версии одновременно (как в нашем примере с src/auth.py).
+
+<DiagramContainer title="Колонки git status -s" color="emerald">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="HEAD vs Index" tooltip="Первая колонка показывает: что изменилось между последним коммитом и тем, что в index">Кол. 1</DataBox>
+      <DataBox label="Index vs Working tree" tooltip="Вторая колонка: что изменилось между index и текущим состоянием на диске">Кол. 2</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="M_" tooltip="Изменён в index, но WT синхронизирован с index">Modified, staged</DataBox>
+      <DataBox label="_M" tooltip="Изменён в WT, но не добавлен в index">Modified, not staged</DataBox>
+      <DataBox label="MM" tooltip="Изменён в index И в WT после этого">Both</DataBox>
+      <DataBox label="A_" tooltip="Новый файл, добавлен в index">Added</DataBox>
+      <DataBox label="??" tooltip="Untracked — Git не отслеживает">Untracked</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+<Callout type="tip">
+`git status -s` — это «git status, но в одну строку на файл». Удобно для быстрого взгляда. Полный `git status` хорош для обучения и junior, потому что объясняет, что делать. Опытные обычно используют -s.
+</Callout>
+
+---
+
+## git add: добавляем в index
+
+Базовое использование:
+
+```bash
+git add path/to/file.py            # один файл
+git add src/                       # вся директория
+git add .                          # вся текущая директория
+git add -A                         # все изменения во ВСЁМ репо (включая удалённые)
+git add '*.py'                     # все .py-файлы (Git pattern)
+```
+
+Различие важно:
+
+<DiagramContainer title="git add варианты: что попадает в index" color="indigo">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="git add ." tooltip="Добавляет всё новое и изменённое в ТЕКУЩЕЙ директории и поддиректориях. Удалённые файлы — НЕ обрабатывает">Текущая dir</DataBox>
+      <DataBox label="git add -A" tooltip="Добавляет ВСЁ во всём repo: новое, изменённое, удалённое. Игнорирует cwd" variant="highlight">Весь repo</DataBox>
+      <DataBox label="git add -u" tooltip="Добавляет только ИЗМЕНЕНИЯ к уже отслеживаемым файлам (modified, deleted), но не Untracked">Только tracked</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Junior часто пишет `git add .`, что почти всегда работает, но иногда хочется явно: `git add -A`, чтобы добавить и удалённые файлы тоже.
+
+### git add -p: интерактивно по кусочкам
+
+Самая мощная опция add — `--patch` (или `-p`):
+
+```bash
+git add -p src/auth.py
+```
+
+Git покажет каждый hunk (кусок изменений) и спросит, добавлять ли:
+
+```text
+diff --git a/src/auth.py b/src/auth.py
+index abc123..def456 100644
+--- a/src/auth.py
++++ b/src/auth.py
+@@ -10,6 +10,8 @@ def authenticate(user):
+     if not user.is_active:
+         return False
+
++    # Add OAuth fallback
++    user.try_oauth()
+     return user.password_valid()
+
+(1/2) Stage this hunk [y,n,q,a,d,s,e,?]?
+```
+
+Опции:
+
+- `y` — yes, добавить этот hunk
+- `n` — no, пропустить
+- `q` — quit, выйти из patch-режима
+- `a` — all, добавить этот и все следующие
+- `d` — done, пропустить этот и все следующие
+- `s` — split, разбить hunk на меньшие куски
+- `e` — edit, отредактировать hunk руками
+- `?` — help
+
+Это инструмент, чтобы из одного «грязного» файла сделать **два чистых коммита**. Например, в файле два изменения: одно — баг-фикс, другое — добавление логирования. С `git add -p` вы сначала добавите hunk бага и сделаете коммит «fix: NPE», потом hunk логирования и коммит «chore: add debug logging».
+
+Опытные DE используют `git add -p` ежедневно. Junior сначала избегают, потом распробуют, потом не могут без неё жить.
+
+---
+
+## git commit: фиксируем index в HEAD
+
+Базовый коммит:
+
+```bash
+git commit -m "Add OAuth flow"
+```
+
+Что произошло:
+
+1. Git взял текущее состояние index
+2. Создал новый commit-объект со ссылкой на это состояние
+3. Установил parent коммита = текущий HEAD
+4. Обновил HEAD на новый коммит
+
+В одной команде. Index после commit синхронизирован с HEAD.
+
+### Несколько способов commit
+
+```bash
+# Из командной строки
+git commit -m "short message"
+
+# С телом сообщения (открывает редактор)
+git commit
+# В редакторе можно написать:
+# Subject line (50 chars)
+# 
+# Body, explaining why
+# Можно несколько параграфов
+# - bullet points
+# - reference issues: #123
+
+# Один файл (если нужно)
+git commit -m "fix bug" path/to/specific/file.py
+# Эквивалент: git add path/to/specific/file.py && git commit
+
+# Коммит с уже staged + ВСЕ изменения отслеживаемых файлов
+git commit -am "msg"
+# Эквивалент: git add -u && git commit
+# ВНИМАНИЕ: -a не добавит untracked files!
+```
+
+<Callout type="warning">
+`git commit -am "..."` — частая ошибка. Junior думает, что -a добавит «всё», но -a добавляет только изменения ОТСЛЕЖИВАЕМЫХ файлов (modified/deleted). Untracked files остаются без коммита. Если хотите «всё-всё», используйте `git add -A && git commit -m "..."`.
+</Callout>
+
+### Хорошие commit messages
+
+Стандарт de facto для большинства команд — **Conventional Commits**:
+
+```text
+<тип>(<scope>): <короткое описание>
+
+<пустая строка>
+
+<подробное описание (опционально)>
+
+<пустая строка>
+
+<footer: BREAKING CHANGE / Refs #123>
+```
+
+Типы:
+
+- `feat` — новая фича
+- `fix` — баг-фикс
+- `docs` — документация
+- `style` — форматирование, без изменений в логике
+- `refactor` — рефакторинг
+- `test` — тесты
+- `chore` — служебные изменения
+- `perf` — улучшение производительности
+
+Пример:
+
+```text
+feat(auth): add OAuth2 fallback for Google SSO
+
+When primary auth fails, try OAuth2 with refresh token.
+Reduces login errors by ~15% in production.
+
+Refs #234
+```
+
+Это не «формальность» — это даёт автоматизированные changelog, semantic versioning, и просто читаемую историю. Большинство OSS-проектов и многие компании это требуют. Подробно — модуль 11 (Pull Requests).
+
+### git commit --amend: исправление последнего коммита
+
+Самая частая «правка»: вы сделали коммит, через 5 секунд заметили опечатку в сообщении. Или забыли добавить файл. `--amend` правит **последний** коммит.
+
+```bash
+# Изменить message последнего коммита
+git commit --amend -m "Корректное сообщение"
+
+# Добавить файл в последний коммит
+echo "missed" > missed.txt
+git add missed.txt
+git commit --amend --no-edit   # --no-edit = не открывать редактор
+
+# И message, и содержимое
+git add forgot.txt
+git commit --amend -m "Полностью новое сообщение"
+```
+
+ВНИМАНИЕ: **Важно**: `--amend` создаёт **новый коммит** с новым SHA. Старый коммит остаётся в reflog, но в ветке его уже нет.
+
+<Callout type="danger">
+Если коммит уже запушен на remote, `--amend` приведёт к проблеме: локальная история разойдётся с remote. Следующий push потребует --force, что опасно на shared веток. Правило: **--amend только до push**. Если push уже сделан и amend нужен — используйте новый коммит с fixup, или коммит «fix: typo in previous message».
+</Callout>
+
+---
+
+## git diff: что изменилось
+
+Базовая команда показывает diff между разными состояниями. По умолчанию — между WT и index:
+
+```bash
+git diff
+# diff --git a/src/auth.py b/src/auth.py
+# index abc..def 100644
+# --- a/src/auth.py
+# +++ b/src/auth.py
+# @@ -1,3 +1,4 @@
+#  def login(user):
+# +    log.debug(f"login attempt: {user}")
+#      return user.authenticate()
+```
+
+Это «что я изменил, но ещё не добавил в index».
+
+### git diff --staged: что в index готово
+
+```bash
+git diff --staged
+# Также: git diff --cached (старое имя)
+```
+
+Показывает diff **между index и HEAD**. То есть «что я подготовил для следующего коммита».
+
+### git diff HEAD: всё, что изменилось
+
+```bash
+git diff HEAD
+```
+
+Сравнивает working tree с HEAD напрямую. То есть и то, что в index, и то, что в working tree. Объединение `git diff` и `git diff --staged`.
+
+<DiagramContainer title="Три варианта git diff" color="purple">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="git diff" tooltip="Без аргументов. Сравнивает WT и Index. «Что я изменил с момента git add»">WT vs Index</DataBox>
+      <DataBox label="git diff --staged" tooltip="Сравнивает Index и HEAD. «Что я добавил для коммита, но ещё не закоммитил»">Index vs HEAD</DataBox>
+      <DataBox label="git diff HEAD" tooltip="Сравнивает WT и HEAD. Объединяет обе зоны">WT vs HEAD</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+### git diff между коммитами / ветками
+
+```bash
+git diff HEAD~1 HEAD       # diff между предпоследним и последним коммитом
+git diff main feature/x    # diff между ветками
+git diff abc123 def456     # diff между SHA коммитов
+git diff HEAD~3 HEAD -- src/auth.py   # только для одного файла
+```
+
+### Опции для удобства
+
+```bash
+git diff --color-words       # diff по словам, не строкам
+git diff --stat              # сводка: имена файлов + количество изменений
+git diff --name-only         # только имена изменённых файлов
+git diff -w                  # игнорировать пробелы
+```
+
+---
+
+## Типичные ошибки и как их исправить
+
+### Сделал commit, понял что не то
+
+```bash
+# Если ещё не запушено — amend
+git commit --amend
+
+# Или откатить commit, но оставить файлы в index
+git reset --soft HEAD~1
+# Теперь можно git add и git commit заново
+
+# Или совсем удалить commit и всё (ОПАСНО! изменения теряются)
+git reset --hard HEAD~1
+```
+
+Подробнее про reset — модуль 09.
+
+### Случайно добавил файл в index, не хочу его коммитить
+
+```bash
+# Убрать файл из index, оставить в WT
+git restore --staged path/to/file
+# или старое:
+git reset HEAD path/to/file
+```
+
+### Хочу отменить локальные изменения в файле (вернуть к версии из последнего коммита)
+
+```bash
+git restore path/to/file
+# или старое:
+git checkout -- path/to/file
+```
+
+ВНИМАНИЕ: Это уничтожит ваши изменения в working tree. Безвозвратно (изменения не были в commit, reflog их не сохранит).
+
+### Хочу отменить ВСЕ изменения и вернуться к чистому HEAD
+
+```bash
+git restore .
+git reset --hard
+```
+
+ВНИМАНИЕ: ОПАСНО. Все локальные изменения потеряются.
+
+---
+
+## Попробуй сам
+
+Полная сессия работы:
+
+```bash
+mkdir -p ~/git-sandbox/lesson-03-commit
+cd ~/git-sandbox/lesson-03-commit
+git init
+
+# Создаём несколько файлов
+echo "a" > a.txt
+echo "b" > b.txt
+echo "c" > c.txt
+
+# Смотрим статус
+git status
+git status -s
+
+# Добавляем только два
+git add a.txt b.txt
+git status
+
+# Diff в index (HEAD vs index)
+git diff --staged
+
+# Коммитим
+git commit -m "Add a and b"
+git status
+
+# Изменяем a, добавляем c
+echo "a modified" > a.txt
+git add c.txt
+
+# Смотрим diffs
+git status -s
+git diff           # WT vs Index — покажет a.txt
+git diff --staged  # Index vs HEAD — покажет c.txt
+git diff HEAD      # WT vs HEAD — покажет оба
+
+# Коммитим
+git commit -am "Add c, modify a"
+# -a поймает изменение a.txt, c.txt уже в index
+git log --oneline
+
+# Amend: исправим последний message
+git commit --amend -m "Add c, update a"
+git log --oneline
+```
+
+---
+
+<KnowledgeCheck
+  question="Junior сделал `git commit -am 'add new feature'`, но в коммит не попал новый файл `new_feature.py`. Почему?"
+  answer="Флаг -a в `git commit -am` добавляет ТОЛЬКО изменения отслеживаемых файлов (модифицированные и удалённые). Untracked файлы (новые, которые ещё не были в репо) -a НЕ добавляет. `new_feature.py` — untracked, поэтому остался без commit. Правильные варианты: 1) `git add new_feature.py && git commit -m 'add new feature'`, 2) `git add -A && git commit -m 'add new feature'` (флаг -A добавляет всё включая untracked), 3) `git add . && git commit -m '...'`. Запомните: `commit -am` — это сокращение для «commit с автоматическим add только tracked файлов». Это частый источник путаницы для junior. Если хочется «всё-всё» — `git add -A`."
+/>

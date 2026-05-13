@@ -1,0 +1,59 @@
+{
+  "lessonSlug": "18-ci-cd-github-actions/04-branch-protection",
+  "moduleId": "18-ci-cd-github-actions",
+  "_meta": {
+    "idPrefix": "git-m18-04"
+  },
+  "questions": [
+    {
+      "id": "git-m18-04-q1",
+      "type": "multiple-choice",
+      "question": "В branch protection включена опция 'Dismiss stale pull request approvals when new commits are pushed'. Какую конкретную атаку это предотвращает?",
+      "options": [
+        {"id": "a", "text": "Brute-force atak на GitHub аккаунт"},
+        {"id": "b", "text": "Сценарий: junior получает approval на PR, потом push дополнительный commit с уязвимостью; без dismiss-stale предыдущий approval действителен, можно merge с уязвимостью"},
+        {"id": "c", "text": "DDoS на GitHub server"},
+        {"id": "d", "text": "Memory leak в CI runner"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Это критическая защита от bait-and-switch attack. Сценарий: PR содержит benign change -> reviewer approve -> автор push дополнительный commit с уязвимостью (или сам merge без approval нового кода). Без dismiss-stale предыдущий approval действителен для всех commits. С dismiss-stale: каждый новый push снимает все approvals, нужен новый review. Это must-have для security-conscious команд. 'Require approval of the most recent reviewable push' — ещё строже: даже одобрен последний commit, не все промежуточные.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m18-04-q2",
+      "type": "multiple-choice",
+      "question": "CODEOWNERS файл `/models/finance/ @company/finance-analytics` с включённым 'Require review from Code Owners'. Junior из data-engineering team открыл PR изменяющий `models/finance/revenue.sql`. Что произойдёт?",
+      "options": [
+        {"id": "a", "text": "Любой member любой team может approve, merge доступен"},
+        {"id": "b", "text": "Требуется approval от хотя бы одного member команды @company/finance-analytics. Approval от data-engineering без finance-analytics — не считается"},
+        {"id": "c", "text": "Junior автоматически запрещается merge — он не finance team"},
+        {"id": "d", "text": "GitHub автоматически назначает junior-у member-а finance-analytics"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "CODEOWNERS + 'Require review from Code Owners' = approval от code owner необходим. GitHub auto-request review от team @company/finance-analytics. Любой member этой team — review/approve. Approval от другой team (data-engineering) — посчитан для общего approval count, но НЕ удовлетворяет CODEOWNERS requirement. Junior может открыть PR, но merge заблокирован до получения finance-analytics approval. Это enforces domain ownership: финансовые модели не merge без finance team review.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m18-04-q3",
+      "type": "multiple-choice",
+      "question": "Опция 'Require branches to be up to date before merging' в branch protection приводит к какому tradeoff в большой команде?",
+      "options": [
+        {"id": "a", "text": "Никакого tradeoff — это всегда хорошо"},
+        {"id": "b", "text": "Защита от semantic conflicts (твой код работает в branch, но не работает с обновлённым main). НО: при многих активных PR появляется 'endless rebase loop' — пока junior rebase+wait CI, другой PR merged, нужно rebase снова. Merge Queue решает"},
+        {"id": "c", "text": "Замедление git pull в 10x"},
+        {"id": "d", "text": "Force push становится обязательным каждый раз"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Tradeoff важен для понимания. Безопасность: CI запускается на финальном коде (main + твоё), ловит semantic conflicts (твой код использует foo(), а в main переименовали в foo_new() — без require-up-to-date merge пройдёт, тесты упадут в prod). Cost: при 10+ active PR появляется race — все хотят rebase на свежий main, но кто-то всегда merge раньше, нужно rebase снова. Merge Queue (GitHub feature 2024+) решает: queue auto-rebase каждый PR, запускает CI, auto-merge если green. Tradeoff между safety и velocity.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m18-04-q4",
+      "type": "true-false",
+      "question": "Включение 'Include administrators' в branch protection лучше **не делать**, потому что admin (CTO, tech lead) должен иметь возможность hot-fix в emergency, обходя правила.",
+      "correctAnswer": false,
+      "explanation": "ОБРАТНОЕ. Include administrators — должно быть ВКЛЮЧЕНО. Иначе правила декоративные — admin может обойти, что обнуляет защиту. Реальные emergency hotfixes — все равно через PR (минимальный single-line fix, fast review). 'Принцип, что admin делает direct push' — anti-pattern в 2026 mature team. Audit log важен, accountability важна. Если действительно нужен emergency bypass — есть Settings: 'Allow bypass' для определённых users/roles с audit trail. Просто пропуск всех правил для admin = no protection.",
+      "bloomLevel": "analytical"
+    }
+  ]
+}

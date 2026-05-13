@@ -1,0 +1,350 @@
+---
+title: "git stash — спрятать незавершённую работу"
+description: "stash push/pop/apply/list/show. Флаги -u (untracked), -a (включая ignored), --message для именованных. Когда юзать (быстрая переключка контекста) и когда нет (для долгого WIP лучше ветка)."
+order: 1
+difficulty: "beginner"
+estimatedTime: 25
+topics: ["stash", "context-switch", "WIP", "untracked", "save-work"]
+---
+
+# git stash — спрятать незавершённую работу
+
+Классический сценарий: ты пишешь новую feature в `feature/users-pipeline`, изменил 5 файлов, ещё не закоммитил. Тут в Slack — «срочный hotfix на проде, нужен ты!». Нужно переключиться на `main`, сделать hotfix, потом вернуться. Но `git switch main` ругается: «у тебя несохранённые изменения, могут потеряться».
+
+`git stash` — это «положить текущие изменения в сторону, чтобы вернуться к ним потом». Spec мест есть отдельное хранилище (stash stack), куда можно положить snapshot работы, переключиться куда угодно, и потом «достать обратно». Это инструмент **быстрой переключки контекста**.
+
+В этом уроке: как stash работает под капотом, отличие push/pop/apply, нюансы с untracked файлами, и когда вместо stash лучше создать ветку.
+
+---
+
+## Базовая модель: stash как stack
+
+Stash — это **stack** (LIFO) специальных коммитов в namespace `refs/stash`. Каждый раз `git stash push` создаёт пару коммитов:
+
+- Один представляет состояние **index** (то что было staged).
+- Второй — состояние **working tree**.
+
+Они привязаны к ссылке `stash@{N}`, где N — позиция в стеке (0 — самый свежий).
+
+```bash
+$ git stash list
+stash@{0}: WIP on feature/users-pipeline: abc1234 Add transform
+stash@{1}: WIP on feature/users-pipeline: def5678 Initial
+```
+
+После `git stash push` working tree возвращается к состоянию HEAD — как будто ты только что сделал checkout без изменений.
+
+<DiagramContainer title="git stash push: куда что уходит">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox tooltip="Перед stash: HEAD + index с изменениями + working tree с изменениями">До stash</DataBox>
+      <FlowNode tooltip="">HEAD: clean</FlowNode>
+      <FlowNode tooltip="staged изменения">index: modified</FlowNode>
+      <FlowNode tooltip="unstaged изменения">wt: modified</FlowNode>
+    </FlowRow>
+    <FlowRow>
+      <DataBox tooltip="После git stash push: создан новый stash entry с обоими snapshot-ами, working tree очищен">После stash</DataBox>
+      <FlowNode tooltip="">HEAD: clean</FlowNode>
+      <FlowNode tooltip="index синхронизирован с HEAD">index: clean</FlowNode>
+      <FlowNode tooltip="working tree чистый">wt: clean</FlowNode>
+    </FlowRow>
+    <FlowRow>
+      <DataBox tooltip="Сохранено отдельно в refs/stash">{'stash@{0}'}</DataBox>
+      <FlowNode tooltip="snapshot index">index snapshot</FlowNode>
+      <FlowNode tooltip="snapshot working tree">wt snapshot</FlowNode>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+---
+
+## Базовый workflow
+
+```bash
+# Работаю над feature
+$ git status
+On branch feature/users-pipeline
+Changes not staged for commit:
+  modified:   dags/etl_users.py
+  modified:   tests/test_etl.py
+
+# Срочный hotfix!
+$ git stash push -m "WIP users pipeline transformations"
+Saved working directory and index state On feature/users-pipeline: WIP users pipeline transformations
+
+$ git status
+On branch feature/users-pipeline
+nothing to commit, working tree clean
+
+# Переключаемся на hotfix
+$ git switch -c hotfix/critical main
+$ vim dags/critical.py
+$ git commit -am "Fix critical bug"
+$ git switch main && git merge hotfix/critical && git push
+
+# Возвращаемся
+$ git switch feature/users-pipeline
+$ git stash pop
+On branch feature/users-pipeline
+Changes not staged for commit:
+  modified:   dags/etl_users.py
+  modified:   tests/test_etl.py
+Dropped refs/stash@{0} (a1b2c3d4...)
+```
+
+Работа вернулась, `stash@{0}` удалён из стека.
+
+---
+
+## push vs pop vs apply
+
+Три основные команды:
+
+| Команда | Что делает |
+|---|---|
+| `git stash push` | Положить текущие изменения в stash, очистить working tree |
+| `git stash pop` | Достать `stash@{0}`, удалить из стека |
+| `git stash apply` | Достать `stash@{0}`, **оставить** в стеке (можно применить ещё раз) |
+| `git stash drop` | Удалить `stash@{0}` без применения |
+| `git stash list` | Показать стек |
+| `git stash show -p stash@{N}` | Показать diff конкретного stash |
+| `git stash clear` | Очистить весь стек (опасно — необратимо в gc-окно ~14 дней) |
+
+**Когда `apply` лучше `pop`**: если ты не уверен, что stash правильно применится без конфликтов на текущую ветку. `apply` оставит stash в стеке — конфликт можно abort-нуть и попробовать на другой ветке. `pop` при конфликте оставляет stash в стеке (защитное поведение Git), но в success-case удаляет — менее предсказуемо.
+
+<Callout type="tip">
+Для junior рекомендую привычку **всегда apply + drop** вместо `pop`. Это explicit: ты явно проверил, что применилось правильно, потом сам удалил. Минус — два шага вместо одного.
+</Callout>
+
+---
+
+## Untracked файлы: -u и -a
+
+По умолчанию `git stash push` **не** трогает untracked файлы (новые файлы, не добавленные через `git add`). Это часто sorpresa:
+
+```bash
+$ git status
+Untracked files:
+  dags/new_dag.py
+
+$ git stash push
+No local changes to save           # Git не считает untracked за «изменения»
+
+$ git switch main
+# new_dag.py всё ещё на диске — он перешёл с тобой на main!
+```
+
+Чтобы включить untracked: `-u` (`--include-untracked`):
+
+```bash
+$ git stash push -u -m "WIP with new file"
+Saved working directory and index state On feature: WIP with new file
+
+$ ls dags/
+etl_users.py                       # new_dag.py исчез — он в stash
+```
+
+Ещё агрессивнее — `-a` (`--all`): включить и **ignored** файлы (из .gitignore). Редко нужно, но иногда полезно (например, забэкапить состояние `__pycache__/` для дебага).
+
+---
+
+## Сценарий: stash только часть изменений
+
+`git stash push -p` (patch mode) — интерактивный выбор кусков для stash:
+
+```bash
+$ git stash push -p -m "Just the etl changes"
+diff --git a/dags/etl_users.py b/dags/etl_users.py
+@@ -10,3 +10,5 @@
++    transform_users(df)
++    validate_schema(df)
+Stash this hunk [y,n,q,a,d,e,?]?
+```
+
+Удобно когда в working tree разные feature вперемешку, и хочется отщепить только часть. Похоже на `git add -p` для granular staging.
+
+Альтернатива — `git stash push -- <pathspec>`: stash только указанные файлы:
+
+```bash
+$ git stash push -- dags/etl_users.py
+# Только этот файл в stash, остальное в working tree
+```
+
+---
+
+## Named stash и поиск
+
+`-m "message"` (`--message`) даёт человекочитаемое имя:
+
+```bash
+$ git stash push -m "WIP: users пайплайн валидация"
+$ git stash push -u -m "WIP: hotfix experiment"
+
+$ git stash list
+stash@{0}: On feature: WIP: hotfix experiment
+stash@{1}: On feature: WIP: users пайплайн валидация
+```
+
+Применить конкретный stash: `git stash apply stash@{1}` или короче `git stash apply 1`.
+
+---
+
+## Show — посмотреть содержимое stash
+
+```bash
+$ git stash show stash@{0}
+ dags/etl_users.py | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+$ git stash show -p stash@{0}    # полный diff
+diff --git a/dags/etl_users.py b/dags/etl_users.py
+@@ -10,3 +10,5 @@
++    transform_users(df)
++    validate_schema(df)
+```
+
+Полезно перед apply — посмотреть, что точно вернётся.
+
+---
+
+## Конфликты при pop / apply
+
+Если ты сделал stash на одной ветке, а pop-нул на другой (или ветка ушла вперёд) — может быть конфликт:
+
+```bash
+$ git stash pop
+Auto-merging dags/etl_users.py
+CONFLICT (content): Merge conflict in dags/etl_users.py
+The stash entry is kept in case you need it again.
+```
+
+Поведение Git: при конфликте `pop` **не удаляет** stash (защита). Чтобы продолжить:
+
+1. Разрешить конфликт руками (модуль 06).
+2. `git add` разрешённые файлы.
+3. **Не** делать `git commit` — это применение, не merge.
+4. После — вручную `git stash drop` чтобы убрать stash.
+
+Альтернатива — `git stash apply --abort`? Нет, такой команды нет. Просто `git restore --staged . && git restore .` чтобы вернуть состояние до apply.
+
+---
+
+## DE-сценарий: hotfix во время feature work
+
+Ты пишешь новый DAG для users в Airflow. 5 файлов изменены, есть untracked `dags/new_dag.py`.
+
+```bash
+$ git status
+On branch feature/users
+Changes not staged for commit:
+  modified: dags/etl_users.py
+  modified: tests/test_users.py
+Untracked files:
+  dags/new_dag.py
+```
+
+В Slack: **«Hotfix! Прод упал!»**
+
+```bash
+# Сохраняем ВСЁ, включая untracked
+$ git stash push -u -m "WIP users feature, 5 файлов + new_dag.py"
+Saved working directory and index state On feature/users: WIP users feature...
+
+# Hotfix flow
+$ git switch main && git pull
+$ git switch -c hotfix/dag-crash
+$ vim dags/critical.py     # fix
+$ git commit -am "fix: handle null in critical DAG"
+$ git push origin hotfix/dag-crash
+$ gh pr create --base main
+# PR замержен через 10 минут
+
+# Возвращаемся
+$ git switch feature/users
+$ git stash list
+stash@{0}: On feature/users: WIP users feature, 5 файлов + new_dag.py
+
+$ git stash pop
+# Все 5 модификаций + new_dag.py вернулись
+```
+
+Полная переключка контекста заняла 30 секунд up и down.
+
+---
+
+## Когда stash — НЕ правильный инструмент
+
+Stash отлично для **краткой** (минуты, часы) переключки контекста. Плохой выбор для:
+
+1. **WIP на дни / недели** — stash легко забыть, потом терять mental thread. Лучше создать ветку `wip/users-feature` и регулярно `git commit -m "WIP"`.
+2. **Шейринг кода с коллегой** — stash локальный, не пушится. Нужен PR / patch.
+3. **Бэкап важной работы** — если случайно `git stash clear` или прошёл GC — потеря. Закоммить в branch для надёжности.
+4. **Много стэшей** — 20 штук с `WIP` именами всех давно забыл. После 3-4 стэшей переходи на ветки.
+
+<Callout type="warning">
+`git stash` объекты живут в .git/objects, но **могут быть удалены garbage collection** если потеряют reachability (например, после `git stash drop` или `clear`). Reflog stash (`git reflog show stash`) хранит ~30 дней по умолчанию. Для надёжной long-term хранения — branch.
+</Callout>
+
+---
+
+## Альтернатива stash: ad-hoc commit на ветке
+
+Часто `git switch -c wip-temp && git commit -am "WIP"` лучше stash:
+
+```bash
+# Вместо stash
+$ git switch -c wip/users
+$ git add . && git commit -m "WIP: continue tomorrow"
+
+# Потом возврат
+$ git switch feature/users
+$ git merge wip/users --squash       # вернуть изменения
+$ git restore --staged . && git restore .   # или просто rebase
+
+# Или
+$ git switch wip/users
+$ git reset --soft HEAD~1     # развернуть commit обратно в working tree
+$ # продолжать работу
+```
+
+Преимущества: branch не пропадёт при `stash clear`, у него message и метки времени, можно даже push на remote для бэкапа.
+
+---
+
+## Попробуй сам
+
+```bash
+$ mkdir stash-demo && cd stash-demo
+$ git init
+$ echo "main" > main.py && git add . && git commit -m "Initial"
+
+# Делаем «WIP»
+$ echo "working" > main.py
+$ echo "untracked" > new.py
+$ git stash push -m "WIP basic"     # untracked НЕ попадёт
+
+$ ls
+new.py                              # остался untracked
+
+$ git stash list
+stash@{0}: On main: WIP basic
+
+$ git stash pop                     # вернули main.py
+$ cat main.py                       # working
+
+# Теперь с -u
+$ git stash push -u -m "WIP with untracked"
+$ ls                                # new.py исчез, в stash
+$ git stash pop                     # вернули
+
+# Show
+$ git stash show -p stash@{0}       # увидим diff (но pop уже сделан)
+```
+
+---
+
+## Killer takeaway
+
+`git stash push -u -m "message"` — спасение для быстрой переключки контекста (hotfix во время feature). Запомни `-u` (untracked), `-m` (имя), `apply + drop` лучше `pop` для junior (explicit). Для work-in-progress на дни — создавай ветку с regular commits, не stash. Stash может быть удалён GC, ветка — нет.
+
+<KnowledgeCheck quizSlug="10-stash-tags-cherry-pick/01-stash" />

@@ -1,0 +1,511 @@
+---
+title: "Восстановление потерянных коммитов: fsck, dangling, lost-found"
+description: "Orphan commits (после reset/rebase): git fsck --lost-found, git fsck --unreachable. Lost branches: git for-each-ref. Revive: git branch <name> <sha>. Recovery когда reflog уже пустой или вне 90 дней."
+order: 2
+difficulty: "intermediate"
+estimatedTime: 25
+topics: ["fsck", "dangling", "lost-found", "orphan-commits", "unreachable", "gc", "for-each-ref"]
+---
+
+# Восстановление потерянных коммитов: fsck, dangling, lost-found
+
+В уроке 01 мы научились возвращать commits через `git reflog`. Это работает, пока reflog содержит запись. Что делать, если:
+
+- Reflog уже **gc-нут** (старше 90 дней)?
+- Ты случайно удалил `.git/logs/` (всё ещё бывает)?
+- Кто-то сделал `git reflog expire --expire=now --all` (manual cleanup)?
+- Это **новый clone** репо, где reflog ещё не накопился?
+
+Для этих случаев есть `git fsck`. Он проверяет **физическое** состояние objects в `.git/objects/`, находит **orphan commits** — те, на которые нет refs, но которые **ещё не удалены** garbage collector-ом.
+
+В этом уроке:
+
+1. Что такое `dangling` и `unreachable` objects.
+2. `git fsck --lost-found` — поиск orphans.
+3. Восстановление: `git branch <name> <sha>`.
+4. Когда fsck не помогает (после gc).
+5. DE-specific сценарии.
+
+---
+
+## Анатомия orphan commits
+
+Сначала — теория. В `.git/objects/` хранятся **все** Git objects: blobs (файлы), trees (директории), commits. Хеш-имена.
+
+```
+.git/objects/
+├── ab/
+│   └── c1234567890abcdef1234567890abcdef1234  # blob или commit или tree
+├── de/
+│   └── adbeef1234567890deadbeef1234567890dead
+└── pack/
+    └── pack-abcdef.pack    # упакованные objects
+```
+
+Когда ты делаешь `git commit`, Git создаёт новый object с SHA. Ref-ы (`refs/heads/main`, `refs/heads/feature`) — это **указатели** на конкретные commits:
+
+```
+.git/refs/heads/main          # содержит SHA текущего HEAD на main
+.git/refs/heads/feat-pipeline # SHA HEAD на feat-pipeline
+```
+
+**Reachable** object = есть путь от **какого-то** ref до этого object (через chain of commits и trees). **Unreachable** = ни один ref не ведёт к этому объекту.
+
+Что делает «unreachable»:
+
+1. `git reset --hard HEAD~5` — старый HEAD-5 коммит становится unreachable (ref сдвинулся).
+2. `git branch -D feat/x` — все commits, эксклюзивные этой ветки, становятся unreachable.
+3. `git rebase` — старые pre-rebase commits становятся unreachable.
+4. Force push — old chain на remote становится unreachable.
+
+Unreachable objects живут в `.git/objects/` пока не запустится **garbage collector** (`git gc`). gc запускается:
+- Автоматически, после некоторых операций (когда loose objects > threshold).
+- Явно — `git gc`, `git gc --aggressive`, `git gc --prune=now`.
+
+Пока не gc-нут — orphan commits можно восстановить через fsck.
+
+---
+
+## git fsck: file system check
+
+`git fsck` проверяет integrity репо. Опции, релевантные для recovery:
+
+```bash
+$ git fsck --help
+```
+
+| Флаг | Что делает |
+|---|---|
+| `--full` | Глубокая проверка всех objects |
+| `--unreachable` | Показать **все** unreachable objects (включая blob, tree) |
+| `--no-reflogs` | Игнорировать reflog при расчёте reachability (treat reflog entries as unreachable) |
+| `--lost-found` | Записать unreachable commits в `.git/lost-found/` |
+| `--dangling` | Показать только dangling objects (default) |
+
+**Dangling vs unreachable** — нюансы:
+
+- **Dangling** — object, на который **никто** не указывает: ни ref, ни другой object.
+- **Unreachable** — object, до которого нельзя дойти от ref-ов.
+
+Все dangling — unreachable, но не наоборот. Unreachable commit может быть «parent unreachable commit-а» — тогда первый не dangling (на него указывает второй), но всё равно unreachable.
+
+Для recovery практически — ищем **dangling commits**.
+
+### Базовый запуск
+
+```bash
+$ git fsck
+Checking object directories: 100% (256/256), done.
+Checking objects: 100% (12345/12345), done.
+dangling commit abcdef1234567890abcdef1234567890abcdef12
+dangling commit fedcba9876543210fedcba9876543210fedcba98
+dangling blob 1234567890abcdef1234567890abcdef12345678
+```
+
+Видишь list: dangling commits + blobs. **Каждый commit** — потенциально потерянная работа. Каждый blob — обычно остался от старой версии файла (не critical для recovery, blob уже извлечён в commit).
+
+### Что в каждом dangling commit
+
+```bash
+$ git show abcdef1234567890abcdef1234567890abcdef12
+commit abcdef1234567890abcdef1234567890abcdef12
+Author: user <user@example.com>
+Date:   Mon May 12 14:23:00 2026 +0300
+
+    Add validation logic
+
+diff --git a/dags/etl.py b/dags/etl.py
+index ...
++def validate_input(df):
++    if df.is_empty():
++        raise ValueError("Empty DataFrame")
+```
+
+Видишь message, author, дату, diff. Это **тот самый** потерянный commit. Решаешь — нужен он или нет.
+
+Если да:
+
+```bash
+# Восстанавливаем как ветку
+$ git branch recovered-work abcdef1
+
+$ git log recovered-work --oneline
+abcdef1 Add validation logic
+xyz9876 (older commit)
+...
+
+# Теперь можно cherry-pick, merge, или работать дальше
+$ git checkout recovered-work
+```
+
+---
+
+## --lost-found: dump orphans в файлы
+
+```bash
+$ git fsck --lost-found
+Checking object directories: 100% (256/256), done.
+dangling commit abcdef1234567890abcdef1234567890abcdef12
+dangling blob 1234567890abcdef1234567890abcdef12345678
+
+$ ls .git/lost-found/
+commit/
+other/
+
+$ ls .git/lost-found/commit/
+abcdef1234567890abcdef1234567890abcdef12
+fedcba9876543210fedcba9876543210fedcba98
+
+$ cat .git/lost-found/commit/abcdef1
+# содержимое первого dangling commit (диагностический dump)
+```
+
+Каждый dangling **commit** записан в `.git/lost-found/commit/`, blobs — в `.git/lost-found/other/`.
+
+Это удобно когда **много** orphans — можно посмотреть какие из них что содержат:
+
+```bash
+$ for sha in .git/lost-found/commit/*; do
+    sha=$(basename $sha)
+    echo "=== $sha ==="
+    git show --stat $sha | head -10
+  done
+```
+
+И выбрать те, которые нужно восстановить.
+
+---
+
+## Сценарий 1: lost work после старого reset
+
+DE сделал `git reset --hard HEAD~5` две недели назад, забыл. Сегодня говорит «а где же мой DAG для analytics_users?». Reflog уже потенциально gc-нут.
+
+```bash
+# Reflog проверка
+$ git reflog | head -50
+# может быть пусто — старое уже expired
+
+# fsck
+$ git fsck --full --unreachable | head -20
+unreachable commit 1a2b3c4d...
+unreachable commit 5e6f7g8h...
+unreachable commit ...
+
+# Один за другим смотрим
+$ git show 1a2b3c4d | head
+commit 1a2b3c4d
+Author: dev
+Date:   2 weeks ago
+    Add analytics_users DAG
+
+# Нашли. Восстанавливаем:
+$ git branch recovered-dag 1a2b3c4d
+$ git log recovered-dag --oneline
+1a2b3c4d (recovered-dag) Add analytics_users DAG
+abc1234 ...
+```
+
+---
+
+## Сценарий 2: lost branch reference
+
+Скрипт случайно сделал `rm -rf .git/refs/heads/feat-*`. Ветки `feat/etl`, `feat/airflow`, `feat/snowflake` пропали:
+
+```bash
+$ git branch
+* main
+# ничего больше нет
+
+# Но objects на диске
+$ git fsck --full
+dangling commit abcdef1
+dangling commit fedcba9
+dangling commit deadbeef
+```
+
+Для каждого dangling — `git show`, смотрим diff, узнаём что это была за ветка, восстанавливаем:
+
+```bash
+$ git show abcdef1 | head -5
+commit abcdef1
+Author: dev
+Date:   ...
+    Refactor S3 sync for performance
+
+# Похоже на feat/snowflake
+$ git branch feat/snowflake abcdef1
+```
+
+Повторяем для каждого dangling, который distinguishable.
+
+<Callout type="tip">
+В большой DE команде обычно есть **runbook** для disaster recovery. Один из шагов — «список activeных branches на конкретную дату» (берётся из CI / GitHub UI / monitoring). Это полезно, когда восстанавливаешь много веток — знать имена.
+</Callout>
+
+---
+
+## git for-each-ref: что есть прямо сейчас
+
+Для diagnostic — посмотреть **полный** список refs:
+
+```bash
+$ git for-each-ref --format='%(refname:short) %(objectname:short) %(committerdate:short)'
+HEAD                       abcdef1 2026-05-13
+main                       abcdef1 2026-05-13
+feat/etl-pipeline          fedcba9 2026-05-12
+origin/main                abcdef1 2026-05-13
+v1.0.0                     1234567 2026-04-15
+```
+
+| Опция | Что выведет |
+|---|---|
+| `%(refname:short)` | Имя без префикса (`main`, не `refs/heads/main`) |
+| `%(objectname:short)` | SHA |
+| `%(committerdate:short)` | Дата последнего commit |
+| `%(authorname)` | Автор |
+| `%(subject)` | Commit message |
+
+Удобно когда репо большой:
+
+```bash
+# Все ветки sorted по дате
+$ git for-each-ref --sort=-committerdate refs/heads/ \
+    --format='%(refname:short) %(committerdate:short)'
+
+main                  2026-05-13
+feat/dbt-refactor     2026-05-12
+feat/airflow-upgrade  2026-05-10
+old/legacy-stuff      2025-12-01
+```
+
+Полезно для cleanup: вижу `old/legacy-stuff` от декабря — наверное, можно удалить.
+
+---
+
+## Когда fsck не помогает
+
+`git fsck` находит **только то, что есть на диске**. Если уже `git gc` запустился и удалил orphan commits — fsck их не покажет.
+
+Признаки that gc уже сработал:
+
+```bash
+$ ls .git/objects/
+# почти пусто, всё запаковано
+
+$ ls .git/objects/pack/
+pack-abcdef.pack
+pack-abcdef.idx
+```
+
+Все objects в pack-файле — gc запустился и оптимизировал. Loose objects (`.git/objects/ab/c123...`) удалены, если они были unreachable.
+
+В этом случае **местные** опции исчерпаны. Что осталось:
+
+### Восстановление с remote
+
+Если репо был запушен — orphan commits могут быть на remote (если не было force-push). Можно сделать **новый clone**:
+
+```bash
+$ cd /tmp
+$ git clone --mirror git@github.com:org/repo.git
+$ cd repo.git
+$ git log --all --oneline | grep "validate_input"
+abcdef1 Add validate_input function
+```
+
+Затем перенести нужные коммиты в основной clone (cherry-pick).
+
+### Restoring from coworker's clone
+
+У коллеги local clone содержит тот же commit:
+
+```bash
+# Коллега
+$ git log feat/etl --oneline
+abcdef1 Add validate_input
+xyz9876 ...
+
+$ git bundle create /tmp/recovery.bundle abcdef1~5..abcdef1
+
+# Отдаёт тебе recovery.bundle (USB / cloud / scp)
+
+# Ты
+$ git bundle verify /tmp/recovery.bundle
+$ git fetch /tmp/recovery.bundle abcdef1:recovered-work
+```
+
+`git bundle` — формат экспорта части истории в один файл. Используется для **offline** transfer.
+
+### Backup сервиса (Github Codeshow, GitLab Mirror)
+
+В корпоративных setup-ах часто есть auto-backup всех репо. Tech lead имеет доступ.
+
+### Последний случай — потеряно
+
+Если ни локально, ни у коллег, ни на сервере коммита нет — **потеряно навсегда**. Это редкость, но возможно (force-push в personal репо без backup).
+
+Profilactic mesure: для важных feature-веток — `git push origin feat-x` каждые несколько часов. Push = backup.
+
+---
+
+## Сценарий 3: восстановление после deleted .git
+
+Самое страшное — `rm -rf .git/`. Весь репо стёрся:
+
+```bash
+$ ls -la
+total 8
+drwxr-xr-x   7 user staff  224 May 13 10:00 .
+drwxr-xr-x  10 user staff  320 May 13 10:00 ..
+-rw-r--r--   1 user staff  123 May 13 10:00 README.md
+-rw-r--r--   1 user staff  456 May 13 10:00 dag.py
+# .git нет
+```
+
+Все uncommitted работы — в `dag.py`, `README.md` — целы. Истории нет.
+
+Recovery options:
+
+1. **OS-level undelete** (rare):
+   - macOS Time Machine — если включён.
+   - Linux ext4 — `extundelete` (если не trim-нуто).
+   - btrfs/zfs snapshots — если есть.
+
+2. **Re-clone**:
+   ```bash
+   $ git clone <remote> /tmp/recovery
+   $ cp -r /tmp/recovery/.git .git
+   ```
+   Файлы локально остаются, история восстановлена с remote. Если есть uncommitted работа — `git status` покажет diff против remote main.
+
+3. **Coworker bundle** (как выше).
+
+---
+
+## DE сценарии recovery
+
+### dbt manifest corrupted
+
+Не Git-related, но DE-relevant:
+
+```bash
+$ dbt run
+Error: Failed to parse manifest.json
+```
+
+Удалить и пересобрать:
+
+```bash
+$ rm -rf target/
+$ dbt clean
+$ dbt compile
+```
+
+Артефакты регенерируются. Это **не recovery от Git** — `target/` обычно в `.gitignore`.
+
+### Airflow DAG history
+
+Если потерял старую версию DAG-файла:
+
+```bash
+$ git log --all -p -- dags/etl_users.py | less
+# покажет diff каждого изменения этого файла
+
+$ git log --all --oneline -- dags/etl_users.py
+abc1234 Update etl_users
+fedcba9 Add validation
+9876543 Initial DAG
+
+# Достаём старую версию
+$ git show fedcba9:dags/etl_users.py > /tmp/old_dag.py
+```
+
+Это работает даже если файл сейчас удалён — Git помнит всю историю всех файлов (если они когда-то были закоммичены).
+
+### Lost stash
+
+`git stash` создаёт записи в `refs/stash`. `git stash drop` удаляет. Если случайно drop-нул:
+
+```bash
+$ git fsck --unreachable | grep commit
+unreachable commit abcdef1
+unreachable commit fedcba9
+
+$ git show fedcba9
+# проверь, выглядит ли это как stash (заголовок "WIP on branch...")
+
+$ git stash apply fedcba9
+```
+
+Stash commit имеет 3 parents (HEAD, index, untracked), unusual structure. `git show` его опознаваем.
+
+---
+
+## Профилактика: regular check
+
+В critical-DE репо полезно настроить **periodic fsck**:
+
+```bash
+# Cron job, раз в неделю
+$ git fsck --full --no-reflogs --unreachable > /tmp/fsck-$(date +%Y%m%d).log
+$ grep -c "dangling" /tmp/fsck-*.log
+```
+
+Если внезапно количество dangling выросло — кто-то делал rewrites, посмотри.
+
+`git maintenance` (см. урок 04) делает это automatically.
+
+---
+
+## Попробуй сам
+
+Полный цикл lose -> fsck -> restore:
+
+```bash
+$ mkdir fsck-demo && cd fsck-demo
+$ git init
+
+# Создаём работу
+$ for i in {1..5}; do
+    echo "version $i" > file.txt
+    git add file.txt
+    git commit -m "Commit $i"
+  done
+
+# Создаём ветку с эксклюзивной работой
+$ git checkout -b feat/lost-work
+$ echo "important feature" > critical.py
+$ git add critical.py
+$ git commit -m "Add critical feature"
+
+# Возвращаемся на main и удаляем ветку
+$ git checkout main
+$ git branch -D feat/lost-work
+Deleted branch feat/lost-work (was XYZ).
+
+# Симулируем reflog cleanup (никогда не делай это в реальности!)
+$ git reflog expire --expire=now --all
+$ git reflog | head
+# может быть пусто
+
+# fsck
+$ git fsck --lost-found
+dangling commit XYZ
+
+# Восстанавливаем
+$ git branch recovered-feat XYZ
+$ git log recovered-feat --oneline
+XYZ Add critical feature
+...
+
+$ ls
+critical.py file.txt    # critical.py вернулся
+```
+
+---
+
+## Killer takeaway
+
+`git fsck` — recovery когда reflog не помогает. `--lost-found` записывает orphan commits в `.git/lost-found/`. **Dangling** = no ref points to it; **unreachable** = no path from any ref. Восстановление: `git branch <name> <sha>`. После `git gc` orphan commits удаляются — fsck бессилен. План B: clone с remote, bundle от коллеги. `git for-each-ref` — diagnostic список refs. Для critical репо — periodic fsck в cron + push regular как backup. Профилактика лучше: не делай force-push в production, branch protection (модуль 18), wip-commit перед рискованной операцией.
+
+<KnowledgeCheck quizSlug="19-recovery/02-recovering-deleted-commits" />

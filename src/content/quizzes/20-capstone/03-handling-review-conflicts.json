@@ -1,0 +1,59 @@
+{
+  "lessonSlug": "20-capstone/03-handling-review-conflicts",
+  "moduleId": "20-capstone",
+  "_meta": {
+    "idPrefix": "git-m20-03"
+  },
+  "questions": [
+    {
+      "id": "git-m20-03-q1",
+      "type": "multiple-choice",
+      "question": "В review junior получил 5 comments разных типов: 'blocker', 'suggestion', 'nit', 'question', 'praise'. Какая правильная reaction strategy?",
+      "options": [
+        {"id": "a", "text": "Игнорировать все"},
+        {"id": "b", "text": "Address каждый по типу: blocker — must fix перед merge; suggestion — обычно accept (reviewer argued reasonably); nit — fix если quick (30 sec) или defer follow-up; question — ответ с reasoning, no code change; praise — short thanks"},
+        {"id": "c", "text": "Fix только blockers, остальные ignore"},
+        {"id": "d", "text": "Спорить со всеми и не делать изменений"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Распознавание типа comment — important skill. Blocker: 'this is wrong, must fix' — обязательный fix, иначе merge blocked. Suggestion: 'I'd recommend X' — обычно accept с benefit of doubt, reviewer thought about it. Nit: 'nit: prefer X over Y' — minor, fix если quick. Question: 'why X instead of Y?' — answer с reasoning, не code change. Praise: 'nice design' — short thanks, acknowledge. Игнорирование — anti-pattern, разрушает team trust. Споры со всеми — defensive, junior не готов к feedback.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m20-03-q2",
+      "type": "multiple-choice",
+      "question": "Пока junior работал над review, main продвинулся: PR #790 merged. Команда требует 'rebase on main before merge' (Require branches up-to-date). Команды для rebase?",
+      "options": [
+        {"id": "a", "text": "git merge origin/main"},
+        {"id": "b", "text": "git fetch origin && git rebase origin/main -> разрешить конфликты -> git rebase --continue -> git push --force-with-lease"},
+        {"id": "c", "text": "git reset --hard origin/main"},
+        {"id": "d", "text": "git pull"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Стандартный rebase flow на updated main: (1) git fetch origin — обновить local refs origin/main; (2) git rebase origin/main — пересажать твои commits на новый HEAD main; (3) если конфликт — разрешить вручную, git add resolved files, git rebase --continue; (4) после рестoration history — git push --force-with-lease (история переписана, force нужен). git merge — создал бы merge commit (не linear). git reset --hard — стёр бы локальные commits. git pull без --rebase — auto merge с тем же эффектом.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m20-03-q3",
+      "type": "multiple-choice",
+      "question": "Во время rebase появился конфликт в shared file `dags/shared/snowflake_loaders.py`. Junior не уверен какую версию выбрать. Что НЕ должен делать?",
+      "options": [
+        {"id": "a", "text": "Открыть файл, прочитать оба варианта <<<<<<< / ======= / >>>>>>>>, понять semantic difference"},
+        {"id": "b", "text": "Если непонятно — спросить reviewer в PR commentе или Slack DM: 'Conflict in snowflake_loaders.py — which to use?'"},
+        {"id": "c", "text": "Mechanically взять 'свою' версию (HEAD) без понимания, чтобы быстрее закончить — без проверки semantic correctness"},
+        {"id": "d", "text": "После resolve проверить локально: pytest, ruff, mypy"}
+      ],
+      "correctAnswer": "c",
+      "explanation": "Mechanical resolve без понимания semantic difference — главный source bugs после rebase. Сценарий: main изменил default behavior (ON_ERROR='ABORT' вместо 'CONTINUE'). Mechanical resolve 'оставь моё' — return старого поведения, breakage. Правильно: (1) read both sides; (2) think semantic — что correct?; (3) если unclear — ask reviewer; (4) verify локально tests after resolve. Это **семантический conflict resolution**, не текстовый.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m20-03-q4",
+      "type": "true-false",
+      "question": "На свою feature ветку (с открытым PR) `git push --force-with-lease` после rebase — это безопасно и стандартно. На shared main / develop ветке force push — НИКОГДА не делать (катастрофа для команды).",
+      "correctAnswer": true,
+      "explanation": "Feature branch — personal scope. Force push нормален: ты переписал свою историю, push нужен. --force-with-lease защищает от случайного overwrite чужого push в твою ветку. Main / develop / release/* — shared. Force push: переписывает историю, у всех коллег broken local main, all PRs based on old main — broken, history audit разрушается. Branch protection в normal-mature репо блокирует force push в main (модуль 18). Если main force-pushed — это **incident**, команда тратит часы на recovery.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

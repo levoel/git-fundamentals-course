@@ -1,0 +1,357 @@
+---
+title: "Three-way merge — слияние с merge commit"
+description: "Когда нужен three-way merge, что такое merge base, как Git создаёт merge commit, git merge --no-ff для PR history"
+order: 4
+difficulty: "beginner"
+estimatedTime: 18
+topics: ["Git", "Merge", "Three-way merge", "Merge commit", "Merge base"]
+---
+
+# Three-way merge — слияние с merge commit
+
+В предыдущем уроке мы разобрали fast-forward merge — линейный сценарий. Здесь — про **three-way merge**, который происходит, когда две ветки разошлись, и нужно явно их объединить с созданием **merge commit**. Это основной механизм слияния в реальной командной работе.
+
+После урока вы будете понимать: что такое merge base, как Git понимает, что мержить, что такое merge commit с двумя parent, и почему `git merge --no-ff` — типичный выбор для PR в проде.
+
+---
+
+## Когда нужен three-way merge
+
+Three-way merge нужен, когда **обе ветки имеют коммиты, не известные другой**. Их история «разошлась» от общего предка:
+
+<DiagramContainer title="Расходящаяся история — кандидат на three-way merge" color="indigo">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="C0" variant="highlight" tooltip="Merge base — общий предок обеих веток. От него обе ветки 'отпочковались'">Merge base C0</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="main" tooltip="После C0 на main появились коммиты M1, M2">C0 -> M1 -> M2</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="feature/x" tooltip="После C0 на feature/x появились коммиты F1, F2, F3">C0 -> F1 -> F2 -> F3</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Задача merge" tooltip="Создать новый коммит M3, который содержит изменения и от M2 (со стороны main), и от F3 (со стороны feature)">Объединить</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+В этом сценарии fast-forward невозможен: чтобы main догнала feature/x, нужно «потерять» коммиты M1, M2. Вместо этого Git создаёт **merge commit** — новый коммит с двумя parent.
+
+---
+
+## Что такое merge base
+
+**Merge base** — это **самый недавний общий предок** двух веток. Точка, где они «разошлись».
+
+```bash
+git merge-base main feature/x
+# C0 SHA
+```
+
+Это plumbing-команда, которая показывает merge base. На практике вы её редко вызываете напрямую, но Git использует её при каждом merge.
+
+Для simple-случаев merge base очевиден: точка, откуда вы создали feature-ветку. Но в сложных историях (когда обе ветки несколько раз мержились друг в друга) merge base — это нетривиальный вопрос. Git использует алгоритм для поиска **best common ancestor**.
+
+---
+
+## Как Git делает three-way merge
+
+Алгоритм:
+
+<DiagramContainer title="Алгоритм three-way merge" color="purple">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="1. Найти merge base" tooltip="Самый недавний общий предок двух веток. Это база для сравнения" variant="highlight">Base C0</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="2. Diff base ↔ main" tooltip="Что изменилось на main с момента C0 до M2">∆_main</DataBox>
+      <DataBox label="3. Diff base ↔ feature" tooltip="Что изменилось на feature с момента C0 до F3">∆_feature</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="4. Объединить ∆" tooltip="Если изменения в разных файлах / разных частях файла — Git объединяет автоматически. Если в одних и тех же местах — это КОНФЛИКТ">Combine</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="5. Создать merge commit" tooltip="Новый commit с двумя parent: M2 и F3. Tree коммита = объединённое состояние" variant="highlight">Merge commit M3</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Три источника — merge base, версия main, версия feature. Отсюда название «three-way».
+
+Если в одном и том же месте файла обе ветки внесли изменения — Git не может выбрать сам и просит **разрешить конфликт**. Подробно про конфликты — модуль 06.
+
+Если конфликтов нет — merge проходит автоматически:
+
+```bash
+git merge feature/x
+# Auto-merging README.md
+# Merge made by the 'ort' strategy.
+#  README.md | 4 ++++
+#  feature.py | 12 ++++++++++++
+#  2 files changed, 16 insertions(+)
+```
+
+`ort` — это **default merge strategy** в Git 2.34+. Раньше был `recursive`. Для junior разницы нет — оба делают three-way merge.
+
+---
+
+## Merge commit изнутри
+
+Merge commit — это commit с двумя (или более) parent:
+
+```bash
+git cat-file -p HEAD
+# tree abc1234...
+# parent f9e8d7...   ← первый parent: предыдущий main (M2)
+# parent c5b6a4...   ← второй parent: верхушка feature/x (F3)
+# author Ivan <ivan@example.com> 1715600000 +0300
+# committer Ivan <ivan@example.com> 1715600000 +0300
+#
+# Merge branch 'feature/x' into main
+```
+
+Первый parent — это **куда мержили** (целевая ветка). Второй parent — **что мержили** (исходная ветка). Этот порядок важен для:
+
+- `git log --first-parent` — показывает только историю по первому parent, игнорирует «внутренности» merged-feature
+- `git revert -m 1 <merge-SHA>` — откатывает merge commit, оставляя версию первого parent (--m 1 = «оставить версию первой родительской ветки»)
+
+<DiagramContainer title="Merge commit имеет 2 parent" color="emerald">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="M3 (merge commit)" variant="highlight" tooltip="Содержит объединённое состояние tree. Метаданные: 2 parent">M3</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Parent 1: M2" tooltip="Куда мержили (target — main). По нему идёт `git log --first-parent`">M2</DataBox>
+      <DataBox label="Parent 2: F3" tooltip="Что мержили (source — feature/x). По нему идёт «вторичная» история">F3</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="История" tooltip="После merge: главная линия main идёт через M3 -> M2 -> M1 -> C0. Feature-линия M3 -> F3 -> F2 -> F1 -> C0. Обе ветки 'сходятся' в M3" variant="highlight">M3 сводит две линии</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+В git log с графом видна структура:
+
+```text
+*   M3 Merge branch 'feature/x' into main
+|\
+| * F3 Add OAuth flow
+| * F2 Refactor auth
+| * F1 Start feature
+* | M2 Fix bug on main
+* | M1 Update README
+|/
+* C0 Initial
+```
+
+Merge commit M3 — это «развилка» сходится в одну точку.
+
+---
+
+## --no-ff: явный merge commit, даже если FF возможен
+
+Сценарий из предыдущего урока: на main не было изменений, можно сделать fast-forward. Но мы хотим **видеть факт merge** в истории:
+
+```bash
+git merge --no-ff feature/x
+```
+
+Это создаст merge commit с двумя parent, даже если технически возможен fast-forward. Зачем:
+
+<DiagramContainer title="Зачем принудительный --no-ff для PR" color="amber">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="FF merge" tooltip="История линейная, F1, F2, F3 - просто часть main. Невозможно понять, что они были одной фичей">main: C0 -> F1 -> F2 -> F3</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="--no-ff merge" variant="highlight" tooltip="Merge commit виден. Видно, что F1-F3 — это группа коммитов одной фичи. `git revert -m 1` откатит всю фичу одной операцией">main -> M3 (merge feature/x)</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Плюсы --no-ff:
+
+1. **Группировка**: видно, какие коммиты относятся к одной фиче.
+2. **Atomic revert**: можно откатить целую фичу одной командой `git revert -m 1 <merge-SHA>` (модуль 09).
+3. **PR-style history**: GitHub в опции «Create a merge commit» делает именно --no-ff.
+
+Минусы:
+
+1. **Больше merge commits** в истории.
+2. Когда коммитов в feature мало — может выглядеть избыточно.
+
+Большинство командных workflow используют --no-ff для merge feature-веток в main (см. GitHub Flow, модуль 12).
+
+---
+
+## --squash: альтернатива merge commit
+
+Третий вариант — объединить все коммиты feature-ветки в **один** коммит на main:
+
+```bash
+git merge --squash feature/x
+git commit -m "Add OAuth flow (squashed)"
+```
+
+Это не настоящий merge — это применение всех изменений feature/x как один новый коммит на main. У результата:
+
+- **Один** parent (как у обычного commit, не два)
+- **Все** изменения feature/x объединены
+- Коммиты feature/x **не попадают** в историю main
+
+<DiagramContainer title="Сравнение трёх стратегий" color="rose">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Fast-forward" tooltip="main: C0 -> F1 -> F2 -> F3. Линейная история, все коммиты feature видны">FF</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="--no-ff" tooltip="main: C0 -> M2 -> M3 (merge). Merge commit с 2 parent, feature-коммиты в боковой линии">no-ff</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="--squash + commit" tooltip="main: C0 -> M2 -> S (squash). Один новый commit с объединёнными изменениями. История feature/x не сохраняется в main">squash</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Когда что:
+
+- **Fast-forward**: личная работа, простая линейная история.
+- **--no-ff**: командная работа, явная история фич (рекомендуется для PR).
+- **--squash**: когда коммиты на feature-ветке мусорные («wip», «fix typo», «try again») и хочется одного чистого коммита в main. Часто используется в GitHub PR через «Squash and merge».
+
+---
+
+## Прерывание merge
+
+Если merge запущен, и вы хотите его отменить:
+
+```bash
+git merge --abort
+```
+
+Это вернёт состояние до начала merge: HEAD на исходном месте, working tree без изменений merge.
+
+`--abort` особенно полезен при конфликтах: вы видите масштаб проблемы, понимаете «не сейчас» — откатываетесь, делаете что-то ещё.
+
+---
+
+## Просмотр истории с merge
+
+```bash
+# Граф с ветвлениями
+git log --graph --oneline --all
+
+# Только основная линия (без коммитов внутри feature-веток)
+git log --first-parent main
+
+# Полная подробная история включая merge
+git log --merges          # только merge commits
+git log --no-merges       # всё КРОМЕ merge commits
+```
+
+`--first-parent` особенно полезен для просмотра «крупных событий» в проекте:
+
+```bash
+git log --first-parent --oneline
+# M3 Merge feature/x (OAuth flow)
+# M2 Fix critical bug
+# M1 Update docs
+# C0 Initial
+```
+
+Это «как развивался продукт». А внутрь каждого merge — `git log <merge-SHA>^1..<merge-SHA>^2` смотрите конкретные коммиты фичи.
+
+---
+
+## Best practices для junior
+
+1. **При работе в команде**: feature-branches + Pull Request + `--no-ff` merge. Это стандартный паттерн.
+2. **Локально на personal-feature**: можно `--ff-only` для линейности, можно `--no-ff` если хочется видеть факт ветвления.
+3. **Никогда не делайте `git merge` на shared ветке без обсуждения с командой** — это создаёт merge commit, и в монорепо со 100 разработчиками может быть культурой считаться плохим тоном.
+4. **При конфликтах** — модуль 06. Сейчас если конфликт случайно — `git merge --abort` и спросите помощи.
+
+---
+
+## Попробуй сам
+
+1. Создайте ситуацию для three-way merge:
+
+```bash
+mkdir -p ~/git-sandbox/lesson-04-3way
+cd ~/git-sandbox/lesson-04-3way
+git init
+echo "common" > shared.txt
+git add . && git commit -m "C0: initial"
+
+git switch -c feature/x
+echo "feature stuff" > feature.txt
+git add . && git commit -m "F1: add feature.txt"
+echo "more feature" >> feature.txt
+git add . && git commit -m "F2: extend feature.txt"
+
+git switch main
+echo "main update" > main-only.txt
+git add . && git commit -m "M1: add main-only.txt"
+
+# Состояние: обе ветки имеют свои коммиты от общего предка
+git log --oneline --all --graph
+```
+
+2. Merge — Git автоматически выберет three-way (FF невозможен):
+
+```bash
+git merge feature/x
+# Git откроет редактор для merge commit message
+# Или: git merge feature/x -m "Merge feature/x"
+```
+
+3. Посмотрите результат:
+
+```bash
+git log --oneline --all --graph
+# Должно показать развилку:
+# *   M2 Merge branch 'feature/x' into main
+# |\
+# | * F2 extend feature.txt
+# | * F1 add feature.txt
+# * | M1 add main-only.txt
+# |/
+# * C0 initial
+```
+
+4. Посмотрите merge commit изнутри:
+
+```bash
+git cat-file -p HEAD
+# Увидите 2 parent
+```
+
+5. Попробуйте --first-parent log:
+
+```bash
+git log --first-parent --oneline
+# Покажет только M2 (merge) и M1 — основная линия main
+```
+
+6. Создайте ещё одну ветку и сделайте --squash:
+
+```bash
+git switch -c feature/y
+echo "y1" > y1.txt && git add . && git commit -m "Y1"
+echo "y2" > y2.txt && git add . && git commit -m "Y2"
+
+git switch main
+git merge --squash feature/y
+git commit -m "Add y feature (squashed)"
+
+git log --oneline --all --graph
+# Squashed: один новый commit с объединёнными изменениями. feature/y коммиты в боковой линии (доступны, но не в main)
+```
+
+---
+
+<KnowledgeCheck
+  question="Какую стратегию merge выбрать для слияния feature-ветки с 8 коммитами вида «wip», «fix typo», «try again», «refactor», «final fix»: fast-forward, --no-ff, или --squash?"
+  answer="--squash. Логика: коммиты feature-ветки — это рабочий процесс (черновики, эксперименты, исправления опечаток). В main вы хотите видеть «одну логически законченную фичу», а не 8 wip-коммитов. --squash объединяет всё изменение в один чистый коммит с осмысленным сообщением (вроде «feat: add OAuth2 with refresh token»). Старые wip-коммиты остаются в feature-ветке (можно посмотреть, если ветку не удалили), но в main — только финальный squashed commit. Если работа в команде через PR на GitHub — выбирайте кнопку «Squash and merge» (то же самое). Минусы --squash: теряется внутренняя история работы (когда что именно делалось). Но для большинства фич это норма — главное «что» (одно изменение), не «как именно велась разработка»."
+/>

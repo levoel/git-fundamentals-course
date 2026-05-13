@@ -1,0 +1,326 @@
+---
+title: "Концепция remote: что это и зачем"
+description: "Remote как именованный URL к копии репозитория; origin, upstream и remote-tracking branches"
+order: 1
+difficulty: "beginner"
+estimatedTime: 18
+topics: ["Git", "remotes", "origin", "remote-tracking"]
+---
+
+# Концепция remote: что это и зачем
+
+До этого момента мы работали с локальным репозиторием — `.git/` в твоей файловой системе. Но Git создан для распределённой работы. **Remote** — это именованный указатель на копию этого же репозитория где-то ещё: на GitHub, GitLab, корпоративном сервере или даже на соседнем диске.
+
+В этом уроке мы разберёмся, что такое remote с точки зрения Git (это не сервер, это запись в конфиге), почему именно `origin` стал стандартом, как работает связка `origin + upstream` для форков, и что такое remote-tracking branches вида `origin/main` — те самые, которые ты постоянно видишь в `git status`.
+
+---
+
+## Mental model: remote — это закладка
+
+Когда ты слышишь "remote репозиторий", в голове рисуется сервер. Это правда, но не полная. Для самого Git **remote — это просто запись в `.git/config`**: имя + URL + правила синхронизации refs.
+
+<DiagramContainer title="Что такое remote с точки зрения Git" color="blue">
+  <FlowColumn className="p-4 gap-3">
+    <Tooltip content="Локальный .git/config — текстовый файл с настройками">
+      <DataBox label=".git/config" className="border-blue-500/30 w-96 mx-auto">
+        <div className="text-xs font-mono space-y-1">
+          <div>[remote "origin"]</div>
+          <div className="pl-3">url = git@github.com:user/repo.git</div>
+          <div className="pl-3">fetch = +refs/heads/*:refs/remotes/origin/*</div>
+        </div>
+      </DataBox>
+    </Tooltip>
+    <Arrow direction="down" />
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Имя remote — обычно origin, но может быть любое">
+        <FlowNode variant="default">{'name = "origin"'}</FlowNode>
+      </Tooltip>
+      <Tooltip content="URL — куда Git ходит по сети">
+        <FlowNode variant="default">URL = адрес</FlowNode>
+      </Tooltip>
+      <Tooltip content="Refspec — правило сопоставления веток">
+        <FlowNode variant="default">refspec = mapping</FlowNode>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+То есть remote — это **алиас**. Вместо того чтобы каждый раз писать полный URL `git@github.com:user/repo.git`, ты используешь короткое имя `origin`. Git берёт это имя, лезет в `.git/config`, находит URL и идёт туда.
+
+<Callout type="tip">
+Remote можно потрогать руками. Открой `.git/config` в любом проекте, который ты клонировал — там увидишь блок `[remote "origin"]`. Это весь "remote" со стороны Git.
+</Callout>
+
+---
+
+## Команды: посмотреть и добавить
+
+### `git remote -v`
+
+Самая частая команда — показать все remotes текущего репозитория с их URL.
+
+```bash
+$ git remote -v
+origin  git@github.com:acme/data-pipelines.git (fetch)
+origin  git@github.com:acme/data-pipelines.git (push)
+```
+
+Заметь: каждый remote показан дважды — для **fetch** (откуда читать) и **push** (куда писать). В 99% случаев это один и тот же URL. Но Git позволяет иметь разные — например, читать с GitHub-зеркала, а писать в основной GitLab.
+
+### `git remote add`
+
+Добавить новый remote:
+
+```bash
+$ git remote add origin git@github.com:user/repo.git
+$ git remote -v
+origin  git@github.com:user/repo.git (fetch)
+origin  git@github.com:user/repo.git (push)
+```
+
+### `git remote remove` и `git remote rename`
+
+```bash
+$ git remote rename origin github
+$ git remote remove old-server
+```
+
+Заметь: всё это **локальные** операции. Они меняют только твой `.git/config`. Никакого "удаления с сервера" не происходит.
+
+---
+
+## Почему `origin` — стандарт
+
+Когда ты пишешь `git clone <url>`, Git создаёт remote с именем `origin` автоматически. Это не магическая константа — это просто **дефолт** для команды `clone`.
+
+```bash
+$ git clone git@github.com:acme/repo.git
+$ cd repo
+$ git remote -v
+origin  git@github.com:acme/repo.git (fetch)
+origin  git@github.com:acme/repo.git (push)
+```
+
+Можно сменить дефолт через флаг `-o`:
+
+```bash
+$ git clone -o github git@github.com:acme/repo.git
+$ git remote -v
+github  git@github.com:acme/repo.git (fetch)
+github  git@github.com:acme/repo.git (push)
+```
+
+Но не делай так. `origin` — конвенция, и ломать её — значит создавать когнитивную нагрузку всем, кто увидит твой репо. Все инструменты, туториалы и скрипты ожидают `origin`.
+
+---
+
+## Multi-remote setup: origin + upstream при форке
+
+Самый частый случай нескольких remote — работа с **fork** на GitHub/GitLab.
+
+Сценарий: ты хочешь контрибьютить в open-source проект `apache/airflow`. Ты не можешь пушить туда напрямую — у тебя нет прав. Поэтому:
+
+1. Делаешь **fork** через UI GitHub -> получаешь `your-name/airflow`.
+2. Клонируешь свой fork локально.
+3. Добавляешь оригинальный репо как второй remote — обычно с именем `upstream`.
+
+<DiagramContainer title="Fork workflow: origin (твой fork) + upstream (оригинал)" color="purple">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-6 justify-center">
+      <Tooltip content="Upstream — оригинальный репо, куда отправляешь PR">
+        <DataBox label="upstream" className="border-purple-500/30 w-56">
+          <div className="text-xs">apache/airflow</div>
+          <div className="text-xs text-zinc-500">read-only для тебя</div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Origin — твой личный fork, куда пушишь ветки">
+        <DataBox label="origin" className="border-green-500/30 w-56">
+          <div className="text-xs">your-name/airflow</div>
+          <div className="text-xs text-zinc-500">read + write</div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+    <Arrow direction="down" />
+    <Tooltip content="Локальный клон с двумя remote">
+      <DataBox label="local clone" className="border-blue-500/30 w-72 mx-auto">
+        <div className="text-xs font-mono space-y-1">
+          <div>git remote -v</div>
+          <div>origin    your-name/airflow</div>
+          <div>upstream  apache/airflow</div>
+        </div>
+      </DataBox>
+    </Tooltip>
+  </FlowColumn>
+</DiagramContainer>
+
+Команды:
+
+```bash
+# Клонировал свой fork
+$ git clone git@github.com:your-name/airflow.git
+$ cd airflow
+
+# Добавил оригинал как upstream
+$ git remote add upstream git@github.com:apache/airflow.git
+
+$ git remote -v
+origin    git@github.com:your-name/airflow.git (fetch)
+origin    git@github.com:your-name/airflow.git (push)
+upstream  git@github.com:apache/airflow.git (fetch)
+upstream  git@github.com:apache/airflow.git (push)
+```
+
+Теперь ты:
+
+- Получаешь обновления из оригинала: `git fetch upstream` -> `git merge upstream/main` (или `rebase`).
+- Пушишь свою feature ветку в свой fork: `git push origin feature/my-fix`.
+- Открываешь PR из `your-name/airflow:feature/my-fix` -> `apache/airflow:main` через UI.
+
+<Callout type="warning">
+Часто бывает: пушнул сразу в `upstream` (или попытался). Получил `403 Permission denied`. Это потому что у тебя нет прав в оригинальном репо. Пушить в open-source — это про fork + PR, а не про прямой push в `apache/*`.
+</Callout>
+
+---
+
+## Remote-tracking branches: `origin/main`
+
+Самая частая путаница у джунов — что такое `origin/main`. Это **не remote-ветка**. Это **локальная** ссылка вида "что я в последний раз видел в `main` на `origin` при `fetch`".
+
+<DiagramContainer title="Remote-tracking branch — это локальная закладка" color="green">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-6 justify-center flex-wrap">
+      <Tooltip content="На сервере GitHub есть ветка main с актуальным commit">
+        <DataBox label="server: origin" className="border-purple-500/30 w-56">
+          <div className="text-xs">main -> C7 (real-time)</div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="У тебя локально 2 типа ссылок: твоя main и snapshot origin/main">
+        <DataBox label="local repo" className="border-blue-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>main -> C5 (твоя работа)</div>
+            <div>origin/main -> C4 (snapshot)</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+    <Arrow direction="down" />
+    <Tooltip content="git fetch обновляет ТОЛЬКО origin/main, твою main не трогает">
+      <FlowNode variant="default">git fetch -> origin/main := C7</FlowNode>
+    </Tooltip>
+  </FlowColumn>
+</DiagramContainer>
+
+Где они лежат физически?
+
+```bash
+$ ls .git/refs/heads/
+main  feature-x
+
+$ ls .git/refs/remotes/origin/
+HEAD  main  develop
+```
+
+Видишь? `refs/heads/main` — твоя локальная ветка. `refs/remotes/origin/main` — снимок того, что ты видел на сервере при последнем `fetch`. Это два **разных** ref, указывающих на разные коммиты.
+
+Когда `git status` пишет:
+
+```
+Your branch is ahead of 'origin/main' by 3 commits.
+```
+
+Это значит: твоя локальная `main` ушла на 3 коммита вперёд относительно того, что ты **последний раз скачал** с сервера. Может быть, на сервере уже 5 новых коммитов — Git не знает, пока ты не сделаешь `git fetch`.
+
+<Callout type="note">
+Ключевая мысль: `origin/main` обновляется **только** командами `fetch`, `pull` или `push`. Это не "живой указатель на сервер". Это закладка. Поэтому привычка делать `git fetch` перед `git status` — здоровая.
+</Callout>
+
+---
+
+## Refspec: как ветки маппятся
+
+В блоке `[remote "origin"]` ты видишь строчку:
+
+```
+fetch = +refs/heads/*:refs/remotes/origin/*
+```
+
+Это **refspec** — правило: "когда я делаю `git fetch origin`, забери все ветки с сервера (`refs/heads/*`) и сохрани их локально под именами `refs/remotes/origin/*`".
+
+Звёздочка раскрывается как glob: ветка `main` на сервере -> `origin/main` локально, `develop` -> `origin/develop` и так далее.
+
+Знак `+` означает "разрешить force-update" — то есть если на сервере историю переписали через force-push, твой `origin/main` обновится без ошибки. Без `+` Git ругался бы на non-fast-forward.
+
+В быту тебе не нужно править refspec вручную. Просто знай: вот так Git понимает, что чему соответствует.
+
+---
+
+## Практика: посмотри свой remote
+
+Открой любой склонированный репо и пройди по чек-листу:
+
+```bash
+# 1. Что есть в remote?
+git remote -v
+
+# 2. Какие remote-tracking branches у меня?
+git branch -r
+
+# 3. Все ветки сразу — локальные + remote
+git branch -a
+
+# 4. Полная инфо про remote
+git remote show origin
+```
+
+Команда `git remote show origin` сходит на сервер и покажет очень полезное:
+
+```bash
+$ git remote show origin
+* remote origin
+  Fetch URL: git@github.com:acme/data-pipelines.git
+  Push  URL: git@github.com:acme/data-pipelines.git
+  HEAD branch: main
+  Remote branches:
+    main      tracked
+    develop   tracked
+    feature/x tracked
+  Local branches configured for 'git pull':
+    main    merges with remote main
+    develop merges with remote develop
+  Local refs configured for 'git push':
+    main    pushes to main    (up to date)
+```
+
+Это полный отчёт: какие ветки есть на сервере, какие из них ты трекаешь, какая `HEAD branch` (default branch проекта).
+
+---
+
+## Попробуй сам
+
+```bash
+# Создай локальный репо
+mkdir remote-demo && cd remote-demo
+git init
+echo "hello" > README.md
+git add . && git commit -m "init"
+
+# Добавь несуществующий remote (Git не проверяет — это просто запись в config)
+git remote add origin git@github.com:fake/repo.git
+git remote -v
+
+# Посмотри config
+cat .git/config
+
+# Удали remote
+git remote remove origin
+cat .git/config
+```
+
+Заметь: `git remote add` не делает запросов в сеть. Ты можешь добавить remote с любым URL — Git проверит его, только когда ты сделаешь `fetch`/`push`.
+
+---
+
+<KnowledgeCheck
+  question="У тебя в проекте `git status` пишет: `Your branch is ahead of 'origin/main' by 7 commits`. Ты заходишь на GitHub и видишь, что в `main` за это время добавились ещё 3 коммита от коллеги. Почему `git status` этого не показал?"
+  answer="Потому что `origin/main` — это локальная remote-tracking branch, snapshot того, что Git видел при последнем `fetch`. `git status` сравнивает твою локальную `main` с этим snapshot, а не лезет в сеть. Чтобы Git узнал об изменениях коллеги, нужно `git fetch` — тогда `origin/main` обновится, и `git status` покажет реальное состояние: `Your branch and 'origin/main' have diverged, and have 7 and 3 different commits each`. Это фундамент distributed VCS: Git не делает скрытых сетевых запросов, ты явно управляешь синхронизацией."
+/>

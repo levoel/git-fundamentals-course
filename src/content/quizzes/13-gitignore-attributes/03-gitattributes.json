@@ -1,0 +1,63 @@
+{
+  "lessonSlug": "13-gitignore-attributes/03-gitattributes",
+  "moduleId": "13-gitignore-attributes",
+  "_meta": {
+    "idPrefix": "git-m13-03",
+    "description": "Quiz for lesson 03 of module 13 — .gitattributes"
+  },
+  "questions": [
+    {
+      "id": "git-m13-03-q1",
+      "type": "multiple-choice",
+      "question": "В чём принципиальная разница между .gitignore и .gitattributes?",
+      "options": [
+        { "id": "a", "text": "Это одно и то же, разные имена для совместимости" },
+        { "id": "b", "text": ".gitignore говорит 'не следи за этими файлами'. .gitattributes говорит 'следи за этими файлами особенным образом' — управляет line endings, merge стратегией, diff driver, linguist метками, export поведением" },
+        { "id": "c", "text": ".gitignore для папок, .gitattributes для файлов" },
+        { "id": "d", "text": ".gitignore локальный, .gitattributes глобальный" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Это два дополняющих файла. .gitignore исключает файлы из tracking — Git вообще их не видит. .gitattributes меняет ПОВЕДЕНИЕ Git для файлов, которые уже tracked: как нормализовать line endings (text/eol), как мержить при конфликтах (merge=union/binary/custom), как считать diff (diff=python/markdown), как считать в language stats (linguist-generated/vendored), что включать в git archive (export-ignore). Оба файла commit-ятся в репо и работают на всех клонеров. .gitattributes — это конфигурация поведения Git, а не файлов.",
+      "studyHint": "Повторите урок 03 — раздел 'Где живёт .gitattributes'",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m13-03-q2",
+      "type": "multiple-choice",
+      "question": "У тебя в DBT проекте target/ содержит 500 generated .sql файлов. GitHub показывает 'Languages: 95% SQL, 5% Python', хотя ты пишешь в основном Python macros. Что добавить в .gitattributes?",
+      "options": [
+        { "id": "a", "text": "`target/  linguist-generated=true` — пометить как сгенерированный, чтобы linguist (GitHub language stats) исключил из подсчёта" },
+        { "id": "b", "text": "`target/  binary` — пометить как бинарь" },
+        { "id": "c", "text": "`target/  export-ignore` — это про другое" },
+        { "id": "d", "text": "Только удалить target/ из репо" }
+      ],
+      "correctAnswer": "a",
+      "explanation": "`linguist-generated=true` говорит GitHub linguist (тулу, который считает language stats) исключить эти файлы. После commit и push на GitHub stats пересчитываются (10-30 мин) — generated файлы перестают учитываться, показывает реальную пропорцию языков. Идеально: target/ вообще должен быть в .gitignore — generated artifacts не commit-ятся. Но если по какой-то причине commit-ятся (некоторые workflows), linguist-generated спасает статистику. Аналогичные атрибуты: `linguist-vendored=true` для third-party кода (vendor/, dbt_packages/), `linguist-documentation=true` для docs/, `linguist-detectable=false` для test fixtures и data.",
+      "studyHint": "Повторите урок 03 — раздел 'linguist: что GitHub считает за что'",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m13-03-q3",
+      "type": "multiple-choice",
+      "question": "У вас в команде поэтапные конфликты при merge poetry.lock — каждая ветка обновляет lock-файл, и при merge постоянно конфликты. Какая стратегия в .gitattributes решает это?",
+      "options": [
+        { "id": "a", "text": "`poetry.lock  binary` — Git вообще не будет пытаться мержить" },
+        { "id": "b", "text": "`poetry.lock  merge=theirs` — при merge всегда брать версию с входящей ветки, не пытаться mergить (lock-файлы нужно регенерить после merge, не патчить вручную)" },
+        { "id": "c", "text": "`poetry.lock  merge=union` — склеить обе версии" },
+        { "id": "d", "text": "`poetry.lock  -text` — отключить text mode" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Для lock-файлов (poetry.lock, package-lock.json, uv.lock, yarn.lock, Cargo.lock) стратегия `merge=theirs` оптимальна: при merge берётся входящая версия, не пытается trying line-by-line merge. Лучшая практика: после merge запустить `poetry lock` (или эквивалент) чтобы регенерировать корректный lock на основе текущего pyproject.toml. Альтернатива `merge=ours` — берёт нашу версию (если входящие изменения нерелевантны). `merge=union` для lock-файлов не подходит — даст невалидный TOML/JSON со склеенными секциями. `binary` тоже плохо — будет конфликт при любых изменениях. Этот паттерн (merge=theirs/ours для lock-files) — стандарт в больших monorepos.",
+      "studyHint": "Повторите урок 03 — раздел 'merge: стратегии слияния'",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m13-03-q4",
+      "type": "true-false",
+      "question": "Атрибут `export-ignore` в .gitattributes исключает файлы из вывода `git archive` (упаковка релиза в tar/zip), но они остаются в обычном репозитории.",
+      "correctAnswer": true,
+      "explanation": "Точно. `git archive` — команда для создания дистрибутива (tar.gz, zip) из коммита, без .git/. По умолчанию включает всё в working tree. С `export-ignore` можно исключить тесты, CI-конфиги, документацию — то, что не нужно в product release. Пример: `.github/  export-ignore`, `.gitattributes export-ignore`, `tests/ export-ignore`, `.pre-commit-config.yaml export-ignore`. Эти файлы остаются в репо для разработки, но не попадают в `git archive --format=tar.gz HEAD`. Полезно для подготовки релизов pip-пакетов, dbt-bundle, Airflow DAG-bundle. Это никак не влияет на обычный clone/push/pull — там всё на месте.",
+      "bloomLevel": "conceptual"
+    }
+  ]
+}

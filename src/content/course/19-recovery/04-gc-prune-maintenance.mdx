@@ -1,0 +1,537 @@
+---
+title: "git gc, prune, maintenance: garbage collection и health check"
+description: "git gc (garbage collection), git gc --aggressive (полная repack, медленно — раз в год). git maintenance start (Git 2.30+) — auto background. git repack -ad. Health-check репозитория: размер, count-objects. Когда репо разрастается: git lfs migrate, или filter-repo для cleanup."
+order: 4
+difficulty: "intermediate"
+estimatedTime: 25
+topics: ["gc", "prune", "maintenance", "repack", "count-objects", "health-check", "lfs-migrate"]
+---
+
+# git gc, prune, maintenance: garbage collection и health check
+
+После 16 модулей мы много раз упоминали `git gc` — garbage collection. В этом уроке — глубже: **когда** gc запускается, что он удаляет, **какие риски**, и как настроить **proactive maintenance**, чтобы репо был «здоров» — быстрый, компактный, без surprises.
+
+Это важно для junior DE: репо проекта растёт, через год parsing занимает 10x дольше, `git log` медленный, `git push` качает гигабайты. Maintenance — это **профессиональное** управление здоровьем репо, не just-in-case operation.
+
+В этом уроке:
+
+1. Что делает `git gc` под капотом.
+2. Loose vs packed objects.
+3. `git gc --aggressive` — когда нужно, когда вредит.
+4. Health-check команды: `count-objects`, `du`, `du --filesystem-stats`.
+5. `git maintenance` — auto-background оптимизация.
+6. Когда репо вырос — `git lfs migrate` или `filter-repo`.
+
+---
+
+## Что делает git gc
+
+Сначала — что в `.git/objects`:
+
+```bash
+$ ls .git/objects/
+ab  cd  ef  pack  info
+```
+
+`ab/`, `cd/`, etc — loose objects (по первым двум hex SHA). `pack/` — упакованные.
+
+**Loose object** — отдельный файл per object. Простой формат, легко создаётся:
+
+```bash
+$ ls .git/objects/ab/
+c1234567890abcdef1234567890abcdef1234   # один файл = один object
+```
+
+**Pack** — много objects в одном файле, сжатие + дельты:
+
+```bash
+$ ls .git/objects/pack/
+pack-abcdef.pack    # сам контейнер (gzip + delta-compressed)
+pack-abcdef.idx     # index для random access
+```
+
+### Repack: loose -> packed
+
+`git gc` делает несколько вещей. Главная — **repack**:
+
+```bash
+$ git gc
+Enumerating objects: 1234, done.
+Counting objects: 100% (1234/1234), done.
+Delta compression using up to 8 threads
+Compressing objects: 100% (567/567), done.
+Writing objects: 100% (1234/1234), done.
+Total 1234 (delta 678), reused 0 (delta 0), pack-reused 0
+```
+
+Что произошло:
+1. Все loose objects (`.git/objects/ab/c123...`) собраны в один `pack-<X>.pack`.
+2. Применена delta compression: похожие objects хранятся как diff от base.
+3. Применена gzip compression поверх deltas.
+4. Loose objects удалены (если они теперь в pack).
+
+Эффект на размер:
+
+```bash
+# До gc
+$ du -sh .git/objects/
+523M    .git/objects/
+
+# После gc
+$ git gc
+$ du -sh .git/objects/
+124M    .git/objects/
+```
+
+**4x compression** — типичная для DE-проекта (много текстовых файлов: SQL, Python, JSON).
+
+### Prune
+
+Вторая часть gc — **prune**:
+
+```bash
+$ git gc
+# выполнит prune унreachable objects старше gc.pruneExpire (default 2 недели)
+```
+
+`prune` удаляет unreachable objects (см. урок 02 — orphan commits после reset/rebase). По default — старше двух недель.
+
+Изменить срок:
+
+```bash
+$ git gc --prune=now           # удалить ВСЁ unreachable прямо сейчас
+$ git gc --prune=2.weeks.ago   # default
+$ git gc --prune=never         # не prune (только repack)
+```
+
+<Callout type="warning">
+`git gc --prune=now` **немедленно** удаляет unreachable objects. После этого recovery невозможно (см. урок 02). Используй с осторожностью. Если работа уже не нужна — ок. Если может пригодиться — не торопись.
+</Callout>
+
+### Auto-gc
+
+Git **автоматически** запускает gc после некоторых операций, когда условия:
+
+```bash
+$ git config --get gc.auto
+6700      # запустить gc если loose objects > 6700
+```
+
+| Параметр | Default | Триггер |
+|---|---|---|
+| `gc.auto` | 6700 | loose objects больше — auto gc |
+| `gc.autoPackLimit` | 50 | pack files больше — auto repack |
+
+После каждого `git commit`, `git fetch`, `git pull` — Git checks условия и запускает gc если нужно.
+
+```
+Auto packing the repository in background for optimum performance.
+```
+
+— такое сообщение видишь, если auto-gc запустился.
+
+### gc.aggressive
+
+Тяжелая artillery:
+
+```bash
+$ git gc --aggressive
+# глубокий repack: применяет тщательно delta search,
+# использует window=250 (вместо 10 для обычного)
+```
+
+Эффект: ещё лучше compression, но **медленно** — 10-100x дольше обычного gc.
+
+| Размер репо | git gc | git gc --aggressive |
+|---|---|---|
+| 100 MB | 10 sec | 60 sec |
+| 1 GB | 1 min | 30 min |
+| 10 GB | 10 min | 5 hours |
+
+Когда оправдано:
+
+- Раз в год / при большом изменении объёма.
+- После `git filter-repo` или большого rewrite.
+- Когда `du -sh .git/` сильно вырос внезапно.
+
+Когда **не** оправдано:
+
+- Регулярно (раз в день/неделю) — diminishing returns.
+- В CI workflow — тратит minutes.
+- Когда обычный gc уже достаточно сжал.
+
+<Callout type="tip">
+Linux Kernel repo — крупнейший пример. После `git gc --aggressive` размер `.git` упал с 5 GB до 1.5 GB. Но эта операция там длится **часы**. Делается **редко**, под надзором maintainers.
+</Callout>
+
+---
+
+## Health-check команды
+
+### git count-objects
+
+```bash
+$ git count-objects -v
+count: 234           # количество loose objects
+size: 8345           # суммарный размер loose в KB
+in-pack: 12345       # objects в pack files
+packs: 3             # количество pack files
+size-pack: 124567    # суммарный размер pack в KB
+prune-packable: 0    # objects которые можно убрать через prune
+garbage: 0           # broken objects (не в виде packs или loose, мусор)
+size-garbage: 0
+```
+
+Что мониторить:
+
+- **loose objects > 5000** — пора `git gc`.
+- **packs > 20** — пора repack.
+- **garbage > 0** — что-то странное, проверить через fsck.
+
+### du -sh
+
+```bash
+$ du -sh .git
+245M    .git
+
+$ du -sh --max-depth=1 .git
+12K     .git/hooks
+234M    .git/objects
+8.2M    .git/refs
+2.4M    .git/logs
+245M    .git
+```
+
+Где сидит весь размер — обычно `.git/objects/pack/`.
+
+### git rev-list
+
+«Сколько коммитов в репо»:
+
+```bash
+$ git rev-list --count --all
+12345
+
+$ git rev-list --count main
+8765
+```
+
+### Branches & tags count
+
+```bash
+$ git branch -a | wc -l
+142
+
+$ git tag | wc -l
+89
+```
+
+DE-проект с 100+ ветками — пора cleanup, см. дальше.
+
+### Largest blobs (что весит больше всего)
+
+```bash
+$ git rev-list --objects --all \
+  | git cat-file --batch-check='%(objectname) %(objecttype) %(objectsize:disk) %(rest)' \
+  | awk '/^[^ ]+ blob / { print $3, $4 }' \
+  | sort -nr \
+  | head -20
+
+156782345 data/historical.parquet
+56781234  notebooks/legacy_analysis.ipynb
+12345678  dags/migrations/init_data.sql
+...
+```
+
+Top 20 самых больших blobs в истории. Часто здесь видишь:
+
+- **Случайно закоммиченные данные** (parquet, csv, sqlite).
+- **Старые ноутбуки** с output cells (Jupyter cells содержат plot images).
+- **Migrations** с inline данными.
+
+Это кандидаты на `git lfs migrate` или `git filter-repo`.
+
+---
+
+## git maintenance: автоматизация
+
+Git 2.30+ ввёл встроенный maintenance scheduler:
+
+```bash
+$ git maintenance start
+```
+
+Регистрирует периодические задачи (через systemd / launchd / cron):
+
+```bash
+$ git maintenance status
+hourly:    commit-graph, prefetch, loose-objects
+daily:     loose-objects, incremental-repack
+weekly:    gc, pack-refs
+```
+
+| Task | Что делает | Когда |
+|---|---|---|
+| `commit-graph` | Cache графа commits для быстрого log/walk | hourly |
+| `prefetch` | Fetch refs из remote без update local refs (greater speed для git pull) | hourly |
+| `loose-objects` | Move loose objects в pack-files | hourly |
+| `incremental-repack` | Частичный repack (без объединения старых packs) | daily |
+| `gc` | Полная сборка мусора | weekly |
+| `pack-refs` | Pack refs в один файл `packed-refs` | weekly |
+
+Manual trigger:
+
+```bash
+$ git maintenance run --task=loose-objects
+$ git maintenance run --task=gc
+$ git maintenance run                       # все задачи сразу
+```
+
+### Включить для всех репо
+
+```bash
+$ git maintenance start                     # для текущего репо
+$ git maintenance start --global            # для всех репо пользователя
+```
+
+`--global` запускает background-задачи на **все** репо в `~/`. Удобно для devbox.
+
+### Disable
+
+```bash
+$ git maintenance stop                      # для текущего
+$ git maintenance unregister --force        # снять из scheduler
+```
+
+---
+
+## Когда репо разрастается
+
+Симптомы:
+- `git clone` качает 5+ GB.
+- `git pull` тратит минуту даже на маленькое изменение.
+- `git log` тормозит.
+- На GitHub репо красным цветом «Large repository».
+
+### Анализ: что весит
+
+```bash
+# Top 20 blobs (как выше)
+$ git rev-list --objects --all | git cat-file --batch-check='%(objectname) %(objecttype) %(objectsize:disk) %(rest)' \
+  | awk '/blob/ { print $3, $4 }' | sort -nr | head -20
+
+# Размер по файлам в HEAD
+$ git ls-files | xargs -I{} ls -la "{}" 2>/dev/null | sort -k5 -nr | head -20
+```
+
+### Решение 1: git lfs migrate
+
+Если **большие файлы должны быть в репо**, но они тормозят — мигрировать в LFS:
+
+```bash
+$ git lfs install
+$ git lfs migrate import --include="*.parquet,*.csv" --everything
+```
+
+`migrate` переписывает историю: blobs > LFS pointer files. Сами файлы — в LFS storage. См. модуль 14.
+
+ВНИМАНИЕ: Это **rewrites history** — force push, force clone у коллег.
+
+### Решение 2: git filter-repo
+
+Удалить файлы из истории совсем:
+
+```bash
+$ git filter-repo --path data/ --invert-paths
+$ git filter-repo --path-glob "*.parquet" --invert-paths
+```
+
+См. модуль 17 (cleanup секретов) — те же принципы.
+
+После filter-repo: `git push --force`, коллеги делают re-clone.
+
+### Решение 3: shallow / partial clones
+
+Это не fix репо, но **обход**:
+
+```bash
+# Shallow: только последние 50 commits
+$ git clone --depth 50 git@github.com:org/repo.git
+
+# Partial: blobs скачиваем по требованию
+$ git clone --filter=blob:none git@github.com:org/repo.git
+```
+
+Junior на 50-commit shallow clone:
+- `git log` — только последние 50.
+- `git blame` — может попросить дополнительные commits.
+
+Для read-only checkout (e.g., CI build) — отлично. Для active development — partial.
+
+### Cleanup веток
+
+Часто 70% веток — old merged feature branches:
+
+```bash
+# Список веток уже merged в main
+$ git branch --merged main | grep -v "^\*\|main\|master"
+feat/old-1
+feat/old-2
+fix/typo-3
+
+# Удалить
+$ git branch --merged main | grep -v "^\*\|main\|master" | xargs git branch -d
+
+# На remote
+$ git remote prune origin
+# или
+$ git push origin --delete feat/old-1
+```
+
+В GitHub UI: Settings -> General -> Pull Requests -> [x] Automatically delete head branches. После merge — auto delete.
+
+---
+
+## DE-specific: репо с notebooks
+
+Jupyter notebooks (`.ipynb`) — JSON с **output cells**. Cells содержат:
+- Картинки plots (base64-encoded PNG, мегабайты).
+- Output text (могут быть пароли, как в модуле 17!).
+
+Junior коммитит ноутбук с outputs — репо растёт по гигабайтам.
+
+Решение — **`nbstripout`**:
+
+```bash
+$ pip install nbstripout
+
+# Включить как git filter
+$ nbstripout --install
+
+# Теперь каждый git add/commit ноутбука — outputs автостираются перед commit
+```
+
+`.gitattributes`:
+
+```
+*.ipynb filter=nbstripout
+```
+
+Или pre-commit hook:
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/kynan/nbstripout
+    rev: 0.7.1
+    hooks:
+      - id: nbstripout
+```
+
+После — `.ipynb` коммитится без outputs. Размер уменьшается 10-100x.
+
+---
+
+## DE-specific: dbt artifacts
+
+`target/` (compiled SQL, manifests) **не должно** быть в репо. `.gitignore`:
+
+```
+target/
+logs/
+dbt_packages/
+*.duckdb
+*.sqlite
+```
+
+Если уже в репо — `git rm -r --cached target/ dbt_packages/`, commit, push.
+
+---
+
+## Repack stratergy для больших репо
+
+`git gc` использует **window size** для delta search:
+
+```bash
+$ git config pack.window 10        # default, fast
+$ git config pack.window 250       # aggressive, slow
+$ git config pack.depth 50         # default depth
+```
+
+И **threads**:
+
+```bash
+$ git config pack.threads 0        # default — use all CPU
+```
+
+Manual repack с custom параметрами:
+
+```bash
+$ git repack -a -d --window=250 --depth=100 --threads=8
+```
+
+`-a` — repack all (объединить все packs в один).
+`-d` — delete старые packs после repack.
+
+Для huge репо (10+ GB) — pre-repack с custom params, потом обычный `git gc` поверх.
+
+---
+
+## Попробуй сам
+
+Health check текущего репо:
+
+```bash
+$ cd ~/projects/my-de-repo
+
+# Размер
+$ du -sh .git
+$ du -sh --max-depth=1 .git/objects
+
+# Counts
+$ git count-objects -v
+
+# Largest blobs (что весит больше всего)
+$ git rev-list --objects --all \
+  | git cat-file --batch-check='%(objectname) %(objecttype) %(objectsize:disk) %(rest)' \
+  | awk '/blob/ { print $3, $4 }' \
+  | sort -nr \
+  | head -10
+
+# Branches
+$ git branch -a | wc -l
+$ git branch --merged main | grep -v "^\*\|main\|master" | head
+
+# Maintenance
+$ git maintenance status
+$ git maintenance run
+$ git count-objects -v
+# должно быть меньше loose объектов после run
+```
+
+Используй на своём DE-репо, увидишь реальные numbers.
+
+---
+
+## Cheat sheet: когда что делать
+
+| Симптом | Команда |
+|---|---|
+| Loose objects > 5000 | `git gc` |
+| Pack files > 20 | `git gc` или `git repack -ad` |
+| Size > 1GB, никогда не делал aggressive | `git gc --aggressive` (раз в год) |
+| Размер вырос за неделю — кто-то закоммитил данные | `git rev-list ... | head -20` найти blob, решить |
+| Большие parquet/csv нужны в репо | `git lfs migrate import` (модуль 14) |
+| Большие файлы НЕ нужны в репо | `git filter-repo --path ... --invert-paths` |
+| Notebooks тормозят commits | `nbstripout` или pre-commit hook |
+| 200+ merged feature branches | `git branch --merged | xargs git branch -d` |
+| `.git` corruption / суррогаты | re-clone (см. урок 03) |
+| Заходишь в new репо | `git maintenance start` для auto-optimize |
+
+---
+
+## Killer takeaway
+
+`git gc` упаковывает loose objects в packs (compression 4-10x), prune-ит unreachable старше 2 недель. Auto-запускается после некоторых операций. `git gc --aggressive` — глубокая repack, медленный, делается редко (раз в год). `git count-objects -v` + `du -sh .git` — health check. `git maintenance start` (Git 2.30+) — auto-background оптимизация, обязательно включить для DE-репо. Большие файлы — LFS migrate или filter-repo. Notebooks — `nbstripout` хук. Старые ветки — `git branch --merged | xargs delete`. Проactive maintenance дешевле reactive recovery.
+
+<KnowledgeCheck quizSlug="19-recovery/04-gc-prune-maintenance" />

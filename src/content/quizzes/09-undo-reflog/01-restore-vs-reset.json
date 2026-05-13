@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "09-undo-reflog/01-restore-vs-reset",
+  "moduleId": "09-undo-reflog",
+  "_meta": { "idPrefix": "git-m09-01" },
+  "questions": [
+    {
+      "id": "git-m09-01-q1",
+      "type": "multiple-choice",
+      "question": "В какой версии Git появилась команда git restore и зачем её ввели?",
+      "options": [
+        { "id": "a", "text": "Git 2.10, чтобы заменить устаревший git checkout полностью" },
+        { "id": "b", "text": "Git 2.23 (2019), чтобы разделить функции старого git checkout — переключение веток (git switch) и откат файлов (git restore) — и убрать двусмысленность когда имя файла совпадает с именем ветки" },
+        { "id": "c", "text": "Git 2.40, как замена reset" },
+        { "id": "d", "text": "Это просто alias для checkout, без отдельной реализации" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "git restore + git switch разделены из git checkout в Git 2.23 (август 2019). Проблема старого checkout: `git checkout file` — если есть ветка file, что делать? Эвристика checkout иногда уничтожала working tree. Новые команды однозначны: switch только для веток, restore только для файлов. Старый checkout deprecated не будет (legacy support), но в новом коде использовать только новые формы.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m09-01-q2",
+      "type": "multiple-choice",
+      "question": "Что точно делает команда `git restore --staged file.py`?",
+      "options": [
+        { "id": "a", "text": "Удаляет file.py с диска" },
+        { "id": "b", "text": "Откатывает working tree file.py к версии из HEAD" },
+        { "id": "c", "text": "Копирует версию из HEAD в index, выкидывая файл из staging area. Working tree (файл на диске) НЕ трогается. Эквивалент unstage. Старая форма: git reset HEAD file.py" },
+        { "id": "d", "text": "Делает обе вещи: и unstage, и откат файла" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "`restore --staged` — это unstage. Источник: HEAD (по умолчанию). Назначение: index. Working tree не трогаем. Если файл был `git add`-нут, потом restore --staged — index возвращается в состояние HEAD (для этого файла), но на диске изменения остаются. Это полезно когда жадно сделал git add . и хочешь убрать файл из коммита, но не из работы.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m09-01-q3",
+      "type": "multiple-choice",
+      "question": "Хочется достать файл models/users.sql из коммита 3 назад. Команда?",
+      "options": [
+        { "id": "a", "text": "git restore HEAD~3 models/users.sql" },
+        { "id": "b", "text": "git restore --source=HEAD~3 models/users.sql — флаг --source указывает откуда брать, по умолчанию назначение working tree. Файл появится на диске как modified" },
+        { "id": "c", "text": "git checkout HEAD~3 — переключится на тот коммит" },
+        { "id": "d", "text": "git reset --hard HEAD~3" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`git restore --source=<ref> <file>` — это explicit способ достать конкретную версию файла из любого коммита/ветки/тега. По умолчанию назначение — working tree. Альтернативы (а) — синтаксис не работает (нужен флаг --source). (с) checkout HEAD~3 — войдёшь в detached HEAD, не то. (d) reset --hard — откатит ВСЮ ветку, не только один файл.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m09-01-q4",
+      "type": "multiple-choice",
+      "question": "Какое из этих изменений безвозвратно теряется при git restore file.py (default режим)?",
+      "options": [
+        { "id": "a", "text": "Ничего — всё восстановимо из reflog" },
+        { "id": "b", "text": "Закоммиченные изменения" },
+        { "id": "c", "text": "Изменения в working tree, которые не были staged через git add — они уничтожаются navsegда, reflog не помогает (он отслеживает только commit-движения, не working tree)" },
+        { "id": "d", "text": "Untracked файлы" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "git restore file.py (default) копирует версию из index в working tree, перезаписывая то, что было на диске. Если эти изменения не были git add — они вне reflog, вне любого Git tracking. Простое перезаписывание файла. Восстановления нет (кроме как из IDE undo буфера, если повезло). Поэтому правило: перед restore сначала git stash или git add, чтобы изменения попали в Git tracking.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m09-01-q5",
+      "type": "true-false",
+      "question": "git checkout -- file.py и git restore file.py делают одно и то же.",
+      "correctAnswer": true,
+      "explanation": "Да, оба копируют версию из index в working tree (по умолчанию). Разница только в синтаксисе и безопасности: `git checkout -- file` имеет двусмысленность если есть ветка с именем file, и `--` это разделитель который многие забывают. `git restore file` — явный и однозначный. Семантика идентична. Для legacy туториалов мысленно переводи checkout-форму в restore-форму.",
+      "bloomLevel": "conceptual"
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "lessonSlug": "04-branches-merging/03-fast-forward-merge",
+  "moduleId": "04-branches-merging",
+  "_meta": {
+    "idPrefix": "git-m04-03",
+    "description": "Quiz for lesson 4.3 — Fast-forward merge"
+  },
+  "questions": [
+    {
+      "id": "git-m04-03-q1",
+      "type": "multiple-choice",
+      "question": "Когда возможен fast-forward merge?",
+      "options": [
+        { "id": "a", "text": "Только на main ветке" },
+        { "id": "b", "text": "Когда история двух веток линейна: ветка, в которую мержим, не имеет новых коммитов с момента создания второй ветки. Git просто перематывает указатель ветки вперёд, новый коммит не создаётся" },
+        { "id": "c", "text": "Только в bare-репозитории" },
+        { "id": "d", "text": "Всегда, если выполнить git fetch перед merge" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Fast-forward возможен, когда между точкой создания feature-ветки и текущим состоянием целевой ветки (main) НЕ появилось новых коммитов на целевой. То есть main — это «прямой предок» feature/x. В таком случае слить = просто двинуть указатель main на конец feature/x. Никакого нового коммита не создаётся, история остаётся линейной.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m04-03-q2",
+      "type": "multiple-choice",
+      "question": "Что делает `git merge --ff-only feature/x`?",
+      "options": [
+        { "id": "a", "text": "Всегда создаёт merge commit" },
+        { "id": "b", "text": "Если fast-forward возможен — делает FF (линейная история). Если нет — выдаёт ошибку 'Not possible to fast-forward' и НЕ делает merge. Это безопасный режим для junior" },
+        { "id": "c", "text": "Делает rebase" },
+        { "id": "d", "text": "Удаляет ветку feature/x" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "--ff-only гарантирует, что merge будет только fast-forward. Если ситуация позволяет (линейная история) — FF делается, история остаётся линейной. Если расходящаяся история (FF невозможен) — Git выдаёт ошибку и НИЧЕГО не делает. Это безопасный режим: никаких неожиданных merge commits, никаких сюрпризов. Junior могут осознанно решать: rebase или явный no-ff merge.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m04-03-q3",
+      "type": "multiple-choice",
+      "question": "Что делает `git merge --no-ff feature/x`?",
+      "options": [
+        { "id": "a", "text": "Запрещает merge вообще" },
+        { "id": "b", "text": "Всегда создаёт merge commit с двумя parent, даже если технически возможен fast-forward. Сохраняет факт ветвления в истории — видно, что F1-F3 были одной фичей" },
+        { "id": "c", "text": "Делает только partial merge" },
+        { "id": "d", "text": "Откатывает все изменения" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "--no-ff заставляет создать merge commit с двумя parent, даже когда FF возможен. Плюсы: 1) Сохраняется группировка — видно, какие коммиты относились к фиче. 2) Atomic revert через `git revert -m 1 <merge>` откатывает всю фичу одним движением. 3) git log --first-parent показывает крупные события: «merged feature/x» вместо мелких коммитов. Минусы: больше merge commits в истории, может быть избыточно для маленьких фич. На GitHub кнопка «Create a merge commit» делает именно --no-ff.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m04-03-q4",
+      "type": "multiple-choice",
+      "question": "Какая глобальная настройка делает `git pull` безопасным для junior, отказывая в случае расходящейся истории?",
+      "options": [
+        { "id": "a", "text": "git config --global pull.safe true" },
+        { "id": "b", "text": "git config --global pull.ff only" },
+        { "id": "c", "text": "git config --global merge.disabled true" },
+        { "id": "d", "text": "git config --global core.junior true" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`pull.ff = only` (мы устанавливали в модуле 02) делает поведение git pull предсказуемым: если возможен fast-forward — делает, если расходящаяся история — выдаёт ошибку. Это защищает от случайных merge commits типа «Merge branch main of github.com:...», которыми junior часто засоряют историю при auto-merge поведении (pull.rebase=false). Junior получает осознанный выбор: rebase или явный merge commit.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m04-03-q5",
+      "type": "true-false",
+      "question": "При fast-forward merge создаётся новый коммит на целевой ветке.",
+      "correctAnswer": false,
+      "explanation": "Нет. Fast-forward — это «перемотка ветки вперёд». Указатель целевой ветки (например, main) перемещается на коммит, который уже существует (последний коммит feature/x). Никаких новых коммитов не создаётся. История остаётся линейной. Если хотите явный merge commit при FF-ситуации — используйте --no-ff.",
+      "bloomLevel": "conceptual"
+    }
+  ]
+}

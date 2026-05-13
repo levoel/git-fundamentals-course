@@ -1,0 +1,327 @@
+---
+title: "Merge strategies на GitHub — merge / squash / rebase"
+description: "Три варианта merge на GitHub: Create a merge commit (preserve history), Squash and merge (один коммит, чистая main), Rebase and merge (linear no merge). Когда что юзать."
+order: 4
+difficulty: "intermediate"
+estimatedTime: 25
+topics: ["merge", "squash", "rebase", "merge-commit", "history", "github"]
+---
+
+# Merge strategies на GitHub — три варианта
+
+После approve PR, GitHub предлагает три способа merge. Каждый создаёт **разную** историю на main. Выбор влияет на читаемость `git log`, способность откатывать изменения, и общую atomic-ность коммитов. В этом уроке: технически что делает каждая стратегия, какая когда подходит, и почему в DE-командах обычно squash или merge-commit, а rebase-merge редко.
+
+---
+
+## Setup для примера
+
+Допустим, у тебя feature ветка с 5 коммитами:
+
+```
+main:     A -> B -> C
+feature:  A -> B -> C -> F1 -> F2 -> F3 -> F4 -> F5
+```
+
+`F1..F5` — твои коммиты feature. `A..C` — main. Хочешь замержить feature в main. Что покажет `git log --graph --oneline` после каждой стратегии?
+
+---
+
+## Стратегия 1: Create a merge commit
+
+Default GitHub поведение. Эквивалент `git merge feature` (no fast-forward):
+
+```
+$ git switch main
+$ git merge --no-ff feature
+```
+
+После:
+
+```
+main:  A -> B -> C ───────────────────-> M
+                ↘                     ↗
+                  F1 -> F2 -> F3 -> F4 -> F5
+```
+
+Создан **merge-коммит M** с двумя родителями: C (main до merge) и F5 (feature). Все F1..F5 коммиты **сохранены** в истории.
+
+### Плюсы
+
+- **Сохранён context работы**: видно как ты пошагово делал feature.
+- **Easy revert**: один `git revert -m 1 <merge-commit>` отменяет всю фичу.
+- **Точная история**: timestamps и author каждого коммита оригинальные.
+
+### Минусы
+
+- **Шумная история**: `git log --oneline` на main забит мелкими WIP коммитами.
+- **Сложнее найти когда что**: «при каком коммите feature замержена» — надо искать merge-коммит.
+
+### Когда юзать
+
+- Долгоживущие feature ветки с **значимыми** коммитами (каждый — логически отдельный шаг).
+- Команда практикует тщательный commit hygiene (каждый коммит атомарный, message по conventional commits).
+- Большие фичи где история разработки важна.
+
+---
+
+## Стратегия 2: Squash and merge
+
+Все коммиты feature **«сплющиваются» в один**:
+
+```
+$ git merge --squash feature
+$ git commit -m "feat: add users pipeline (squashed)"
+```
+
+После:
+
+```
+main:  A -> B -> C -> S
+```
+
+Где `S` — **один** коммит, содержащий все изменения F1..F5 одним патчем. F1..F5 как отдельные коммиты **исчезают** с main (но остаются на feature, пока её не удалят).
+
+GitHub UI позволяет редактировать message squash-коммита перед merge. По умолчанию — это title PR + body списком commit messages из feature.
+
+### Плюсы
+
+- **Чистая main история**: один коммит на одну фичу. `git log --oneline main` читается легко.
+- **Atomic units**: каждая строка лога = одна логическая фича.
+- **Простой revert**: один `git revert <squash-commit>`.
+- **Не нужна commit hygiene на feature**: можно `WIP`, `fix typo`, `tests pass plz` — всё сольётся в один чистый коммит.
+
+### Минусы
+
+- **Теряется детальная история**: «через какие шаги шёл author к финальной версии» — невидимо.
+- **Author = тот кто squash-нул, не original author** в некоторых случаях (GitHub обычно сохраняет).
+- **Bisect (поиск бага) теряет точность**: один большой коммит вместо мелких ступенек.
+
+### Когда юзать
+
+- **Большинство DE команд**: SaaS, продуктовая разработка, internal repos.
+- Feature разрабатывалась с messy commits («WIP», «fix linter», «add tests»).
+- Команда ценит чистый main log выше детальной истории.
+
+---
+
+## Стратегия 3: Rebase and merge
+
+Все коммиты feature **переписываются** поверх main, **без merge-коммита**:
+
+```
+$ git switch feature
+$ git rebase main
+$ git switch main
+$ git merge --ff-only feature
+```
+
+После:
+
+```
+main:  A -> B -> C -> F1' -> F2' -> F3' -> F4' -> F5'
+```
+
+F1..F5 ребейзнуты (новые SHA, отсюда `F1'..F5'`). Применены прямо на main как **линейная** последовательность. Никакого merge-коммита.
+
+### Плюсы
+
+- **Линейная история**: `git log --oneline` без merge-коммитов, всё в одну линию.
+- **Сохраняет атомарность каждого коммита**: F1..F5 видны отдельно.
+- **Bisect работает чисто**: можно найти баг точно на одном коммите.
+
+### Минусы
+
+- **Теряет context merge**: не видно «эти 5 коммитов были одной feature» (нет marker'а).
+- **Переписывает SHA**: original commit hashes исчезают (плохо для PR-комментариев которые ссылаются на конкретные коммиты).
+- **Сложнее revert**: надо ревертить каждый коммит F1'..F5' отдельно, или диапазон.
+- **Каждый коммит должен пройти CI** — иначе main падает на промежуточных commit-ах (если CI runs on every commit).
+
+### Когда юзать
+
+- Команды с **строгим commit hygiene** на feature (каждый коммит — атомарный, тесты проходят на каждом).
+- Open-source проекты типа Linux kernel, Postgres, где линейная история — конвенция.
+- Когда команда любит `git log --oneline` без merge-коммитов.
+
+---
+
+## Сравнительная диаграмма
+
+<DiagramContainer title="История main после каждой стратегии">
+  <FlowColumn>
+    <DataBox tooltip="Исходно: feature имеет 5 коммитов">Исходно</DataBox>
+    <FlowRow>
+      <FlowNode tooltip="main">A</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="">B</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="main HEAD до merge">C</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="feature">F1...F5</FlowNode>
+    </FlowRow>
+    <DataBox tooltip="Merge commit: M указывает на C и F5, F1-F5 сохранены">После Merge commit</DataBox>
+    <FlowRow>
+      <FlowNode tooltip="">A</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="">B</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="">C</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="merge-коммит, два родителя">M</FlowNode>
+      <FlowNode tooltip="F1-F5 видны в branch">+F1...F5</FlowNode>
+    </FlowRow>
+    <DataBox tooltip="Squash: один S коммит с всеми изменениями">После Squash</DataBox>
+    <FlowRow>
+      <FlowNode tooltip="">A</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="">B</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="">C</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="один коммит = all changes">S</FlowNode>
+    </FlowRow>
+    <DataBox tooltip="Rebase: F1-F5 переписаны как F1'-F5', линейно">После Rebase</DataBox>
+    <FlowRow>
+      <FlowNode tooltip="">A</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="">B</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="">C</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="новые SHA, линейно">F1'...F5'</FlowNode>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+---
+
+## Decision matrix для DE команд
+
+| Сценарий | Стратегия |
+|---|---|
+| Большинство SaaS / продуктовых команд | **Squash** |
+| Команда с дисциплинированным commit hygiene | Squash или Rebase |
+| Open-source где история важна | Merge commit или Rebase |
+| Linux kernel / Postgres style проекты | Rebase |
+| dbt / Airflow corporate repos | Обычно Squash |
+| Spark / Hadoop community | Merge commit |
+| Свой pet project, один разработчик | Squash (проще) |
+
+В DE-командах реально: **70% squash, 25% merge-commit, 5% rebase-merge**. Junior должен спросить у tech lead «какой у нас merge strategy». Это team convention.
+
+<Callout type="tip">
+GitHub можно настроить так, что разрешена только одна стратегия (Settings -> Pull Requests -> Allow merge types). Это enforces team convention автоматически. Если в твоей команде разрешён только squash — забудь про merge commit и rebase merge.
+</Callout>
+
+---
+
+## Squash detail: что попадает в commit message
+
+При Squash and merge, GitHub формирует message:
+
+```
+PR title
+
+* Commit 1 message
+* Commit 2 message
+* Commit 3 message
+```
+
+Например:
+
+```
+feat(dags): add users ETL pipeline (#234)
+
+* WIP basic structure
+* Add transform step
+* Add tests
+* Fix linter
+* Update docs
+```
+
+В UI можно отредактировать message перед merge. Best practice — почистить:
+
+```
+feat(dags): add users ETL pipeline (#234)
+
+Implements ETL для users из Postgres в warehouse.
+Includes transform, validation, tests.
+
+Closes #123
+```
+
+Number `(#234)` в конце автоматически добавляется GitHub — ссылка на PR. Очень полезно для tracking.
+
+---
+
+## Что НЕ делать
+
+### Ad-hoc rebase локально перед merge
+
+```bash
+# Локально
+$ git switch feature
+$ git rebase main
+$ git push --force-with-lease     # переписываем remote feature
+
+# В GitHub
+[click] Squash and merge
+```
+
+После rebase + squash инфа двойная. Команда может ожидать одно, видеть другое. **Не комбинируй** rebase локально + squash на GitHub.
+
+### Manual merge через terminal
+
+```bash
+$ git switch main
+$ git merge feature
+$ git push origin main
+```
+
+Это работает, но **обходит** PR-процесс: нет approve, нет CI check на merge-коммите, нет audit trail в GitHub UI. В team setting почти всегда запрещено branch protection (push в main только через PR merge button).
+
+### Force-push main после merge
+
+Никогда. Подробно — в модуле 09 урок 03.
+
+---
+
+## Реальный pattern: dbt-репо на GitHub
+
+Команда dbt на GitHub с такими settings:
+
+- **Branch protection** на main:
+  - Require PR before merge
+  - Require 1 approval
+  - Require status checks (dbt parse, dbt test on PR branch)
+  - Restrict pushes (только через PR merge)
+  - Allowed merge types: **Squash only**
+
+Workflow:
+
+```bash
+$ git switch -c feat/customer_ltv main
+# работа, possibly много мелких коммитов (WIP, fix, refactor)
+$ git push -u origin feat/customer_ltv
+
+$ gh pr create --title "feat(marts): customer LTV model" \
+    --body "..."
+
+# CI зелёный, reviewer approve
+$ gh pr merge --squash --delete-branch
+# Один squashed коммит на main, feature ветка удалена
+```
+
+Результат:
+- `git log main --oneline` — чистая история одна-фича-один-коммит.
+- Хочешь подробности feature — открой PR в GitHub, видна детальная история.
+- Revert одного PR — один `git revert <commit>`.
+
+Это **standard DE pattern** в 2026.
+
+---
+
+## Killer takeaway
+
+GitHub предлагает 3 merge strategies: **Merge commit** (preserve history, шумный log), **Squash** (один коммит, чистая main — most common в DE), **Rebase merge** (линейная история, требует строгий commit hygiene). 70% DE teams юзают squash. Команда настраивает разрешённые стратегии через branch protection. Не комбинируй local rebase + squash on GitHub — выбери одно.
+
+<KnowledgeCheck quizSlug="11-pull-requests/04-merge-strategies" />

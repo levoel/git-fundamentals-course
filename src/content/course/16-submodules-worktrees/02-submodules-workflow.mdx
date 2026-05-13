@@ -1,0 +1,472 @@
+---
+title: "Submodules workflow: clone, update, common pain"
+description: "Практический workflow — clone --recurse-submodules, update --remote, detached HEAD, forgot to push, submodule.recurse=true и другие болевые точки"
+order: 2
+difficulty: "intermediate"
+estimatedTime: 22
+topics: ["submodules", "workflow", "detached HEAD", "submodule.recurse"]
+---
+
+# Submodules workflow: clone, update, common pain
+
+В предыдущем уроке мы разобрали, что submodule — это pinned reference на commit другого репо. В теории всё понятно. На практике submodules знамениты тем, что junior DE регулярно ловят footgun-ы: пустые директории после clone, detached HEAD внутри submodule, забытый push, потерянные изменения. Большинство этих болей — от непонимания workflow.
+
+В этом уроке: практический workflow для работы с submodules в команде. Полные сценарии: clone-and-go, update до latest, переключение branches, разработка прямо в submodule. И конкретные решения для каждого pain point.
+
+---
+
+## Workflow 1: Clone parent project
+
+Самый частый scenarios — клонировать существующий parent-репо со submodules. Есть три способа.
+
+```bash
+# Способ 1: один shot
+$ git clone --recurse-submodules https://github.com/acme/parent.git
+# Эквивалент: clone + submodule init + submodule update --recursive
+
+# Способ 2: clone, потом init/update
+$ git clone https://github.com/acme/parent.git
+$ cd parent
+$ git submodule update --init --recursive
+# --init нужен потому что после clone submodule "не активирован" в .git/config
+# --recursive — для submodules внутри submodules (rare but exists)
+
+# Способ 3: настроить чтобы все clone делали --recurse-submodules по дефолту
+$ git config --global submodule.recurse true
+# Теперь git clone и git pull автоматически работают с submodules
+```
+
+<Callout type="tip">
+Для повседневной работы сразу настрой `git config --global submodule.recurse true`. Это глобальная настройка, которая включает recursive поведение для clone, checkout, pull. Снимает 90% болей submodule-ов.
+</Callout>
+
+### Что значит "submodule init"
+
+Без `init` у тебя в `.gitmodules` есть запись, но в `.git/config` parent-а submodule не зарегистрирован. Submodule директория есть, но пустая.
+
+```bash
+# После обычного clone (без --recurse-submodules)
+$ ls shared-utils/
+# (пусто)
+
+$ cat .gitmodules
+[submodule "shared-utils"]
+    path = shared-utils
+    url = https://github.com/acme/shared-utils.git
+
+$ cat .git/config
+# нет submodule секции
+
+# init копирует данные из .gitmodules в .git/config
+$ git submodule init
+Submodule 'shared-utils' (https://github.com/acme/shared-utils.git) registered for path 'shared-utils'
+
+$ cat .git/config
+[submodule "shared-utils"]
+    url = https://github.com/acme/shared-utils.git
+    active = true
+
+# Теперь update может склонировать
+$ git submodule update
+Submodule path 'shared-utils': checked out 'abc123...'
+
+$ ls shared-utils/
+# теперь файлы есть
+```
+
+`init` отделено от `update` потому что иногда хочется регистрировать submodule, но не клонировать его (например, если он не нужен для текущей работы).
+
+В 99% случаев — делай `init --update` одной командой:
+
+```bash
+$ git submodule update --init --recursive
+```
+
+---
+
+## Workflow 2: Update submodule до latest
+
+Сценарий: ты работаешь в parent, submodule `shared-utils` обновился в upstream (platform team добавила новую функцию). Ты хочешь использовать.
+
+```bash
+# Способ 1: ручной через submodule репо
+$ cd shared-utils
+$ git fetch origin
+$ git checkout main
+$ git pull origin main
+
+$ cd ..  # обратно в parent
+$ git status
+modified:   shared-utils (new commits)
+
+$ git add shared-utils
+$ git commit -m "chore: bump shared-utils to latest"
+
+# Способ 2: через parent-команду
+$ git submodule update --remote shared-utils
+# --remote означает "тяни последнее с tracked branch"
+# По умолчанию tracked branch = origin/HEAD (обычно main)
+
+$ git add shared-utils
+$ git commit -m "chore: bump shared-utils"
+```
+
+### Какой branch tracking?
+
+По умолчанию `git submodule update --remote` тянет с `origin/HEAD` (обычно main). Если хочется другой branch — настрой через `.gitmodules`:
+
+```ini
+# .gitmodules
+[submodule "shared-utils"]
+    path = shared-utils
+    url = https://github.com/acme/shared-utils.git
+    branch = develop    ← теперь --remote будет тянуть develop
+```
+
+После изменения `.gitmodules` команда:
+
+```bash
+$ git submodule sync   # синхронизирует .git/config с .gitmodules
+$ git submodule update --remote
+```
+
+---
+
+## Workflow 3: Detached HEAD внутри submodule
+
+Самый частый source confusion в submodules. После `git submodule update` внутри submodule HEAD detached:
+
+```bash
+$ cd shared-utils
+$ git status
+HEAD detached at abc123...
+# Это нормально для submodule!
+```
+
+Почему: parent ссылается на конкретный **SHA**, не на branch. Когда parent делает checkout submodule, он делает `git checkout <SHA>`, что приводит к detached HEAD.
+
+Это работает для **read-only** использования (просто использовать функции из shared-utils). Если ты хочешь **изменять** код прямо в submodule:
+
+```bash
+# Внутри submodule перейти на бранч ДО изменений
+$ cd shared-utils
+$ git checkout main      # или другой branch
+$ git pull origin main
+
+# Теперь работай как с обычным репо
+$ vim main.py
+$ git add . && git commit -m "feat: add new helper"
+$ git push origin main
+
+# Вернись в parent и обнови gitlink
+$ cd ..
+$ git status
+modified:   shared-utils
+
+$ git add shared-utils
+$ git commit -m "chore: bump shared-utils with new helper"
+```
+
+<Callout type="warning">
+Если ты commit-ишь внутри submodule **без переключения на branch** (в detached HEAD), коммит создастся, но не на ветке. После следующего `git checkout` он "потеряется" (станет dangling object). reflog поможет восстановить (модуль 09), но это болезненный опыт.
+</Callout>
+
+---
+
+## Workflow 4: Forgot to push submodule
+
+Самая частая ошибка: ты сделал коммит в submodule, обновил gitlink в parent, запушил parent — но забыл запушить submodule. Коллега тянет parent, gitlink указывает на коммит, который существует только у тебя локально.
+
+```bash
+# Что делает коллега
+$ git pull
+$ git submodule update --init --recursive
+Submodule path 'shared-utils': checked out 'abc123...'
+fatal: reference is not a tree: abc123abc123...
+Unable to checkout 'abc123' in submodule path 'shared-utils'
+
+# Это значит — gitlink указывает на commit, которого нет в remote shared-utils
+```
+
+Решение:
+
+```bash
+# Ты возвращаешься, делаешь push submodule
+$ cd shared-utils
+$ git push origin main
+
+# Теперь коллега может работать
+```
+
+Профилактика — настрой:
+
+```bash
+# Сделать push в parent проверять, что submodule тоже pushed
+$ git config push.recurseSubmodules check
+# или check = "abort if submodule not pushed", on-demand = "auto push submodule"
+```
+
+Опции `push.recurseSubmodules`:
+- `no` (default) — не проверять, можно забыть
+- `check` — abort if submodule has unpushed commits
+- `on-demand` — авто-push submodule перед parent push
+
+Для team workflow рекомендую `on-demand`. Каждый push parent автоматически делает push submodule, если нужно.
+
+---
+
+## Workflow 5: Switching branches в parent
+
+Когда ты `git checkout` другую ветку в parent, submodule **не обновляется автоматически**:
+
+```bash
+# На feature-branch использовалась shared-utils v2
+$ git checkout feature/new-pipeline
+$ cd shared-utils
+$ git log --oneline -1
+abc123 feat: add v2 connector  ← v2
+
+# Переходишь на main, где shared-utils ещё на v1
+$ cd ..
+$ git checkout main
+
+# Но в submodule всё ещё v2!
+$ cd shared-utils
+$ git log --oneline -1
+abc123 feat: add v2 connector  ← всё ещё v2!
+
+$ cd ..
+$ git status
+modified:   shared-utils (uncommitted changes — gitlink mismatch)
+```
+
+Это путает: ты переключил branch в parent, но submodule по факту — из старой ветки. Решение — `submodule.recurse=true` глобально:
+
+```bash
+$ git config --global submodule.recurse true
+
+# Теперь:
+$ git checkout main
+# Автоматически обновит submodule к pinned commit ветки main
+```
+
+Альтернативно — каждый раз вручную:
+
+```bash
+$ git checkout main
+$ git submodule update --recursive
+```
+
+Помнить вручную — рецепт катастрофы. Лучше включить config.
+
+---
+
+## Workflow 6: Удаление submodule
+
+Удалить submodule не так просто, как добавить. Нужно три действия:
+
+```bash
+# 1. Deinit (убирает из .git/config и working tree)
+$ git submodule deinit -f shared-utils
+
+# 2. Удалить из tree (gitlink)
+$ git rm -f shared-utils
+
+# 3. Удалить .git/modules/shared-utils
+$ rm -rf .git/modules/shared-utils
+
+# 4. Закоммить (удаление из .gitmodules произошло автоматически на step 2)
+$ git commit -m "chore: remove shared-utils submodule"
+```
+
+Это известный гудок submodules — удаление через 3-4 шага. Есть alias-ы в community:
+
+```bash
+git config --global alias.rmsub '!f() { git submodule deinit -f "$1" && git rm -f "$1" && rm -rf .git/modules/"$1"; }; f'
+
+# Теперь:
+$ git rmsub shared-utils
+```
+
+---
+
+## Workflow 7: CI с submodules
+
+GitHub Actions и аналоги по умолчанию НЕ клонируют submodules. Нужно явное указание:
+
+```yaml
+# .github/workflows/ci.yml
+- uses: actions/checkout@v4
+  with:
+    submodules: recursive   # 'true' для one level, 'recursive' для глубокого
+    token: ${{ secrets.GH_TOKEN }}   # если submodule private
+```
+
+Без `submodules: recursive` CI получит пустую `shared-utils/`, и тесты упадут с ImportError.
+
+Если submodule private (другой репо в той же организации с разными permissions), нужен PAT (personal access token) с правами на оба репо, передаваемый через secrets.
+
+---
+
+## Common pitfalls и решения
+
+### 1. "shared-utils пустой после clone"
+
+**Причина**: забыл `--recurse-submodules` или `submodule update --init`.
+
+**Решение**: `git submodule update --init --recursive` или `git config --global submodule.recurse true` навсегда.
+
+### 2. "detached HEAD внутри submodule, я случайно сделал коммит, теперь не могу его найти"
+
+**Причина**: коммит был в detached HEAD, после следующего checkout стал dangling.
+
+**Решение**: 
+```bash
+cd shared-utils
+git reflog              # найди SHA своего коммита
+git checkout -b recover <SHA>   # сохрани как ветку
+```
+
+Профилактика: всегда перед коммитом в submodule `git checkout main` (или нужную ветку).
+
+### 3. "Pull parent — submodule не обновляется"
+
+**Причина**: pull обновляет gitlink в индексе, но не обновляет sам submodule.
+
+**Решение**: после `git pull` сделать `git submodule update --recursive`. Или `submodule.recurse=true` глобально.
+
+### 4. "Запушил parent с обновлением submodule, коллеги жалуются на 'reference is not a tree'"
+
+**Причина**: gitlink указывает на твой локальный коммит submodule, который не запушен.
+
+**Решение**: `cd submodule && git push`. Профилактика: `push.recurseSubmodules=on-demand`.
+
+### 5. "PR review submodule — что reviewer должен смотреть?"
+
+**Причина**: PR на parent показывает только изменение gitlink (`-Subproject commit X +Subproject commit Y`). Что внутри изменилось — нужно смотреть в submodule отдельно.
+
+**Решение**: 
+- Сделать `git log <old-sha>..<new-sha>` в submodule для просмотра commits
+- Или открыть submodule на GitHub: `https://github.com/acme/shared-utils/compare/<old>...<new>`
+- Использовать `git diff --submodule=log` или `git diff --submodule=diff` для inline просмотра
+
+```bash
+$ git config --global diff.submodule log
+# Теперь git diff показывает commits в submodule:
+
+$ git diff
+Submodule shared-utils abc123..def456:
+  > feat: add new connector
+  > fix: edge case in parser
+```
+
+---
+
+## Полный survival checklist
+
+После всего этого — короткий cheat sheet для повседневной работы:
+
+```bash
+# 1. Глобальные настройки — один раз
+git config --global submodule.recurse true
+git config --global push.recurseSubmodules on-demand
+git config --global diff.submodule log
+
+# 2. Clone parent с submodules
+git clone --recurse-submodules <URL>
+
+# 3. Pull — submodule обновится автоматически (если submodule.recurse=true)
+git pull
+
+# 4. Изменения в submodule
+cd shared-utils
+git checkout main         # ВСЕГДА before editing
+# (внести изменения, commit)
+git push
+cd ..
+git add shared-utils && git commit -m "chore: bump submodule"
+git push                   # автоматически запушит submodule (если push.recurseSubmodules=on-demand)
+
+# 5. Обновить submodule до latest на tracked branch
+git submodule update --remote
+git add . && git commit -m "chore: bump submodule"
+
+# 6. Удалить submodule
+git submodule deinit -f <name>
+git rm -f <name>
+rm -rf .git/modules/<name>
+git commit -m "chore: remove <name>"
+```
+
+С этим cheat sheet 90% проблем submodule исчезнут.
+
+---
+
+## Hands-on: эксперимент
+
+```bash
+# Создаём всё локально, чтобы можно было погонять команды
+
+# 1. Submodule репо (внутренняя library)
+mkdir lib-repo && cd lib-repo
+git init
+echo "def hello(): return 'v1'" > main.py
+git add . && git commit -m "init v1"
+cd ..
+
+# 2. Parent репо
+mkdir parent && cd parent
+git init
+echo "# Parent" > README.md
+git add . && git commit -m "init"
+git submodule add ../lib-repo lib
+git commit -m "feat: add lib submodule"
+
+# 3. Симулируй коллегу — клонируй parent (без --recurse-submodules)
+cd ..
+git clone parent colleague-clone
+cd colleague-clone
+ls lib/
+# (empty)
+
+git submodule update --init --recursive
+ls lib/
+# main.py есть
+
+# 4. Внутри lib обнови
+cd ../lib-repo
+echo "def goodbye(): return 'bye'" >> main.py
+git commit -am "add goodbye"
+
+# 5. В parent обнови gitlink
+cd ../parent
+git submodule update --remote
+git status
+git diff --submodule=log
+# Submodule lib abc..def:
+#   > add goodbye
+
+git add lib && git commit -m "chore: bump lib"
+
+# 6. Симулируй колегу — pull
+cd ../colleague-clone
+git pull
+# С submodule.recurse=true — submodule обновится сам
+# Без него — нужен git submodule update --recursive
+```
+
+---
+
+## Cross-link
+
+- **Урок 03** — git subtree, альтернатива submodule без боли
+- **Урок 04** — git worktrees, другой механизм (multiple working trees)
+- **Модуль 14** — DVC для data (вместо submodule на data-репо)
+- **Модуль 18** — CI с submodules (actions/checkout submodules: recursive)
+
+---
+
+<KnowledgeCheck
+  question="Коллега жалуется: 'после git pull у меня тесты падают с ImportError. Я ничего не менял!'. Ты смотришь, у него parent на main branch, gitlink shared-utils указывает на abc123, но в `shared-utils/main.py` старая версия без новой функции. В чём проблема и какой fix?"
+  answer="Проблема: `git pull` обновил gitlink в индексе parent (теперь указывает на abc123 — новую версию), но НЕ обновил содержимое submodule в working tree. shared-utils осталась в старом состоянии — со старым кодом, но parent считает что там должна быть новая версия. Импорты падают потому что новая функция, которую parent ожидает, отсутствует в submodule. Fix: `git submodule update --recursive` — это обновит submodule до commit-а, на который указывает gitlink. После этого new функция появится, тесты пройдут. Чтобы это не повторялось: настроить `git config --global submodule.recurse true` — теперь любой git pull, git checkout, git merge автоматически обновляет submodules. Это глобальная настройка, делается один раз на машину. Для team — добавь в onboarding doc: 'после первого clone выполни git config --global submodule.recurse true'. Дополнительно: `git config --global diff.submodule log` — теперь git diff в parent показывает не только 'Subproject commit X..Y', но и сами commits внутри submodule (читаемо для PR review). Этот стэк настроек (submodule.recurse + push.recurseSubmodules + diff.submodule) убирает 90% боли submodules для повседневной работы."
+/>

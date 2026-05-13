@@ -1,0 +1,323 @@
+---
+title: "git reset --soft / --mixed / --hard — что точно меняется в трёх областях"
+description: "Три режима git reset разные по силе разрушения. --soft двигает только HEAD, --mixed (default) ещё index, --hard уничтожает и working tree. Полная таблица: что попадает в helldump, что выживает."
+order: 2
+difficulty: "beginner"
+estimatedTime: 30
+topics: ["reset", "soft", "mixed", "hard", "HEAD", "three-trees", "rewrite-history"]
+---
+
+# git reset — двигаем HEAD по истории
+
+`git reset` — одна из самых пугающих команд для junior. Из-за `--hard` репутация у неё «сжигает работу». На самом деле reset — это просто способ **сказать ветке: «теперь ты указываешь на другой коммит»**. Сколько ущерба он нанесёт твоему working tree — зависит от того, какой из трёх режимов ты выбрал.
+
+В этом уроке разберём, что точно меняет каждый режим, как мысленно представлять разницу между soft/mixed/hard, и почему `--hard` на самом деле не так страшен (потому что есть reflog — урок 04).
+
+---
+
+## Базовая ментальная модель
+
+Команда `git reset <mode> <ref>` делает **до трёх действий по порядку**:
+
+<DiagramContainer title="Что меняет каждый mode reset">
+  <FlowColumn>
+    <FlowRow>
+      <FlowNode tooltip="--soft: только указатель ветки">--soft</FlowNode>
+      <FlowNode tooltip="Сдвигает HEAD (и текущую ветку) на указанный коммит">двигает HEAD</FlowNode>
+    </FlowRow>
+    <FlowRow>
+      <FlowNode tooltip="--mixed: default режим">--mixed (default)</FlowNode>
+      <FlowNode tooltip="Сдвигает HEAD + перезаписывает index новым HEAD">двигает HEAD + перезаписывает index</FlowNode>
+    </FlowRow>
+    <FlowRow>
+      <FlowNode tooltip="--hard: самый разрушительный">--hard</FlowNode>
+      <FlowNode tooltip="HEAD + index + working tree — всё синхронизируется с указанным коммитом">двигает HEAD + index + working tree</FlowNode>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+**Главное правило**: чем выше в этом списке режим, тем меньше он трогает. `--soft` — самый безопасный, ничего не уничтожает в файлах. `--hard` — самый разрушительный, может стереть несохранённое.
+
+---
+
+## Setup: общий пример для всех режимов
+
+Создадим репо с тремя коммитами:
+
+```bash
+$ git init reset-demo && cd reset-demo
+$ echo "v1" > pipeline.py && git add . && git commit -m "C1: initial"
+$ echo "v2" > pipeline.py && git commit -am "C2: add transform"
+$ echo "v3" > pipeline.py && git commit -am "C3: add validation"
+
+$ git log --oneline
+ghi9012 (HEAD -> main) C3: add validation
+def5678 C2: add transform
+abc1234 C1: initial
+```
+
+Хотим откатиться на C1 (через `HEAD~2` или хэш `abc1234`). Сравним, что произойдёт в трёх режимах.
+
+---
+
+## Режим 1: --soft (только HEAD)
+
+```bash
+$ git reset --soft HEAD~2
+
+$ git log --oneline
+abc1234 (HEAD -> main) C1: initial
+
+$ cat pipeline.py
+v3                                  # working tree не тронули!
+
+$ git status
+On branch main
+Changes to be committed:
+  modified:   pipeline.py           # изменения из C2+C3 теперь в index
+```
+
+Что произошло:
+
+1. HEAD сдвинули с C3 на C1. Коммиты C2 и C3 «осиротели» — больше не на ветке main.
+2. Index **не тронули** — он по-прежнему содержит снэпшот из C3.
+3. Working tree **не тронули** — на диске всё ещё `v3`.
+
+Результат: разница между «текущим состоянием» (v3 на диске и в index) и «новым HEAD» (C1, где `v1`) теперь висит в index как **готовое к новому коммиту изменение**.
+
+<Callout type="tip">
+`git reset --soft HEAD~N` — это способ **«сжать» N коммитов в один**. Откатили HEAD, все накопленные изменения остались в index, делаем `git commit -m "Merged feature"` — получили один коммит вместо N. Альтернатива interactive rebase squash из модуля 07.
+</Callout>
+
+### Когда юзать --soft
+
+- Сжать последние N коммитов в один (squash до push).
+- Откатиться, не теряя ни строчки изменений: всё остаётся в index, можно перекоммитить с правильным message.
+- «Я закоммитил в неправильную ветку» — `git reset --soft HEAD~1`, переключиться на правильную ветку, закоммитить.
+
+---
+
+## Режим 2: --mixed (default — HEAD + index)
+
+`--mixed` — режим по умолчанию. `git reset HEAD~2` без флага = `git reset --mixed HEAD~2`.
+
+```bash
+# Сначала вернёмся к C3, чтобы повторить эксперимент
+$ git reset --hard ghi9012     # вернули как было
+
+$ git reset --mixed HEAD~2     # = git reset HEAD~2
+
+$ git log --oneline
+abc1234 (HEAD -> main) C1: initial
+
+$ cat pipeline.py
+v3                              # working tree не тронули
+
+$ git status
+On branch main
+Changes not staged for commit:
+  modified:   pipeline.py        # в working tree, НЕ в index
+```
+
+Разница с `--soft`: index синхронизирован с новым HEAD (C1, `v1`). Изменения c v1 на v3 теперь в working tree как **«не staged»**.
+
+То есть `--mixed` делает:
+1. HEAD -> C1.
+2. Index -> перезаписан снэпшотом из C1.
+3. Working tree -> не тронут.
+
+Изменения не теряются, но их надо заново `git add`-нуть, чтобы закоммитить.
+
+### Когда юзать --mixed
+
+- «Я хочу пересмотреть, что класть в коммит». Reset снёс staging area, делай `git add` заново по частям через `git add -p`.
+- Сжать коммиты и пересоставить staging area с нуля.
+
+---
+
+## Режим 3: --hard (всё уничтожаем)
+
+```bash
+$ git reset --hard ghi9012     # вернули как было
+
+$ git reset --hard HEAD~2
+
+$ git log --oneline
+abc1234 (HEAD -> main) C1: initial
+
+$ cat pipeline.py
+v1                              # working tree откатился!
+
+$ git status
+On branch main
+nothing to commit, working tree clean
+```
+
+`--hard` синхронизировал **всё**: HEAD на C1, index в состояние C1, файлы на диске тоже в состояние C1. Никакого следа от C2/C3 на ветке нет. Working tree чистый — как будто C2 и C3 не существовали.
+
+<Callout type="danger">
+`git reset --hard` **уничтожает несохранённые изменения** в working tree (те, что не были закоммичены). Это нельзя восстановить через reflog — reflog хранит только коммиты, не working tree. Если ты редактировал файл, не закоммитил, и сделал `--hard` — изменения **навсегда потеряны**.
+</Callout>
+
+### А коммиты-то восстановимы?
+
+Да — но через reflog (урок 04). C2 и C3 после `--hard` не в ветке main, но **существуют как orphan objects** в `.git/objects` ещё ~90 дней до garbage collection. Reflog запомнил их хэши:
+
+```bash
+$ git reflog
+abc1234 (HEAD -> main) HEAD@{0}: reset: moving to HEAD~2
+ghi9012 HEAD@{1}: commit: C3: add validation
+def5678 HEAD@{2}: commit: C2: add transform
+abc1234 HEAD@{3}: commit (initial): C1: initial
+
+$ git reset --hard HEAD@{1}    # вернули обратно через reflog
+```
+
+Поэтому `--hard` страшен, но не катастрофичен — пока есть reflog. Снесённые `--hard`-ом working tree изменения, которые не были в коммите — вот это уже не вернёшь.
+
+### Когда юзать --hard
+
+- «Я хочу полностью забыть мои локальные эксперименты и начать с чистой ветки». Например, ветка зашла в тупик, проще откатить и начать заново.
+- Синхронизироваться с удалённой веткой: `git reset --hard origin/main`. Уничтожает локальные коммиты, которые ещё не запушены. Юзай **только если ты уверен**, что эти коммиты тебе не нужны.
+
+---
+
+## Полная сравнительная таблица
+
+| Действие | --soft | --mixed (default) | --hard |
+|---|---|---|---|
+| Двигает HEAD | да | да | да |
+| Перезаписывает index | нет | да | да |
+| Перезаписывает working tree | нет | нет | да |
+| Несохранённые изменения в working tree | сохранены | сохранены | **уничтожены** |
+| Изменения, которые были в коммитах после нового HEAD | в index | в working tree | потеряны (но в reflog) |
+| Опасность | низкая | средняя | высокая |
+
+---
+
+## Диаграмма: путь файла в каждом режиме
+
+<DiagramContainer title="Состояние pipeline.py после reset на C1, исходно v3 в HEAD/index/wt">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox tooltip="После --soft: HEAD на C1 (v1), index хранит v3, файл на диске v3">--soft</DataBox>
+      <FlowNode tooltip="C1: v1">HEAD: v1</FlowNode>
+      <FlowNode tooltip="index хранит v3 — готов к коммиту изменения">index: v3</FlowNode>
+      <FlowNode tooltip="working tree: v3 на диске">wt: v3</FlowNode>
+    </FlowRow>
+    <FlowRow>
+      <DataBox tooltip="После --mixed: HEAD на C1, index синхронизирован с C1, working tree остался v3">--mixed</DataBox>
+      <FlowNode tooltip="C1: v1">HEAD: v1</FlowNode>
+      <FlowNode tooltip="index синхронизирован с HEAD">index: v1</FlowNode>
+      <FlowNode tooltip="working tree: v3 на диске, не staged">wt: v3</FlowNode>
+    </FlowRow>
+    <FlowRow>
+      <DataBox tooltip="После --hard: всё синхронизировано с C1, изменения v3 потеряны из working tree (восстановимы только из reflog коммита)">--hard</DataBox>
+      <FlowNode tooltip="C1: v1">HEAD: v1</FlowNode>
+      <FlowNode tooltip="index синхронизирован с HEAD">index: v1</FlowNode>
+      <FlowNode tooltip="working tree: v1, изменения уничтожены">wt: v1</FlowNode>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+---
+
+## Что точно НЕ делает reset
+
+Распространённые заблуждения:
+
+1. **Reset не удаляет коммиты из репозитория**. Он двигает указатель ветки. Сами коммиты живут в `.git/objects` пока их не подберёт garbage collection (обычно через ~90 дней + если они unreachable).
+
+2. **Reset не работает с remote**. `git reset --hard HEAD~2` локально откатит твою ветку. На сервере (`origin/main`) ничего не изменится, пока ты не сделаешь `git push --force` (что почти всегда плохая идея на shared веткой).
+
+3. **Reset не trigger-ит файловую систему хитро**. Это просто запись новых SHA в `.git/refs/heads/<branch>` + обновление index + опционально файлов.
+
+---
+
+## DE-сценарии
+
+### Сценарий A: «закоммитил в feature, надо было в hotfix»
+
+```bash
+# Делал hotfix, но забыл переключиться на ветку hotfix/critical
+$ git log --oneline
+abc1234 (HEAD -> feature/users) Fix critical bug in DAG
+
+# Откатываем коммит, оставляя изменения в working tree
+$ git reset --mixed HEAD~1
+$ git switch hotfix/critical
+$ git add . && git commit -m "Fix critical bug in DAG"
+```
+
+### Сценарий B: «сжимаю 5 экспериментальных коммитов в один перед PR»
+
+```bash
+$ git log --oneline
+e5e5e5e (HEAD -> feature/etl) try variant 5
+d4d4d4d try variant 4
+c3c3c3c try variant 3
+b2b2b2b try variant 2
+a1a1a1a try variant 1
+def5678 (origin/main) main commit
+
+# Сжимаем всё до main
+$ git reset --soft origin/main
+$ git commit -m "feat: ETL pipeline для users"
+$ git log --oneline
+fffffff (HEAD -> feature/etl) feat: ETL pipeline для users
+def5678 (origin/main) main commit
+```
+
+### Сценарий C: «синхронизируюсь с origin, мои локальные коммиты не нужны»
+
+```bash
+$ git fetch origin
+$ git reset --hard origin/main
+# Локальная main теперь точно как origin/main, все локальные коммиты ушли
+```
+
+<Callout type="warning">
+В сценарии C ты теряешь все локальные коммиты, которые ещё не запушены. Если они тебе нужны — сначала `git branch backup-local` или `git stash`, потом `--hard`.
+</Callout>
+
+---
+
+## Reset vs Restore — когда что
+
+| Хочу | Команда |
+|---|---|
+| Откатить файл к HEAD | `git restore <file>` |
+| Unstage файл | `git restore --staged <file>` |
+| Откатить HEAD на N коммитов, сохранить изменения в index | `git reset --soft HEAD~N` |
+| Откатить HEAD на N коммитов, изменения в working tree | `git reset --mixed HEAD~N` |
+| Откатить HEAD на N коммитов, ВСЁ снести | `git reset --hard HEAD~N` |
+| Отменить публичный коммит безопасно | `git revert <commit>` (урок 03) |
+
+Мнемоника: **`restore` — для файлов, `reset` — для HEAD, `revert` — для shared history**.
+
+---
+
+## Попробуй сам
+
+Воссоздай setup и поиграйся со всеми тремя режимами:
+
+```bash
+$ mkdir reset-play && cd reset-play
+$ git init
+$ for i in 1 2 3; do echo "v$i" > f.txt && git add . && git commit -m "C$i"; done
+
+# Поэкспериментируй
+$ git reset --soft HEAD~2 && git status && git reset --hard ghi9012   # вернуть как было — подставь свой хэш
+$ git reset --mixed HEAD~2 && git status && git reset --hard <C3-hash>
+$ git reset --hard HEAD~2 && git status && cat f.txt    # увидел v1?
+$ git reflog                                             # коммиты С2/С3 ещё видны
+$ git reset --hard HEAD@{1}                              # восстановили
+```
+
+---
+
+## Killer takeaway
+
+`git reset` — это «двигай HEAD на N коммитов назад/вперёд». Три режима отличаются тем, насколько глубоко синхронизировать остальные области: `--soft` только HEAD, `--mixed` ещё index, `--hard` ещё и working tree. `--hard` опасен только для **uncommitted** изменений — закоммиченное всегда восстановимо через reflog (урок 04). Никогда не делай `--hard` на ветке с несохранённой работой без `git stash` перед этим.
+
+<KnowledgeCheck quizSlug="09-undo-reflog/02-reset-modes" />

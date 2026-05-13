@@ -1,0 +1,14 @@
+# Default: tech leads
+* @acme-corp/tech-leads
+
+# Airflow DAGs — DE team
+/dags/                  @acme-corp/data-engineering
+
+# Shared helpers — DE team + leads
+/dags/shared/           @acme-corp/data-engineering @acme-corp/tech-leads
+
+# Infrastructure
+/.github/workflows/     @acme-corp/devops @acme-corp/tech-leads
+
+# Critical configs
+/pyproject.toml         @acme-corp/data-engineering @acme-corp/tech-leads

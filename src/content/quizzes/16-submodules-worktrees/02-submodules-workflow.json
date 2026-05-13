@@ -1,0 +1,63 @@
+{
+  "lessonSlug": "16-submodules-worktrees/02-submodules-workflow",
+  "moduleId": "16-submodules-worktrees",
+  "_meta": {
+    "idPrefix": "git-m16-02",
+    "description": "Quiz for lesson 02 of module 16 — submodules workflow"
+  },
+  "questions": [
+    {
+      "id": "git-m16-02-q1",
+      "type": "multiple-choice",
+      "question": "Какие 3 global config настройки рекомендуются для команды, работающей с submodules?",
+      "options": [
+        { "id": "a", "text": "Только submodule.recurse=true" },
+        { "id": "b", "text": "(1) submodule.recurse=true — clone/pull/checkout автоматически работают с submodules; (2) push.recurseSubmodules=on-demand — git push parent автоматически пушит submodule если он не запушен; (3) diff.submodule=log — git diff в parent показывает commits внутри submodule (читаемо для review)" },
+        { "id": "c", "text": "Только diff.submodule=log" },
+        { "id": "d", "text": "Никакие не нужны" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Три canonical настройки для каждого разработчика, работающего с submodules: (1) `submodule.recurse=true` — global или per-repo. Включает recursive поведение для clone, checkout, pull, merge — submodules автоматически синхронизируются. Без этого: переключил branch в parent -> submodule остался на старом коммите -> ImportError при импорте. (2) `push.recurseSubmodules=on-demand` — при `git push` parent, если submodule имеет unpushed commits, они автоматически пушатся. Это защищает от 'забыл запушить submodule' — самой частой ошибки submodule workflow. Опции: no (default, можно забыть), check (abort with warning), on-demand (auto-push). (3) `diff.submodule=log` — `git diff` в parent для submodule показывает не только 'Subproject commit X..Y', но и list commits ('> feat: add ...', '> fix: ...'). Это критично для PR review — reviewer видит ЧТО внутри submodule изменилось без отдельного clone shared-utils репо. Setup: `git config --global submodule.recurse true && git config --global push.recurseSubmodules on-demand && git config --global diff.submodule log`. Один раз — на всю жизнь. Все три снимают 90% submodule болей.",
+      "studyHint": "Повторите урок 02 — раздел 'Полный survival checklist'",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m16-02-q2",
+      "type": "multiple-choice",
+      "question": "Внутри submodule HEAD detached. Почему и как правильно делать commit внутри submodule?",
+      "options": [
+        { "id": "a", "text": "Это баг Git, нужно git reset" },
+        { "id": "b", "text": "Detached HEAD — нормально для submodule. Parent ссылается на конкретный SHA, поэтому при checkout submodule Git делает `git checkout <SHA>` (без branch). Чтобы commit-ить ВНУТРИ submodule: (1) cd shared-utils; (2) git checkout main (или нужная ветка) — выйти из detached; (3) git pull origin main; (4) внести изменения, commit, push; (5) cd .. в parent; (6) git add shared-utils && git commit -m 'chore: bump submodule'" },
+        { "id": "c", "text": "Закоммитить в detached HEAD — нормально" },
+        { "id": "d", "text": "Submodule нельзя редактировать" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Detached HEAD inside submodule — feature, не bug. Mechanics: parent's gitlink хранит SHA, не branch. При `git submodule update` Git делает `git checkout <SHA>` в submodule репо. Checkout по SHA = detached HEAD (нет current branch). Это правильное состояние для READ-only использования submodule. Проблема возникает, когда хочешь edit-ить submodule: если commit-нёшь в detached HEAD, commit создастся, но не на branch. После следующего `git checkout` в submodule (например, после `git submodule update` в parent) commit станет dangling — теряется (находится через reflog, модуль 09). Правильный workflow: (1) cd shared-utils; (2) `git status` — увидишь 'HEAD detached at <SHA>'; (3) `git checkout main` (или другая ветка) — обычное переключение; (4) `git pull origin main` — синхронизация; (5) внести изменения, `git commit`, `git push origin main`; (6) cd обратно в parent; (7) `git status` покажет 'modified: shared-utils' — это gitlink update; (8) `git add shared-utils && git commit -m 'chore: bump submodule'` чтобы обновить gitlink в parent. КЛЮЧЕВОЕ: всегда checkout branch ДО первого редактирования внутри submodule. Привычка: cd submodule -> checkout main -> pull -> edit -> commit -> push -> cd parent -> bump gitlink.",
+      "studyHint": "Повторите урок 02 — раздел 'Workflow 3: Detached HEAD внутри submodule'",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m16-02-q3",
+      "type": "multiple-choice",
+      "question": "Коллега жалуется: 'я pull-нул parent, и теперь тесты падают с ImportError, я ничего не менял!'. Какова причина и какой fix?",
+      "options": [
+        { "id": "a", "text": "Коллега должен переустановить Python" },
+        { "id": "b", "text": "Причина: git pull обновил gitlink в parent (новый SHA), но submodule в working tree остался на старом commit (без новых функций). Parent ожидает функцию, которой нет в старой версии submodule -> ImportError. Fix: `git submodule update --recursive`. Профилактика: `git config --global submodule.recurse true` — теперь все pull/checkout автоматически обновляют submodule" },
+        { "id": "c", "text": "Submodule сломался" },
+        { "id": "d", "text": "Нужно удалить .git/" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Это самый частый submodule footgun. Mechanics: (1) Ты обновил submodule, commit-нул gitlink в parent, push-ил. (2) Коллега делает `git pull` в parent. (3) Git pull обновляет parent's гilink в индексе (на новый SHA), но НЕ обновляет submodule working tree. (4) Submodule остаётся на старом commit с старым кодом. (5) Parent ожидает import из новой функции, которой ещё нет в старой версии submodule -> ImportError. Immediate fix: `git submodule update --recursive` — синхронизирует submodule с pinned SHA в gitlink. Это safe команда, всегда можно запустить после pull/checkout/merge. Profilактика навсегда: `git config --global submodule.recurse true`. После этого git pull автоматически делает submodule update. Аналогично для checkout, merge. Это global setting (один раз на машину), и убирает 90% submodule болей повседневной работы. Onboarding для команды: документировать в README что после первого clone нужно `git config --global submodule.recurse true`. Bonus: `git config --global submodule.fetchJobs 4` для parallel fetch — speed up при большом количестве submodules. С этими настройками submodules становятся почти прозрачным механизмом.",
+      "studyHint": "Повторите урок 02 — раздел 'Workflow 5: Switching branches в parent'",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m16-02-q4",
+      "type": "true-false",
+      "question": "После git push parent коллеги видят ошибку 'fatal: reference is not a tree: <SHA>' при попытке submodule update. Причина: ты обновил gitlink (новый SHA) в parent, но забыл push submodule с этим коммитом. Решение для повторного предотвращения — git config --global push.recurseSubmodules=on-demand.",
+      "correctAnswer": true,
+      "explanation": "Точно. Сценарий: (1) В submodule сделан commit (новая функция). (2) Submodule НЕ push-нут в remote. (3) В parent сделан `git add shared-utils && git commit -m '...'` — gitlink обновлён на SHA локального коммита submodule. (4) `git push parent` — отправляет parent с новым gitlink. (5) Колега pull-ит parent, видит обновлённый gitlink, делает submodule update -> Git идёт в remote shared-utils, ищет SHA, не находит -> 'fatal: reference is not a tree'. SHA указывает на commit, которого remote shared-utils ещё не знает (потому что ты забыл push). Решение немедленное: ты возвращаешься, `cd shared-utils && git push`. Теперь коллеги могут submodule update. Решение навсегда: `git config --global push.recurseSubmodules on-demand`. Опции этой настройки: 'no' (default — забыть легко), 'check' (abort with warning если submodule unpushed), 'on-demand' (auto-push submodule перед parent push). 'on-demand' — рекомендуемый default для team workflow. После этого ты `git push parent` — git автоматически проверяет, есть ли unpushed commits в submodule, если есть — pushes их сначала. Никаких 'reference is not a tree' ошибок у коллег. Cost — zero для пользователя, нужно один раз настроить.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

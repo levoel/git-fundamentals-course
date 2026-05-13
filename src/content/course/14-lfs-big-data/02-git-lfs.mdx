@@ -1,0 +1,458 @@
+---
+title: "Git LFS: pointer файлы и внешний storage"
+description: "Как работает Git LFS — pointer файлы вместо контента, smudge/clean filters, install/track workflow, quotas на GitHub и production caveats"
+order: 2
+difficulty: "intermediate"
+estimatedTime: 24
+topics: ["Git", "LFS", "Large File Storage", "binary files"]
+---
+
+# Git LFS: pointer файлы и внешний storage
+
+Git LFS (Large File Storage) — официальное расширение Git, разработанное GitHub для решения проблемы больших файлов. Идея простая и элегантная: в репо вместо реального бинарника лежит **маленький pointer-файл** с хешем, а сам контент хранится в отдельном **LFS-storage**. Для пользователя это выглядит почти как обычный Git — `git clone`, `git pull` работают как обычно. Под капотом — magic через filter mechanism.
+
+В этом уроке: как именно работает LFS изнутри (smudge/clean filters), как установить и настроить, как добавить файлы и куда они идут на самом деле, GitHub quotas и production caveats. К концу ты сможешь подключить LFS к своему репо и понимать, что происходит под капотом.
+
+---
+
+## Mental model: pointer file вместо контента
+
+В обычном Git blob = байты содержимого. В LFS-репо blob = крошечный текстовый pointer:
+
+<DiagramContainer title="Что лежит в репо: обычный Git vs LFS" color="blue">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="В обычном Git: blob = byte-for-byte содержимое файла, 100MB файл = 100MB в .git/">
+        <DataBox label="Обычный Git" className="border-rose-500/30 w-80">
+          <div className="text-xs space-y-1">
+            <div>features.parquet (100 MB)</div>
+            <div className="text-zinc-500">-> blob = 100 MB в .git/objects/</div>
+            <div className="text-zinc-500">-> clone скачивает 100 MB</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="В LFS: blob = pointer (130 байт текста). Реальные данные — в LFS storage">
+        <DataBox label="С Git LFS" className="border-emerald-500/30 w-80">
+          <div className="text-xs space-y-1">
+            <div>features.parquet (pointer, 130 bytes)</div>
+            <div className="text-zinc-500">-> blob = 130 bytes в .git/objects/</div>
+            <div className="text-zinc-500">-> файл скачивается отдельно по LFS</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Как выглядит pointer-файл (то, что Git реально хранит):
+
+```
+version https://git-lfs.github.com/spec/v1
+oid sha256:4cac19622fc3ade9c373d54e8e76e85f7466bcab85cee5a3a5cfd6e64da82e25
+size 104857600
+```
+
+Три строки: спец-версия LFS, хеш реального содержимого (sha256), размер. Это **всё**, что попадает в Git. Реальный 100MB файл живёт в LFS storage (отдельный бакет рядом с Git-сервером).
+
+Когда ты делаешь `git checkout` — LFS-клиент видит pointer-файл, идёт в LFS storage по hash-у, скачивает реальный контент и подменяет pointer на бинарь в working tree. Это происходит автоматически и прозрачно.
+
+---
+
+## Как LFS работает: smudge и clean filters
+
+Чудо работает через **Git smudge/clean filters** — стандартный механизм Git для трансформации файлов на пути между working tree и repository.
+
+<DiagramContainer title="Smudge/clean filter — два направления трансформации" color="purple">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center">
+      <DataBox label="working tree" className="border-blue-500/30 w-56">
+        <div className="text-xs">features.parquet (100MB)</div>
+      </DataBox>
+      <Tooltip content="При commit: clean filter превращает большой файл в pointer">
+        <FlowNode variant="default">clean -></FlowNode>
+      </Tooltip>
+      <DataBox label=".git/objects" className="border-purple-500/30 w-56">
+        <div className="text-xs">pointer (130 bytes)</div>
+      </DataBox>
+    </FlowRow>
+    <FlowRow className="gap-3 justify-center">
+      <DataBox label="working tree" className="border-blue-500/30 w-56">
+        <div className="text-xs">features.parquet (100MB)</div>
+      </DataBox>
+      <Tooltip content="При checkout: smudge filter скачивает по pointer-у реальный файл из LFS">
+        <FlowNode variant="default">← smudge</FlowNode>
+      </Tooltip>
+      <DataBox label=".git/objects" className="border-purple-500/30 w-56">
+        <div className="text-xs">pointer (130 bytes)</div>
+      </DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+- **`clean` filter** работает на `git add`: содержимое файла пайпится в `clean`, который выгружает реальное содержимое в local LFS cache (`.git/lfs/objects/`), а в индекс кладёт pointer.
+- **`smudge` filter** работает на `git checkout`: pointer пайпится в `smudge`, который читает hash, идёт в LFS storage (cache локально или remote), скачивает реальный контент, выдаёт его в working tree.
+
+В `.gitattributes` это объявляется так:
+
+```gitattributes
+*.parquet filter=lfs diff=lfs merge=lfs -text
+*.csv     filter=lfs diff=lfs merge=lfs -text
+*.h5      filter=lfs diff=lfs merge=lfs -text
+```
+
+`filter=lfs` — использовать LFS clean/smudge filters. `diff=lfs` — показывать LFS-aware diff. `merge=lfs` — мёрж через LFS handler. `-text` — отключить text mode (это бинари).
+
+Когда ты делаешь `git lfs track "*.parquet"` — Git LFS автоматически добавляет такую строку в `.gitattributes`.
+
+---
+
+## Установка Git LFS
+
+LFS — отдельная утилита поверх Git. На macOS:
+
+```bash
+# Установка
+brew install git-lfs
+
+# Активация (один раз на машину) — устанавливает hooks в global .gitconfig
+git lfs install
+
+# Что произошло — посмотри в ~/.gitconfig
+$ cat ~/.gitconfig
+[filter "lfs"]
+    clean = git-lfs clean -- %f
+    smudge = git-lfs smudge -- %f
+    process = git-lfs filter-process
+    required = true
+```
+
+`git lfs install` регистрирует фильтры в global config. Теперь Git знает, что делать с `filter=lfs` атрибутами.
+
+На Ubuntu:
+
+```bash
+# Через apt (в 2026 уже включено в стандартные репо)
+sudo apt install git-lfs
+git lfs install
+```
+
+На Windows — установщик с git-lfs.com или через `winget install GitHub.GitLFS`.
+
+Проверка:
+
+```bash
+$ git lfs version
+git-lfs/3.5.0 (GitHub; darwin arm64; go 1.22.1)
+```
+
+---
+
+## Workflow: tracking файлов
+
+После `git lfs install` нужно сказать LFS, какие файлы трекать.
+
+```bash
+# В корне репо
+cd my-de-project
+git lfs install   # активирует LFS для этого репо
+
+# Трекать все parquet файлы
+git lfs track "*.parquet"
+Tracking "*.parquet"
+
+# Трекать конкретную директорию
+git lfs track "data/raw/*"
+
+# Что произошло — посмотри в .gitattributes
+$ cat .gitattributes
+*.parquet filter=lfs diff=lfs merge=lfs -text
+data/raw/* filter=lfs diff=lfs merge=lfs -text
+```
+
+Важно: **.gitattributes должен быть commit-нут** до того, как ты добавишь файлы. Иначе LFS их не подхватит.
+
+```bash
+# Commit правил FIRST
+git add .gitattributes
+git commit -m "chore: track parquet via LFS"
+
+# Только потом добавь сами файлы
+git add features.parquet
+git commit -m "data: add features"
+
+# Push — LFS контент идёт отдельным каналом на LFS-сервер
+git push origin main
+```
+
+При push LFS-клиент сначала отправит большие файлы в LFS storage (через отдельный HTTP API), потом отправит обычный Git push с pointer-ами. На GitHub стандартный LFS-сервер встроен.
+
+---
+
+## Проверка состояния LFS
+
+```bash
+# Какие паттерны треккаются?
+$ git lfs track
+Listing tracked patterns
+    *.parquet (.gitattributes)
+
+# Какие файлы под LFS?
+$ git lfs ls-files
+4cac1962... * features.parquet
+89a3f12c... * model.pkl
+
+# Статистика по LFS storage в репо
+$ git lfs ls-files --size
+4cac1962... * features.parquet (100 MB)
+89a3f12c... * model.pkl (50 MB)
+
+# Информация про LFS хранилище
+$ git lfs env
+git config filter.lfs.process = "git-lfs filter-process"
+git config filter.lfs.smudge = "git-lfs smudge -- %f"
+git config filter.lfs.clean = "git-lfs clean -- %f"
+LocalWorkingDir=/Users/me/project
+LocalGitDir=/Users/me/project/.git
+LocalGitStorageDir=/Users/me/project/.git
+LocalMediaDir=/Users/me/project/.git/lfs/objects
+...
+```
+
+`.git/lfs/objects/` — локальный кэш LFS-файлов. При первом checkout-е LFS скачивает в кэш, при последующих — берёт из него.
+
+---
+
+## Клонирование LFS-репо
+
+```bash
+# Обычный clone — скачает Git, потом сразу LFS
+$ git clone https://github.com/acme/de-project.git
+Cloning into 'de-project'...
+remote: Enumerating objects: 1024, done.
+...
+Receiving objects: 100% (1024/1024), 12.42 MiB | 5.42 MiB/s, done.
+
+Filtering content: 100% (5/5), 250.42 MiB | 8.21 MiB/s, done.
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                   это LFS скачивает реальные файлы
+```
+
+Если хочешь сначала только Git без LFS (например, для quick inspection):
+
+```bash
+# Клон без скачивания LFS контента
+$ GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/acme/de-project.git
+
+# В working tree окажутся pointer-файлы вместо реальных
+$ cat features.parquet
+version https://git-lfs.github.com/spec/v1
+oid sha256:4cac1962...
+size 104857600
+
+# Потом, когда нужно — pull реальные файлы
+$ git lfs pull
+```
+
+Это удобно для CI, который анализирует код, но не нуждается в данных.
+
+---
+
+## GitHub LFS quotas
+
+GitHub предоставляет LFS storage с лимитами:
+
+<DiagramContainer title="GitHub Free vs Paid LFS limits" color="amber">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Free аккаунты: 1GB storage + 1GB bandwidth/месяц">
+        <DataBox label="Free" className="border-amber-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>1 GB storage</div>
+            <div>1 GB bandwidth/month</div>
+            <div>Hard limit, no overage</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Paid: data packs $5/month за каждые 50GB">
+        <DataBox label="Data Packs" className="border-blue-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>$5 / month per pack</div>
+            <div>50 GB storage + 50 GB bandwidth</div>
+            <div>Можно купить несколько</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="GitHub Enterprise: настраиваемые лимиты на self-hosted">
+        <DataBox label="Enterprise" className="border-emerald-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>Custom limits</div>
+            <div>Self-hosted backend (S3, Azure)</div>
+            <div>Корпорат вариант</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Bandwidth — это **download** трафик из LFS storage. Каждый `git clone`/`git lfs pull` потребляет bandwidth. Если у тебя CI на 50 запусков в день, и каждый клонирует 500MB LFS — это 25GB bandwidth в день, 750GB в месяц. Free tier выгорит за 3 часа.
+
+<Callout type="warning">
+LFS bandwidth — главный gotcha. Storage платится один раз, bandwidth — каждый download. На активных проектах bandwidth дороже storage. Перед использованием GitHub LFS оцени: сколько CI-запусков × сколько MB на каждом × сколько разработчиков.
+</Callout>
+
+GitLab имеет более щедрые лимиты (10GB на free tier). Bitbucket — свои условия. Для корпоративных проектов с большими data — лучше self-hosted LFS-сервер с S3 backend (`lfs-test-server`, `Giftless`, или встроенный в GitLab/Gitea).
+
+---
+
+## Production caveats
+
+Несколько подводных камней, на которые джуны попадают:
+
+### 1. forget to install LFS перед clone
+
+```bash
+$ git clone https://github.com/acme/lfs-repo.git
+$ cat features.parquet
+version https://git-lfs.github.com/spec/v1
+oid sha256:...
+size 104857600
+                ← это pointer, не реальный файл!
+```
+
+Если ты не установил `git lfs install`, smudge filter не работает — файл остаётся как pointer. Python пытается прочитать parquet — ошибка "не parquet формат".
+
+Решение:
+
+```bash
+$ git lfs install
+$ git lfs pull   # скачать реальные файлы
+```
+
+### 2. Старые коммиты до LFS
+
+Если ты добавил LFS **после** того, как закоммитил большие файлы, история уже плохая. `git lfs track "*.parquet"` влияет только на **будущие** commit-ы. Старые blob-ы остаются в `.git/objects/` как есть — большие.
+
+Чтобы перепаковать историю, есть `git lfs migrate`:
+
+```bash
+# Перенести все *.parquet в истории в LFS (переписывает SHA!)
+$ git lfs migrate import --include="*.parquet" --everything
+
+# Force-push, чтобы перепаковать сервер
+$ git push --force-with-lease
+```
+
+`--everything` — все ветки. `--include` — паттерны. SHA коммитов изменятся, поэтому force-push обязателен, и команда должна пересоздать клоны.
+
+<Callout type="danger">
+`git lfs migrate import` переписывает историю. Все SHA в репо изменятся. Все open PR-ы сломаются (нужно пересоздавать). Все клоны команды станут invalid. Делай это ТОЛЬКО в момент тишины (PR заморожены) и оповести команду.
+</Callout>
+
+### 3. CI не клонирует LFS
+
+GitHub Actions по умолчанию делает `git clone` с `lfs: false`. Если CI нужен LFS контент:
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    lfs: true     # explicit fetch LFS files
+```
+
+Без этого CI получит pointer-файлы, и Python/инструменты будут падать с непонятными ошибками.
+
+### 4. Merging — конфликты в LFS файлах не resolve-ятся как обычно
+
+При merge двух веток, каждая из которых обновила LFS-файл, Git LFS не пытается мёржить байты (это правильно — бинари не мёржатся). Получаешь конфликт, и нужно выбрать одну сторону через `git checkout --ours <file>` или `--theirs <file>`.
+
+### 5. Не удаляй LFS файлы через rebase в публичной истории
+
+Если кто-то ребейзит ветку, на которой удалены LFS-файлы, и force-push-ит — LFS storage может остаться "осиротевшим" (файлы существуют, но никакой коммит на них не ссылается). GitHub запустит garbage collection через сутки. Но при self-hosted LFS — нужно настраивать вручную.
+
+---
+
+## Когда LFS — правильный выбор
+
+LFS хорошо подходит когда:
+
+- **Бинарные artifacts** — модели, изображения, PDF, видео в малом количестве (десятки файлов, не тысячи)
+- **Файлы редко меняются** — не каждую неделю
+- **Команда уже на GitHub/GitLab** — LFS встроен в платформу
+- **Размер репо в пределах LFS quotas** — или есть бюджет на data packs
+
+LFS плохо подходит когда:
+
+- **Данные в облаке уже** — у вас уже S3/GCS с datasets, LFS добавляет ещё одно хранилище
+- **Тысячи файлов, часто меняются** — bandwidth расходы катастрофичны
+- **Нужна работа с data pipelines** — DVC лучше подходит для ML/DE workflows
+
+Для последнего случая — следующий урок про DVC.
+
+---
+
+## Попробуй сам: настроить LFS
+
+```bash
+# Установить (один раз)
+brew install git-lfs   # macOS
+git lfs install
+
+# Создать тестовый репо
+mkdir lfs-demo && cd lfs-demo
+git init
+git lfs install   # активировать LFS для этого репо
+
+# Трекать parquet
+git lfs track "*.parquet"
+cat .gitattributes
+# *.parquet filter=lfs diff=lfs merge=lfs -text
+
+# Сделать большой файл (50 MB случайных данных)
+python -c "
+import pandas as pd
+import numpy as np
+df = pd.DataFrame(np.random.rand(500_000, 10))
+df.to_parquet('features.parquet')
+"
+
+ls -lh features.parquet
+# 50M  features.parquet
+
+# Commit
+git add .gitattributes features.parquet
+git commit -m "init with LFS"
+
+# Что в Git реально?
+git lfs ls-files
+# abc1234... * features.parquet
+
+# Внутренности
+ls .git/lfs/objects/ab/c1/
+# abc1234abc1234abc1234abc1234abc1234abc1234abc1234abc1234abc1234ab
+
+# Размер .git/ маленький (только pointer + LFS cache)
+du -sh .git/
+# 51M  (LFS cache 50M + Git objects ~1M)
+# В отличие от обычного Git, где было бы 50M в objects, ВКАЖДОЕ изменение
+
+# Симулировать клон в другую папку
+cd ..
+git clone lfs-demo lfs-clone
+cd lfs-clone
+
+# Проверить, что LFS скачался
+ls -lh features.parquet
+# 50M (smudge filter подменил pointer на реальный файл)
+
+git lfs ls-files
+# abc1234... * features.parquet
+```
+
+Это локальный сценарий (без remote LFS). На GitHub то же самое, только LFS storage — на серверах GitHub.
+
+---
+
+<KnowledgeCheck
+  question="Ты подключил Git LFS к репо, добавил `*.parquet` в track, закоммитил parquet-файл. Коллега клонировал репо, но Python падает с ошибкой 'invalid parquet file'. Что не так?"
+  answer="Коллега не установил git-lfs на своей машине, либо не сделал `git lfs install`. Без этого smudge filter не отрабатывает: при checkout файл features.parquet остаётся как pointer-файл (130 bytes текста с hash-ом), а не реальный 100MB parquet. Python пытается прочитать pointer как parquet — ошибка. Решение для коллеги: (1) `brew install git-lfs` (или эквивалент на его ОС); (2) `git lfs install` — регистрирует filters в global git config; (3) `git lfs pull` — скачивает реальные LFS-файлы и заменяет pointer-ы в working tree. После этого Python увидит правильный parquet. Альтернатива — `git lfs fetch && git checkout .` чтобы переоформить working tree из LFS cache. Чтобы избежать этой ошибки в команде: добавь в README инструкции по setup LFS, и в CI checkout step добавь `with: lfs: true`. Это типичный onboarding gotcha — коллеги клонируют, видят pointer-файлы, не понимают что происходит."
+/>

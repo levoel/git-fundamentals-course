@@ -1,0 +1,518 @@
+---
+title: "Code review iterations & conflict resolution"
+description: "Review симуляция: 5 типов comments (suggestion, nit, blocker, question, praise). Address каждый: agree+commit, discuss+resolve. Пока ты работал, main продвинулся вперёд -> твоя ветка stale -> git pull --rebase origin main -> конфликт в shared file -> разрешение -> push --force-with-lease."
+order: 3
+difficulty: "intermediate"
+estimatedTime: 35
+topics: ["code-review", "review-comments", "rebase-on-main", "conflicts", "force-with-lease", "fixup-commits"]
+---
+
+# Code review iterations & conflict resolution
+
+PR `#789` открыт. CI зелёный. Прошла 30 минут — приходит уведомление: «Alice requested changes». В этом уроке — **самая важная** часть capstone: как обрабатывать review comments и разрешать конфликты, появляющиеся в процессе.
+
+## Что увидишь в reviewer comments
+
+Alice оставила 5 comments. Типичная картина — junior должен распознать **тип** каждого и реагировать соответственно.
+
+---
+
+### Comment 1: blocker (must fix)
+
+> **alice** commented on `dags/user_events_dag.py:23`:
+> ```
+> SNOWFLAKE_STAGE = "@ANALYTICS.RAW.S3_STAGE"
+> ```
+> This is hardcoded to a specific environment. Stage name should differ between **dev** / **staging** / **prod**. Use Variable.get() or pull from connection extras. See how `fact_orders_dag.py` does it.
+
+**Тип**: blocker. Это **must fix**, иначе merge blocked.
+
+**Reasoning Alice**: hardcoded environment-specific values — anti-pattern. В dev запуск твоего DAG-а будет писать в prod таблицу. Bad.
+
+**Twoя реакция**:
+
+1. Открыть `fact_orders_dag.py`, посмотреть как сделано.
+2. Применить ту же pattern.
+3. Закоммитить fix.
+4. Response с commit SHA.
+
+```python
+# fact_orders_dag.py uses:
+from airflow.models import Variable
+
+SNOWFLAKE_STAGE = Variable.get(
+    "snowflake_s3_stage",
+    default_var="@ANALYTICS.RAW.S3_STAGE_DEV",  # safe default for dev
+)
+```
+
+Применяем у себя:
+
+```python
+# dags/user_events_dag.py
+from airflow.models import Variable
+
+SNOWFLAKE_STAGE = Variable.get(
+    "snowflake_s3_stage",
+    default_var="@ANALYTICS.RAW.S3_STAGE_DEV",
+)
+```
+
+Commit:
+
+```bash
+$ git add dags/user_events_dag.py
+$ git commit -m "fix(user_events_dag): use Variable.get() for stage name
+
+Per review feedback: environment-specific config should come from
+Airflow Variables (set per env), not hardcoded.
+
+Refs: DE-1234"
+
+$ git push
+```
+
+Response в GitHub UI:
+
+> Good catch — I used Variable.get() now in 8a9b0c1, with safe dev default. Tested locally by setting `AIRFLOW_VAR_SNOWFLAKE_S3_STAGE=@ANALYTICS.RAW.S3_STAGE_LOCAL` and rerunning pytest.
+
+Acknowledged + commit SHA + how tested. Reviewer пишет «Resolve conversation» — done.
+
+---
+
+### Comment 2: suggestion (recommended but optional)
+
+> **alice** commented on `dags/user_events_dag.py:48`:
+> ```python
+> retry_delay=300,  # 5 minutes
+> ```
+> Suggestion: use `timedelta(minutes=5)` for clarity. Bare ints work but team convention is timedelta. See default_args in other DAGs.
+
+**Тип**: suggestion. Это рекомендация. Reviewer не блокирует, но предпочитает изменение.
+
+**Reasoning Alice**: 300 — what unit? Seconds. timedelta — self-documenting.
+
+**Reaction**: соглашаешься (это reasonable), fix, commit.
+
+```python
+from datetime import datetime, timedelta
+
+default_args={
+    "owner": "data-engineering",
+    "retries": 2,
+    "retry_delay": timedelta(minutes=5),
+},
+```
+
+```bash
+$ git add dags/user_events_dag.py
+$ git commit -m "style(user_events_dag): use timedelta for retry_delay
+
+Refs: DE-1234"
+$ git push
+```
+
+Response:
+
+> Agreed, switched to timedelta in 9c0d1e2 — clearer.
+
+---
+
+### Comment 3: nit (minor, optional)
+
+> **alice** commented on `dags/user_events_dag.py:1`:
+> ```python
+> """User events ingestion DAG.
+> ```
+> nit: docstring is good. Maybe add a `Returns` section listing what tables get written? Match the style of `analytics_main_etl_dag.py`.
+
+**Тип**: nit (== nitpick, мелочь). Reviewer прямо помечает как `nit:`, что значит «не блокирую, но если несложно».
+
+**Reaction**: посмотри время. Если 30 секунд — fix. Если дольше — можно ответить «good idea, will do in follow-up PR».
+
+В нашем случае — 30 секунд:
+
+```python
+"""User events ingestion DAG.
+
+Loads user behavior events from S3 (Parquet, partitioned by date) into
+Snowflake table ANALYTICS.RAW.USER_EVENTS.
+
+Schedule: daily at 04:00 UTC (after main ETL).
+Idempotent: re-runs delete existing partition before re-insert.
+
+Tables written:
+- ANALYTICS.RAW.USER_EVENTS (partitioned by event_date)
+
+Ticket: DE-1234.
+"""
+```
+
+Commit:
+
+```bash
+$ git commit -am "docs(user_events_dag): add tables written to docstring per review
+
+Refs: DE-1234"
+$ git push
+```
+
+---
+
+### Comment 4: question (clarification request)
+
+> **alice** commented on `dags/user_events_dag.py:62`:
+> ```python
+> delete_existing >> load_to_snowflake
+> ```
+> Why `>>` instead of using `chain()`? Either works, just curious about your choice.
+
+**Тип**: question. Не fix, не suggestion — just curious. Не нужно менять код.
+
+**Reaction**: ответь reasoning. Это **learning moment** — junior показывает мышление.
+
+> @alice For 2-task DAG `>>` reads cleaner — feels like reading «do A then B». `chain()` is great for 3+ tasks where readability suffers. I'd switch to `chain()` if we add a third task downstream.
+
+`Resolve conversation` if Alice agrees, или discussion если есть disagreement.
+
+---
+
+### Comment 5: praise (positive feedback)
+
+> **alice** commented on `dags/user_events_dag.py:35`:
+> ```python
+> delete_existing = SnowflakeOperator(...)
+> ```
+> Nice idempotency design — DELETE-then-INSERT pattern. Some teams forget this and end up with duplicates on retry.
+
+**Тип**: praise. Reviewer хвалит выбор.
+
+**Reaction**: коротко поблагодарить. Не оставляй без ответа — reviewer вложил время.
+
+> Thanks! Definitely a footgun, learned from `fact_orders_dag` 
+
+(Emoji в комментариях — ок, но не в commit messages / code.)
+
+---
+
+### Anti-patterns ответов
+
+Чего **не делать** на code review:
+
+**1. Defensive / dismissive**:
+
+> No, my way is correct, I think the suggestion is wrong.
+
+— даже если ты прав, тон создаёт friction. Если disagree — **explain reasoning**, не отбрасывай.
+
+**2. Один-word ответы**:
+
+> Done.
+
+— OK для очень small change, но reviewer не знает **где** done. Better: `Done in 8a9b0c1`.
+
+**3. Promising but not delivering**:
+
+> Will fix later.
+
+— и не фикс. Reviewer возвращается, видит unresolved comment, frustrating.
+
+**4. Ignoring comments**:
+
+— просто push fix без response. Reviewer может пропустить, что ты адресовал. Лучше — short acknowledge.
+
+---
+
+## Шаг 7: main продвинулся — твоя ветка stale
+
+Прошёл час — ты обработал все 5 comments, pushed 4 fix commits. Alice пишет:
+
+> Looks good now! Approve. But — main moved while we were chatting. Please rebase on main before merge.
+
+Что произошло:
+
+```
+main:    A -> B -> C -> D -> E -> F      (продвинулся: PR #790 merged D, PR #791 — E,F)
+                  ↓
+your:    A -> B -> C -> X1 -> X2 -> X3 -> X4 -> X5    (твои 5 commits)
+                                              fixes from review
+```
+
+Твоя ветка отделена от main на коммите C. Чтобы merge, нужно либо merge main -> твоя, либо rebase твоя -> main.
+
+Команда команда (модуль 18 — require up-to-date) обычно требует **rebase**, потому что:
+
+- Linear история чище.
+- CI запускается на финальном коде (main + твои changes).
+
+### Rebase
+
+```bash
+$ git fetch origin
+remote: ...
+From github.com:acme-corp/analytics-dags
+   abc1234..def5678  main         -> origin/main
+
+$ git rebase origin/main
+First, rewinding head to replay your work on top of it...
+Applying: feat(dags): add user_events ingestion DAG
+Applying: test(user_events_dag): add smoke + schedule + tasks tests
+Applying: docs(dags): document user_events_ingestion DAG
+Applying: fix(user_events_dag): use Variable.get() for stage name
+
+CONFLICT (content): Merge conflict in dags/shared/snowflake_loaders.py
+error: could not apply 9c0d1e2... style(user_events_dag): use timedelta for retry_delay
+Resolve all conflicts manually, then run "git rebase --continue".
+```
+
+Конфликт в `dags/shared/snowflake_loaders.py`. Этого файла **в твоих commits не было** напрямую. Что произошло — твой `user_events_dag.py` импортирует `build_copy_into_sql` оттуда, и rebase задело sequence imports / helper, который изменили в main.
+
+Откроем файл:
+
+```python
+# dags/shared/snowflake_loaders.py
+def build_copy_into_sql(table: str, stage: str, file_format: str) -> str:
+    """Build COPY INTO SQL for Snowflake."""
+<<<<<<< HEAD
+    return (
+        f"COPY INTO {table} "
+        f"FROM {stage} "
+        f"FILE_FORMAT = {file_format} "
+        f"ON_ERROR = 'CONTINUE';"
+    )
+=======
+    return (
+        f"COPY INTO {table} "
+        f"FROM {stage} "
+        f"FILE_FORMAT = {file_format} "
+        f"ON_ERROR = 'ABORT_STATEMENT';"
+    )
+>>>>>>> 9c0d1e2 (style(user_events_dag): use timedelta for retry_delay)
+```
+
+Этот конфликт — Алиса в другом PR (`#790`) изменила default `ON_ERROR` с `'CONTINUE'` на `'ABORT_STATEMENT'`. Это **breaking** semantics — старый код игнорировал failed rows, новый — aborting.
+
+### Разрешение конфликта
+
+Что делать? Думай **semantically**, не механически.
+
+1. **Правильный выбор**: Alice сделала изменение в main для **всех** DAGs. Это новый стандарт. Используй её версию.
+2. **Read both sides**: твой контекст — user events, для которых `ABORT_STATEMENT` — discussion-worthy (миллиарды events, не хочешь abort на одной плохой строке?). Может быть, нужен middle ground.
+3. **Если сомневаешься** — ask Alice.
+
+Здесь Alice уже approved своим коммитом. Применяй её версию:
+
+```python
+def build_copy_into_sql(table: str, stage: str, file_format: str) -> str:
+    """Build COPY INTO SQL for Snowflake."""
+    return (
+        f"COPY INTO {table} "
+        f"FROM {stage} "
+        f"FILE_FORMAT = {file_format} "
+        f"ON_ERROR = 'ABORT_STATEMENT';"
+    )
+```
+
+Сохрани файл. Mark as resolved:
+
+```bash
+$ git add dags/shared/snowflake_loaders.py
+$ git rebase --continue
+[detached HEAD 7f8e9d0] style(user_events_dag): use timedelta for retry_delay
+Applying: docs(user_events_dag): add tables written to docstring per review
+```
+
+Rebase продолжается, остальные коммиты applied without issue.
+
+```bash
+$ git status
+On branch feat/de-1234-user-events-dag
+Your branch and 'origin/feat/de-1234-user-events-dag' have diverged,
+and have 9 and 5 different commits each, respectively.
+  (use "git pull" to merge the remote branch into yours)
+
+nothing to commit, working tree clean
+```
+
+**Diverged** — это потому, что rebase создал **новые SHA** для твоих commits. Локально 9 коммитов (мы перебазировали на новый main), на remote — старые 5.
+
+### Verify локально
+
+Перед push — повтори CI checks:
+
+```bash
+$ uv run ruff check .
+$ uv run mypy dags/
+$ uv run pytest
+======== 47 passed ========
+```
+
+Все green. И ещё — ВАЖНО — открой `dags/user_events_dag.py`, посмотри что в нём после rebase. Может, intent сохранился, может — не очень.
+
+### Force push с --force-with-lease
+
+После rebase ты должен force push. **Никогда** просто `--force` на ветку с подключенными PR. Используй `--force-with-lease`:
+
+```bash
+$ git push --force-with-lease
+Enumerating objects: 35, done.
+...
++ abc1234...9d0e1f2 feat/de-1234-user-events-dag -> feat/de-1234-user-events-dag (forced update)
+```
+
+`--force-with-lease` — пушит **только если** remote ref совпадает с тем, что ты последний раз fetch-ил. Защита: если кто-то pushed в твою ветку (например, fix от другого), `--force-with-lease` **откажет**, и ты не сотрёшь чужую работу.
+
+`--force` без `with-lease` — может уничтожить чужой push. **Не делай это** на shared branches.
+
+---
+
+## CI после rebase
+
+Force push -> GitHub запускает CI заново. Wait зелёного:
+
+```bash
+$ gh pr checks
+All checks passing
+  ci/lint           pass    32s
+  ci/type-check     pass    1m08s
+  ci/test           pass    1m45s
+  ci/secret-scan    pass    19s
+```
+
+Зелёный. PR теперь rebased on main + все fixes applied.
+
+Comment в PR:
+
+> Rebased on latest main, resolved conflict in `snowflake_loaders.py` (took your `ABORT_STATEMENT` change from #790). All tests still pass. Ready for final approval.
+
+Alice approves. Ready to merge.
+
+---
+
+## Fixup commits и interactive rebase
+
+Pro-level стиль обработки review — **fixup commits**. Идея: вместо отдельных commit per review change, привязываешь fix к **исходному** commit.
+
+```bash
+# Вместо обычного commit
+$ git add dags/user_events_dag.py
+$ git commit --fixup=abc1234   # ← где abc1234 — оригинальный commit
+```
+
+Commit message автоматически = `fixup! <original message>`.
+
+После всех fixup-ов:
+
+```bash
+$ git rebase --interactive --autosquash origin/main
+```
+
+`--autosquash` сам **переставит и сольёт** fixup commits с оригинальными. История чистая — нет 5 микро-commits в PR.
+
+Когда использовать:
+
+- **Solo work** на branch — отлично.
+- **Reviewed work, где reviewer хочет видеть iterations** — лучше обычные commits, чтобы reviewer мог посмотреть diff отдельных fixes.
+- **При squash merge в main** — не имеет значения, всё равно squash.
+
+Это advanced, junior на первом capstone — нормально использовать regular commits.
+
+---
+
+## Resolve all conversations
+
+GitHub UI требует `Require conversation resolution before merging` (модуль 18). Каждый review comment имеет `Resolve conversation` кнопку.
+
+```
+Conversation status:
+[x] Resolved (3)
+○ Outstanding (0)
+
+You can now merge this pull request.
+```
+
+Resolve всех — merge button становится зелёным.
+
+<Callout type="tip">
+Когда reviewer отметил `Resolve` сам — ничего делать не нужно. Когда ты отвечаешь и думаешь, что вопрос закрыт — кликни `Resolve` сам. Не оставляй reviewer-у эту работу.
+</Callout>
+
+---
+
+## Edge case: что если rebase trашит свою работу
+
+Сценарий: ты сделал rebase, конфликтов много, ты их кое-как разрешил, push-нул. Вечером понимаешь — конфликт разрешил неправильно, твоя feature теперь сломана.
+
+Solution: reflog (модуль 19)!
+
+```bash
+$ git reflog
+def5678 HEAD@{0}: rebase finished: returning to refs/heads/feat/de-1234-user-events-dag
+def5678 HEAD@{1}: rebase: docs(user_events_dag): add tables written
+abc1234 HEAD@{2}: rebase: fix(user_events_dag): use Variable.get
+9c0d1e2 HEAD@{3}: rebase: ...
+8a9b0c1 HEAD@{4}: rebase (start): checkout origin/main
+old_sha HEAD@{5}: commit: оригинальный последний commit до rebase
+
+# Откатить к pre-rebase state
+$ git reset --hard HEAD@{5}
+# Force push (опять с --force-with-lease)
+$ git push --force-with-lease
+```
+
+История restored. Делай rebase заново, аккуратнее.
+
+---
+
+## Communication во время review
+
+Reviewers — занятые люди. Несколько правил:
+
+**1. Сделай review-ready PR**. Зелёный CI, описание, screenshots если UI. Не присылай WIP-PR на review.
+
+**2. Тэгай при критическом блокаре**. `@alice this is blocking deploy — would appreciate quick eyes when you have 5 min`. Без спама.
+
+**3. После большой ревизии — re-request review**. GitHub button `Re-request review`. Reviewer получает notification.
+
+**4. Reasonable response time** — обычно 24h business. Если 2 дня тишина — polite ping.
+
+**5. Не пишите эмоции на PR**. Disagreements обсуждай в Slack DM. PR — public, остаётся forever, плохой тон ловится.
+
+---
+
+## Попробуй сам
+
+Имитация — на твоём local clone capstone mock-репо:
+
+```bash
+# Создай конфликт намеренно
+$ git checkout main
+$ git pull
+$ git switch -c test/conflict-practice
+$ echo "my version" > shared.txt
+$ git add shared.txt && git commit -m "Add shared file"
+
+# Параллельно симулируем "main продвинулся"
+$ git checkout main
+$ echo "main version" > shared.txt
+$ git add shared.txt && git commit -m "Main version"
+
+# Rebase
+$ git checkout test/conflict-practice
+$ git rebase main
+
+CONFLICT (add/add): Merge conflict in shared.txt
+$ vim shared.txt    # резолвишь
+$ git add shared.txt
+$ git rebase --continue
+```
+
+Сделай это 2-3 раза в sandbox — мышечная память спасёт в production stress.
+
+---
+
+## Killer takeaway
+
+5 типов review comments: **blocker** (must fix), **suggestion** (recommended), **nit** (minor optional), **question** (clarify), **praise** (acknowledge). Каждый требует своего ответа. Defensive ответы — anti-pattern. Когда main продвинулся: `git fetch origin && git rebase origin/main` -> fix конфликты semantically (think what's right), не mechanically. `git push --force-with-lease` — safe force push (не уничтожает чужой push). Resolve conversations сам, не оставляй reviewer. После всех fixes — re-request review. Reflog спасает после bad rebase.
+
+<KnowledgeCheck quizSlug="20-capstone/03-handling-review-conflicts" />

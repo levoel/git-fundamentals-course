@@ -1,0 +1,95 @@
+{
+  "lessonSlug": "17-secrets-security/_exam",
+  "moduleId": "17-secrets-security",
+  "examTitle": "Экзамен: Секреты и безопасность",
+  "passThreshold": 70,
+  "_meta": {
+    "idPrefix": "git-m17-exam"
+  },
+  "questions": [
+    {
+      "id": "git-m17-exam-q1",
+      "type": "multiple-choice",
+      "question": "Junior запушил AWS Access Key в public репозиторий. Order правильных действий в incident response?",
+      "options": [
+        {"id": "a", "text": "1) git filter-repo для удаления из истории; 2) force push; 3) уведомить команду; 4) rotate ключ"},
+        {"id": "b", "text": "1) ROTATE/REVOKE ключ в AWS Console; 2) проверить CloudTrail на использование; 3) опционально cleanup истории через filter-repo; 4) уведомить команду + post-mortem"},
+        {"id": "c", "text": "1) Удалить репо с GitHub; 2) создать новый; 3) скопировать код вручную"},
+        {"id": "d", "text": "1) Сделать git revert; 2) push; 3) надеяться, что никто не заметил"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Правильный incident response: ROTATE FIRST. Боты могут использовать ключ за минуты — чистка истории не отменяет валидность ключа. Сначала revoke в AWS (update-access-key --status Inactive), создать новый, обновить secrets backend. Затем проверить CloudTrail — что атакующий уже сделал. Cleanup истории — косметика, можно пропустить (модуль 17 урок 3). Post-mortem обязателен — что предотвратит recurrence (pre-commit hook, push protection — модуль 17 урок 2).",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m17-exam-q2",
+      "type": "multiple-choice",
+      "question": "Какая комбинация защит образует трёхуровневую оборону от секретов в Git?",
+      "options": [
+        {"id": "a", "text": "gitleaks pre-commit (local) -> gitleaks в CI (PR-level) -> GitHub Push Protection (server-side reject)"},
+        {"id": "b", "text": "Сильный пароль на GitHub + 2FA + VPN"},
+        {"id": "c", "text": "Только GitHub Secret Scanning"},
+        {"id": "d", "text": "Полное отсутствие public репо"}
+      ],
+      "correctAnswer": "a",
+      "explanation": "Defense in depth для секретов: (1) gitleaks pre-commit hook — блокирует commit локально, ловит до того, как что-то отправлено в Git; (2) gitleaks в CI — проверяет PR, ловит случаи когда pre-commit обошли (--no-verify) или его не было; (3) GitHub Push Protection — server-side, отклоняет push с известными паттернами секретов. Все три бесплатны для public репо. GitHub Secret Scanning — четвёртая линия (после факта). 2FA и VPN — orthogonal задачи (защита аккаунта, не секретов в коде).",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m17-exam-q3",
+      "type": "multiple-choice",
+      "question": "В CI/CD GitHub Actions для DE-проекта какой подход для AWS credentials современнее и безопаснее long-lived secrets?",
+      "options": [
+        {"id": "a", "text": "Хранить AWS_ACCESS_KEY_ID и AWS_SECRET_ACCESS_KEY в GitHub Secrets и rotate раз в 90 дней"},
+        {"id": "b", "text": "OIDC trust между GitHub Actions и AWS IAM Role — Actions получает temporary credentials (1 час validity) без long-lived keys"},
+        {"id": "c", "text": "Хранить ключ в .env файле, который зашифрован gpg"},
+        {"id": "d", "text": "Использовать root account credentials для full access"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "OIDC (OpenID Connect) — золотой стандарт 2026. Workflow: (1) GitHub Actions предоставляет OIDC JWT; (2) AWS IAM Role trust policy verifies JWT (от github.com, конкретный repo/branch); (3) IAM выдаёт temporary credentials (STS:AssumeRole), валидные 1 час. Никаких long-lived AWS keys в GitHub Secrets — невозможно leak. Action: aws-actions/configure-aws-credentials@v4 с role-to-assume. permissions: id-token: write нужно в workflow. Это исключает целый класс рисков (leaked GitHub Secrets, compromised workflow).",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m17-exam-q4",
+      "type": "multiple-choice",
+      "question": "Команда нашла, что коллега 6 месяцев назад случайно закоммитил Snowflake private key (file *.p8) в public репо. Ключ всё ещё валиден. Что НЕ нужно делать?",
+      "options": [
+        {"id": "a", "text": "В Snowflake выполнить ALTER USER ... UNSET RSA_PUBLIC_KEY и установить новый"},
+        {"id": "b", "text": "Проверить Snowflake history/audit на использование старого ключа за 6 месяцев"},
+        {"id": "c", "text": "ПЕРВЫМ делом сделать git filter-repo и force push — спрятать факт утечки от GitHub"},
+        {"id": "d", "text": "Включить gitleaks в pre-commit для prevention recurrence"}
+      ],
+      "correctAnswer": "c",
+      "explanation": "Cleanup истории НИКОГДА не первый шаг. Этот ключ был на public 6 месяцев — он гарантированно скачан и проиндексирован ботами. Cleanup на GitHub не отменяет копии в forks, caches, у атакующих. Скрывать факт утечки — anti-pattern, security incident требует transparency. Правильно: (a) rotate сразу — старый ключ инвалидируется; (b) audit — что было сделано через старый ключ за 6 месяцев (potential breach); (d) prevention — gitleaks pre-commit. Cleanup истории — опционально, для compliance или audit чистоты, делается ПОТОМ.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m17-exam-q5",
+      "type": "multiple-choice",
+      "question": "В Airflow DAG-файле junior пишет:\n```python\nfrom airflow.models import Variable\nDB_PASSWORD = Variable.get('production_db_password')\n```\nIs this approach безопасным?",
+      "options": [
+        {"id": "a", "text": "Безопасно — Variable.get() читает из secure storage"},
+        {"id": "b", "text": "Зависит от backend. Если Variables backend = Airflow metadata DB -> пароль в DB, нелучше hardcode. Если backend = AWS Secrets Manager -> secure. Лучше всего: использовать Connection (не Variable) с secrets backend"},
+        {"id": "c", "text": "Небезопасно — Variable.get() всегда логирует пароль"},
+        {"id": "d", "text": "Безопасно — Airflow шифрует все Variables"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Airflow Variables по умолчанию хранятся в metadata DB (Postgres). Это лучше hardcode (можно rotate из UI), но: (1) пароль в DB plaintext (или Fernet-encrypted, key известен всем worker-ам); (2) UI Edit показывает пароль; (3) backup DB содержит. Для production использовать SECRETS BACKEND — настроить в airflow.cfg, чтобы Variable.get() читал из AWS Secrets Manager / Vault. Ещё лучше: для подключений к БД использовать Connection (с secrets backend), не Variable — Connection-абстракция designed специально для credentials с правильной интеграцией в Hooks.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m17-exam-q6",
+      "type": "multiple-choice",
+      "question": "Какой паттерн используется для безопасного onboarding нового DE в команду?",
+      "options": [
+        {"id": "a", "text": "Tech lead пересылает .env файл junior-у через Slack"},
+        {"id": "b", "text": "Junior клонирует репо, copy .env.example в .env, заполняет dev-значения локально; production secrets получает через secrets backend (AWS SSO + Secrets Manager IAM)"},
+        {"id": "c", "text": "Junior копирует .env у коллеги через git pull (если коммитили в private branch)"},
+        {"id": "d", "text": "Junior пишет свои дев credentials, заоммит .env в свой fork"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Standard onboarding: (1) clone репо, в нём .env.example (template без значений) — коммитится; (2) cp .env.example .env, заполнить development значения локально; (3) для production access — junior получает IAM-роль через corporate SSO, и Airflow/dbt сами читают credentials из Secrets Manager (никогда напрямую). Slack-передача .env — anti-pattern (Slack history, audit, leakage). Коммитить .env в любую ветку — anti-pattern (история навсегда). Copy через git pull означает, что .env когда-то коммитнут — это уже incident. Правильная архитектура: secrets backend централизованный, .env только для personal dev (local development), .env.example для onboarding template.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

@@ -1,0 +1,321 @@
+---
+title: "Draft PR, suggestion blocks и GitHub CLI"
+description: "Draft PR для WIP (не review-ready, но видны команде). Suggestion blocks в review для one-click apply. gh CLI: gh pr create/view/checkout/merge — экономит часы каждую неделю."
+order: 5
+difficulty: "intermediate"
+estimatedTime: 25
+topics: ["draft-pr", "suggestion", "gh-cli", "wip", "review-request", "github-cli"]
+---
+
+# Draft PR, suggestion blocks и GitHub CLI
+
+В уроках 01-04 мы покрыли основу PR. Теперь — advanced инструменты, которые делают workflow drastically более эффективным: **draft PR** для work-in-progress, **suggestion blocks** для one-click фикса, и **GitHub CLI (gh)** — терминальная утилита, экономящая часы каждую неделю.
+
+Junior DE, освоивший эти инструменты с первого дня, на порядок продуктивнее тех, кто работает только через web UI.
+
+---
+
+## Draft PR — work in progress без review
+
+Сценарий: ты пишешь feature, ещё не доделал, но хочешь:
+
+- Получить ранний feedback по архитектуре.
+- Запустить CI чтобы убедиться что не сломал ничего.
+- Дать команде видимость, что ты работаешь над этим.
+- Не получать review-replies пока WIP.
+
+**Draft PR** — это PR в состоянии «черновик». Все features работают (CI, branch comparison, обсуждение), но:
+
+- **Не запрашивает review** автоматически.
+- **Нельзя merge** до перевода в «Ready for review».
+- В UI помечен серой иконкой `Draft`.
+
+### Создание draft PR
+
+```bash
+# Через CLI
+$ gh pr create --draft --title "WIP: customer LTV" --body "Early prototype, feedback welcome"
+
+# Через UI
+[click] New Pull Request -> Create draft pull request (dropdown в Create button)
+```
+
+### Перевод в ready
+
+```bash
+# Через CLI
+$ gh pr ready 234
+
+# Через UI
+[click] Ready for review (на странице PR)
+```
+
+После этого PR работает как обычный: можно request reviewers, CI required, merge доступен.
+
+### Когда юзать draft
+
+- **Early feedback**: «вот моя архитектура, до того как я напишу 500 строк, скажи что плохо».
+- **CI testing**: гонять тесты на CI без отвлечения команды.
+- **Long-running work**: feature на неделю, хочешь видимость без формального review.
+- **Discussion**: открыть PR для обсуждения, до того как code complete.
+
+<Callout type="tip">
+Draft PR — это **профессиональный move**. Показывает что ты thoughtful, не сваливаешь wall-of-code в финале. Tech leads ценят это.
+</Callout>
+
+---
+
+## Suggestion blocks — one-click fix
+
+В уроке 03 кратко упомянули. Углубимся.
+
+Reviewer пишет комментарий с **suggestion block**:
+
+````markdown
+В этой строке опечатка:
+
+```suggestion
+df_users = pd.read_csv("users.csv")
+```
+````
+
+Author видит:
+
+```
+[reviewer comment]
+В этой строке опечатка:
+[suggestion block: df_users = pd.read_csv("users.csv")]
+[Commit suggestion button] [Add suggestion to batch button]
+```
+
+Кнопка **«Commit suggestion»** делает за author:
+
+1. Применяет suggested text вместо текущей строки (тех строк, на которые ссылается комментарий).
+2. Создаёт коммит с message `Apply suggestion from <reviewer>`.
+3. Пушит в feature ветку.
+
+Один клик — никакого local checkout, edit, push.
+
+### Multi-line suggestions
+
+Suggestion может покрывать несколько строк. В UI выдели несколько строк перед добавлением комментария, тогда suggestion заменит весь блок:
+
+````markdown
+```suggestion
+# Use parameterized query to prevent SQL injection
+cur.execute(
+    "SELECT * FROM users WHERE id = %s",
+    (user_id,),
+)
+```
+````
+
+### Batch suggestions
+
+Если у reviewer 5 suggestion-ов, author может нажать «Add to batch» на каждом, потом «Commit suggestions in single commit» — один коммит со всеми правками сразу. Чище git log.
+
+### Когда suggestion подходит
+
+- Опечатки.
+- Переименование переменных.
+- Замена одной строки на другую.
+- Удаление дублирующейся строки.
+- Простой refactor.
+
+### Когда НЕ подходит
+
+- Изменение в разных файлах (нужно несколько suggestions или manual edit).
+- Глобальный refactor.
+- Логические изменения требующие тестов (suggestion не запустит test suite — может породить ложно-positive «applied»).
+
+---
+
+## GitHub CLI — gh
+
+`gh` — официальный GitHub CLI. Заменяет 90% действий в web UI на терминальные команды. Установка:
+
+```bash
+$ brew install gh                # macOS
+$ apt install gh                 # Linux (Debian/Ubuntu)
+$ choco install gh               # Windows
+
+$ gh auth login                  # авторизация (один раз)
+```
+
+### Топ-15 команд для junior DE
+
+```bash
+# Pull Requests
+$ gh pr create --fill            # авто-fill из commits
+$ gh pr list                     # список открытых PR в текущем репо
+$ gh pr view 234                 # детали PR #234
+$ gh pr view --web               # открыть в браузере
+$ gh pr checkout 234             # переключиться на ветку PR (для local testing)
+$ gh pr merge 234 --squash       # squash merge
+$ gh pr close 234                # закрыть PR без merge
+$ gh pr review 234 --approve     # approve
+$ gh pr ready                    # перевести draft -> ready
+
+# Issues
+$ gh issue create
+$ gh issue list
+$ gh issue view 456
+$ gh issue close 456
+
+# Repository
+$ gh repo clone owner/name
+$ gh repo view --web
+
+# Workflow / CI
+$ gh run list                    # последние CI runs
+$ gh run view 12345              # детали CI run
+$ gh run watch                   # live monitor текущего CI
+```
+
+### Killer combo: gh pr checkout
+
+```bash
+$ gh pr checkout 234
+```
+
+Эквивалентно:
+1. `git fetch origin pull/234/head:pr-234`
+2. `git switch pr-234`
+
+То есть **переключиться на ветку чужого PR за одну команду**. Для local testing, debugging, review:
+
+```bash
+$ gh pr checkout 234
+$ pytest tests/                  # запустить тесты локально
+$ docker-compose up airflow      # запустить полный pipeline
+```
+
+Без `gh pr checkout` — нужно вручную добавлять remote (если fork), fetch, branch, switch. С `gh` — одна команда.
+
+### `gh pr create --fill`
+
+Автозаполнить title и body из последнего коммита:
+
+```bash
+$ git commit -m "feat(dags): add users ETL pipeline
+
+Implements user data ETL from PostgreSQL to warehouse.
+Adds transform, validation, tests.
+
+Closes #123"
+
+$ git push -u origin feat/users-pipeline
+$ gh pr create --fill
+# Title = "feat(dags): add users ETL pipeline"
+# Body = body коммита
+```
+
+Полезно когда commit message и так хороший. Минус: для PR с несколькими коммитами берётся только последний.
+
+### Review через CLI
+
+```bash
+$ gh pr review 234 --approve
+$ gh pr review 234 --comment -b "Looks good overall, minor nits."
+$ gh pr review 234 --request-changes -b "Found SQL injection in line 42."
+```
+
+Полезно если ты review-ишь PR и хочешь оставить общий comment без UI clicks.
+
+---
+
+## Re-request review после изменений
+
+Сценарий: reviewer оставил blocker, ты исправил. Хочешь чтобы re-reviewer не упустил твой fix.
+
+### Через UI
+
+GitHub автоматически снимает approval после новых коммитов (если настроено через branch protection). Можно вручную re-request review:
+
+```
+[click] Reviewers (right sidebar) -> click circular arrow icon next to reviewer name
+```
+
+### Через CLI
+
+```bash
+$ gh pr edit 234 --add-reviewer @tech-lead
+```
+
+Re-add того же reviewer триггерит notification.
+
+---
+
+## Best practice: small commits, squash on merge
+
+Local: коммить часто и мелко, не парься о clean messages.
+
+```bash
+$ git commit -am "WIP: parsing"
+$ git commit -am "fix: handle empty input"
+$ git commit -am "WIP: validation"
+$ git commit -am "tests"
+$ git commit -am "fix linter"
+$ git push
+```
+
+5 «мусорных» коммитов на feature. На GitHub:
+
+```bash
+$ gh pr create --title "feat(parsers): add CSV parser" --body "..."
+# Review цикл
+$ gh pr merge --squash --delete-branch
+```
+
+Squash на merge -> один чистый коммит на main. Локальная история «грязная» но это OK — она «исчезает» при merge. Лучшее обоих миров: гибкость разработки + чистая main.
+
+---
+
+## DE-сценарий: full workflow
+
+```bash
+# 1. Создаю ветку и работаю
+$ git switch -c feat/customer-ltv main
+$ vim models/marts/customer_ltv.sql
+$ git commit -am "WIP basic model"
+$ vim tests/test_ltv.yml
+$ git commit -am "add tests"
+$ git push -u origin feat/customer-ltv
+
+# 2. Открываю DRAFT PR для CI testing и early feedback
+$ gh pr create --draft --title "feat(marts): customer LTV" \
+    --body "Early prototype, feedback на архитектуру welcome"
+
+# 3. Дорабатываю
+$ vim models/marts/customer_ltv.sql   # уточнения по feedback
+$ git commit -am "address feedback: aggregate per quarter"
+$ git push
+
+# 4. Ready for review
+$ gh pr ready
+$ gh pr edit --add-reviewer tech-lead
+
+# 5. Reviewer оставил suggestions, я нажал «Commit suggestion» в UI
+# (несколько коммитов «Apply suggestion from ...»)
+
+# 6. Re-request review
+[в UI: click arrow next to reviewer]
+
+# 7. Approved, гоню merge
+$ gh pr merge --squash --delete-branch
+
+# 8. Возвращаюсь на main
+$ git switch main
+$ git pull
+$ git branch -d feat/customer-ltv   # local cleanup (если автоудаление не сработало)
+```
+
+8 шагов, большинство — одна терминальная команда. Без `gh` это было бы 25-30 кликов в браузере.
+
+---
+
+## Killer takeaway
+
+Draft PR — для WIP с CI gating без review requests. Suggestion blocks — one-click apply от reviewer-а, ускоряет циклы fix-ов. **GitHub CLI (`gh`) — game changer**: установи в день 1, освой `gh pr create/view/checkout/merge` — экономит часы каждую неделю. Best practice: messy local commits + squash on merge -> грязный local + чистый main.
+
+<KnowledgeCheck quizSlug="11-pull-requests/05-draft-prs-suggestions" />

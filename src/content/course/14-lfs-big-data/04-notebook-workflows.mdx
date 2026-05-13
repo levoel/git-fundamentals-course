@@ -1,0 +1,481 @@
+---
+title: "Jupyter notebooks в Git: nbstripout, jupytext, nbdime"
+description: "Главный pain DE — .ipynb. Outputs ломают diff и merge. Три решения: nbstripout для чистки, jupytext для paired .py, nbdime для diff/merge notebooks"
+order: 4
+difficulty: "intermediate"
+estimatedTime: 24
+topics: ["Jupyter", "notebooks", "nbstripout", "jupytext", "nbdime"]
+---
+
+# Jupyter notebooks в Git: nbstripout, jupytext, nbdime
+
+Jupyter notebooks — главный инструмент Data Engineer для exploratory работы. И главный enemy Git. Файл `.ipynb` — это **JSON**, в котором вместе с твоим кодом запекаются outputs (картинки base64, dataframes как HTML, execution counts). Один запуск ячейки меняет тысячи символов в файле. Merge двух веток с notebook-ом превращается в катастрофу.
+
+В этом уроке: три проверенных решения этой проблемы — `nbstripout` (чистка outputs автоматически перед commit), `jupytext` (paired `.py` + `.ipynb` файлы, mergim `.py`), `nbdime` (специальный diff/merge для notebooks). Покажем все три, плюсы-минусы, и какой выбирать для DE-команды.
+
+---
+
+## Почему .ipynb боль
+
+Открой любой `.ipynb` в текстовом редакторе. Увидишь:
+
+```json
+{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": 17,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "image/png": "iVBORw0KGgoAAAANSUhEUgAAAtoAAAFvCAYAAAB/c5wTQ...
+      ... (60KB base64-encoded PNG картинки)
+      ...AAABJRU5ErkJggg=="
+     },
+     "metadata": {},
+     "output_type": "display_data"
+    },
+    {
+     "data": {
+      "text/html": "<div>...table HTML 8KB...</div>",
+      "text/plain": "..."
+     },
+     "execution_count": 17,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "df.plot()"
+   ]
+  }
+ ]
+}
+```
+
+Три ключевые проблемы:
+
+<DiagramContainer title="Три проблемы .ipynb для Git" color="rose">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Outputs запекаются в файл — каждый запуск меняет тысячи строк. Diff невозможно читать">
+        <DataBox label="Outputs в файле" className="border-rose-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>картинки как base64</div>
+            <div>HTML tables</div>
+            <div>execution_count меняется</div>
+            <div>diff: ±2000 строк за 1 ячейку</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="JSON структура — Git мерж не понимает, что это код. Merge ломает структуру файла">
+        <DataBox label="JSON-структура" className="border-amber-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>cells, metadata вложенные</div>
+            <div>conflict markers ломают JSON</div>
+            <div>jupyter не открывает повреждённый</div>
+            <div>three-way merge непригоден</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="PR review невозможен — reviewer видит base64 PNG, а не код">
+        <DataBox label="Code review impossible" className="border-purple-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>GitHub UI показывает diff JSON</div>
+            <div>Скрытый код в шуме</div>
+            <div>'+15 −12 lines' — реально ли?</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Результат: команда DE, которая работает с notebooks в обычном Git, тратит часы в неделю на:
+- Распутывание merge конфликтов
+- Размер репо растёт от outputs (картинки и таблицы — мегабайты)
+- Code review notebooks — поверхностный или не делается
+- "Чей output более актуальный" — невозможно понять без перезапуска
+
+Это решаемая проблема. Три инструмента дают разные подходы.
+
+---
+
+## Решение 1: nbstripout — чистим outputs автоматически
+
+Самое простое решение: **выкидывать outputs из .ipynb перед commit**. В Git попадает notebook с пустыми outputs — только код. Outputs живут локально в твоём notebook-е, но в Git их нет.
+
+`nbstripout` — pre-commit hook, который автоматически это делает.
+
+```bash
+# Установка
+pip install nbstripout
+
+# Активация для конкретного репо (один раз)
+nbstripout --install
+
+# Что это сделало?
+$ cat .git/info/attributes
+*.ipynb filter=nbstripout
+*.ipynb diff=ipynb
+
+$ git config --get filter.nbstripout.clean
+"/Users/me/.venv/bin/python" -m nbstripout
+```
+
+Под капотом — то же smudge/clean filter mechanism, что у LFS. Только filter не отправляет файл во внешний storage, а просто **вырезает outputs**. Локально файл остаётся с outputs (ты их видишь в Jupyter), но в blob-е Git хранит чистую версию.
+
+### Workflow с nbstripout
+
+```bash
+# Создал notebook, запустил все ячейки, выводит графики
+$ jupyter notebook analysis.ipynb
+# (работаешь, ячейки выводят данные, графики)
+
+# Сохранил, закрыл
+# Файл на диске — С outputs
+$ wc -c analysis.ipynb
+123456 analysis.ipynb   ← 120KB с outputs
+
+# Commit — clean filter вырезает outputs
+$ git add analysis.ipynb
+$ git commit -m "feat: add analysis notebook"
+
+# В Git попало без outputs
+$ git show HEAD:analysis.ipynb | wc -c
+8192   ← 8KB чистого кода без outputs
+```
+
+Окружающие коллеги видят чистый notebook (без картинок и таблиц), но с кодом. Они могут запустить его сами и получить outputs.
+
+### Минусы nbstripout
+
+- **Outputs не сохраняются для документации**: иногда хочется в notebook видеть результат "вот пример работы кода" — это потерянная информация. Workaround: иметь `examples/` директорию с notebook-ами специально для презентации, отдельно от `notebooks/` для работы.
+- **Не решает merge конфликты**: если двое коллег изменили один notebook в разных местах, merge всё равно происходит как JSON и часто конфликтует. Помогает только если в одном файле работает один человек.
+- **Локальные outputs всё ещё в твоём `.ipynb` на диске** — при `git status` файл "modified" пока ты его не commit-нул. Это норм.
+
+### Best practice для команды
+
+В `requirements-dev.txt` (или эквивалент) добавь `nbstripout`. В onboarding doc — "после клонирования: `nbstripout --install` в репо". Альтернатива — через `pre-commit` (см. модуль 15), тогда установка автоматическая.
+
+---
+
+## Решение 2: jupytext — paired .py + .ipynb
+
+Подход радикальнее: **держим notebook как `.py` файл с спецкомментариями для ячеек**, а `.ipynb` — это derived представление. В Git попадает `.py` (читаемое, мёржится как обычный Python), `.ipynb` либо в `.gitignore`, либо синхронизирован с `.py`.
+
+```python
+# analysis.py — jupytext-формат
+# ---
+# jupyter:
+#   jupytext:
+#     formats: py:percent,ipynb
+# ---
+
+# %% [markdown]
+# # Analysis of transactions
+# Quick exploration of Q1 transactions
+
+# %%
+import pandas as pd
+
+df = pd.read_parquet('data/transactions.parquet')
+df.head()
+
+# %%
+df.groupby('category').agg({'amount': 'sum'})
+
+# %% [markdown]
+# ## Findings
+# Top category is "groceries"
+```
+
+Маркер `# %%` — это разделитель ячейки. `# %% [markdown]` — markdown ячейка. Между маркерами — обычный Python.
+
+Этот `.py` файл:
+- читается как обычный Python (можно `python analysis.py` запустить)
+- редактируется как Python в любой IDE (VS Code, PyCharm) с поддержкой ячеек
+- jupytext может конвертировать в `.ipynb` (`jupytext --to ipynb analysis.py`)
+- merge через Git работает как обычный Python код
+
+```bash
+# Установка
+pip install jupytext
+
+# Создать paired формат для существующего ноутбука
+jupytext --set-formats ipynb,py:percent analysis.ipynb
+
+# Теперь оба файла: analysis.ipynb и analysis.py
+# При сохранении в Jupyter — оба обновляются
+
+# В Git commit-ишь .py, .ipynb — в .gitignore
+echo "*.ipynb" >> .gitignore
+git add analysis.py .gitignore
+git commit -m "feat: add analysis (jupytext py)"
+```
+
+### Workflow с jupytext
+
+Открываешь Jupyter с расширением jupytext (или используешь VS Code Jupyter, который автоматически синхронизирует). Работаешь как обычно с notebook-ом. При сохранении — обновляются оба файла.
+
+Коллега тянет `.py`, открывает его в Jupyter (jupytext автоматически распознаёт format и показывает как notebook) или в VS Code (поддерживает `# %%` cell markers nativly).
+
+### Плюсы jupytext
+
+- **Merge как обычный Python** — three-way merge работает, no JSON struggle.
+- **PR review нормальный** — reviewer видит код, не JSON.
+- **Маленькие файлы в Git** — `.py` обычно в 10-50 раз меньше `.ipynb` без outputs.
+- **Можно одновременно**: разработка в Jupyter, проверка через `python file.py`, тестирование как обычный модуль.
+
+### Минусы jupytext
+
+- **Outputs не сохраняются** — те же проблемы что у nbstripout с документацией.
+- **Команда должна знать jupytext** — onboarding документация нужна.
+- **Не каждый стандарт notebook-формата сохраняется** идеально при roundtrip — иногда теряются metadata-поля (display preferences и т.п.).
+
+`jupytext` — это **best practice для production DE-проектов 2026**. Большие компании (Airflow contributions, dbt repos с notebook-tutorials) часто используют именно его.
+
+---
+
+## Решение 3: nbdime — специальный diff/merge для notebooks
+
+Если по каким-то причинам ты обязан хранить notebooks как `.ipynb` (с outputs) — есть nbdime. Это **специальный diff и merge tool**, который понимает структуру JSON ноутбука и показывает diff на уровне ячеек, не байтов JSON.
+
+```bash
+# Установка
+pip install nbdime
+
+# Активация для Git
+nbdime config-git --enable --global
+
+# Что произошло?
+$ git config --global --get diff.jupyternotebook.command
+git-nbdiffdriver diff
+
+$ git config --global --get merge.jupyternotebook.driver
+git-nbmergedriver merge %O %A %B %L %P
+```
+
+nbdime регистрирует себя как Git diff/merge driver для `*.ipynb` файлов. Теперь:
+
+```bash
+# git diff показывает читаемый diff ячеек, а не JSON
+$ git diff analysis.ipynb
+nbdiff analysis.ipynb
+--- a/analysis.ipynb  (HEAD)
++++ b/analysis.ipynb  (working copy)
+## modified /cells/3:
+   source:
+     - df.groupby('category').sum()
+   + df.groupby('category').agg({'amount': 'sum', 'count': 'count'})
+```
+
+То есть видно, что в ячейке 3 поменялась одна строка кода. Не нужно читать JSON.
+
+При конфликте `git merge`:
+
+```bash
+$ git merge feature/q2-update
+Auto-merging notebooks/analysis.ipynb
+CONFLICT (content): Merge conflict in notebooks/analysis.ipynb
+
+# Открыть GUI для resolve
+$ nbdime mergetool
+```
+
+`nbdime mergetool` запускает локальный веб-UI, где ты видишь три версии (ours, base, theirs) ноутбука side-by-side и можешь выбрать клик-кликом.
+
+### Плюсы nbdime
+
+- **Не нужно менять формат файлов** — продолжаешь работать с `.ipynb`.
+- **Outputs сохраняются** — для notebook-as-documentation.
+- **Понятный diff** — на уровне cells, не JSON.
+
+### Минусы nbdime
+
+- **Команда должна установить и настроить** — у каждого `nbdime config-git --enable --global`.
+- **GitHub UI всё равно показывает JSON-diff** — nbdime локальный инструмент. PR на GitHub не выглядит лучше. (Хотя GitHub в 2026 рендерит .ipynb с rendered cells в PR view.)
+- **Большие notebooks в Git** — проблема .git/ size не решена.
+
+---
+
+## Сравнение: какой выбрать
+
+<DiagramContainer title="Три подхода: когда что использовать" color="indigo">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Минимальное усилие — просто чистим outputs. Хорошо для individual работы">
+        <DataBox label="nbstripout" className="border-blue-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>+ Минимальная настройка</div>
+            <div>+ Outputs не загромождают репо</div>
+            <div>− Outputs пропадают для документации</div>
+            <div>− Merge всё равно сложный</div>
+            <div>Для: одиночные notebooks, личные проекты</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Лучшая практика для team DE-проектов: paired .py файлы мержатся легко">
+        <DataBox label="jupytext" className="border-emerald-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>+ Merge как Python</div>
+            <div>+ PR review нормальный</div>
+            <div>+ Маленькие файлы в Git</div>
+            <div>− Команда должна знать workflow</div>
+            <div>Для: team production DE/ML</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Когда обязательно хранить .ipynb с outputs">
+        <DataBox label="nbdime" className="border-purple-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>+ Outputs сохраняются</div>
+            <div>+ Читаемый diff/merge</div>
+            <div>− Большие файлы в Git остаются</div>
+            <div>− Каждый должен настроить</div>
+            <div>Для: notebooks-as-docs, tutorials</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Мой рекомендуемый подход для production DE-team:
+
+1. **Базовый setup**: `nbstripout` через pre-commit для всех `*.ipynb` (модуль 15)
+2. **Для shared notebooks**: `jupytext` paired `.py` (commit-ятся), `.ipynb` в `.gitignore`
+3. **Для tutorials/docs**: `nbdime` enabled, notebooks с outputs commit-ятся в `docs/notebooks/`
+
+---
+
+## Hands-on: настроить nbstripout + jupytext
+
+```bash
+# В корне твоего DE-проекта
+pip install nbstripout jupytext
+
+# Активировать nbstripout
+nbstripout --install
+
+# Проверь — в .git/config
+$ cat .git/config | grep -A 3 "filter \"nbstripout\""
+[filter "nbstripout"]
+    clean = /Users/me/.venv/bin/python -m nbstripout
+    smudge = cat
+
+# Проверь .git/info/attributes
+$ cat .git/info/attributes
+*.ipynb filter=nbstripout
+*.ipynb diff=ipynb
+
+# Создай notebook
+mkdir notebooks
+cat > notebooks/test.ipynb <<'EOF'
+{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": 1,
+   "metadata": {},
+   "outputs": [
+    {"data": {"text/plain": ["42"]}, "metadata": {}, "execution_count": 1, "output_type": "execute_result"}
+   ],
+   "source": ["x = 42\nx"]
+  }
+ ],
+ "metadata": {"kernelspec": {"name": "python3", "display_name": "Python 3"}},
+ "nbformat": 4,
+ "nbformat_minor": 4
+}
+EOF
+
+git add notebooks/test.ipynb
+git commit -m "test"
+
+# Что в Git?
+$ git show HEAD:notebooks/test.ipynb | python -c "import json, sys; d = json.load(sys.stdin); print(json.dumps(d, indent=2))"
+{
+  "cells": [
+    {
+      "cell_type": "code",
+      "execution_count": null,        ← очищено
+      "metadata": {},
+      "outputs": [],                  ← очищено
+      "source": [
+        "x = 42\nx"
+      ]
+    }
+  ],
+  ...
+}
+
+# Outputs в Git — нет. На диске — есть (можно проверить так же файл локально):
+$ python -c "import json; d = json.load(open('notebooks/test.ipynb')); print(d['cells'][0]['execution_count'])"
+# может быть null или 1 в зависимости от того, что Jupyter сохранил
+```
+
+### Дальше — добавить jupytext
+
+```bash
+# Pair existing notebook
+$ jupytext --set-formats ipynb,py:percent notebooks/test.ipynb
+$ ls notebooks/
+test.ipynb
+test.py            ← derived из ipynb
+
+$ cat notebooks/test.py
+# ---
+# jupyter:
+#   jupytext:
+#     formats: ipynb,py:percent
+# ---
+
+# %%
+x = 42
+x
+
+# Теперь commit-им .py, ipynb в .gitignore
+$ echo "notebooks/*.ipynb" >> .gitignore
+$ git add .gitignore notebooks/test.py
+$ git commit -m "convert notebook to jupytext"
+```
+
+С этого момента: открываешь `test.py` в Jupyter (с jupytext-расширением) или VS Code — видишь как notebook. Сохраняешь — `.py` обновляется. В Git попадает только `.py`.
+
+---
+
+## Pre-commit integration
+
+`nbstripout` идеально настраивается через pre-commit (модуль 15):
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/kynan/nbstripout
+    rev: 0.7.1
+    hooks:
+      - id: nbstripout
+```
+
+После `pre-commit install` каждый коллега, склонирующий репо, автоматически получает hook — outputs стрипаются перед commit. Не нужно onboarding-документации "не забудь nbstripout --install".
+
+---
+
+## TL;DR
+
+- `.ipynb` файлы в обычном Git — главный pain DE-команд. Outputs ломают diff, merge практически невозможен.
+- **nbstripout** — выкидывает outputs автоматически через filter. Минимальная настройка.
+- **jupytext** — paired `.py` + `.ipynb`, merge как Python. Best practice для team production.
+- **nbdime** — специальный diff/merge с UI. Для случаев, когда outputs обязательно сохранить.
+- Через pre-commit (модуль 15) — `nbstripout` подключается автоматически для всей команды.
+
+Для DE-проекта 2026 года я рекомендую: `nbstripout` через pre-commit для всех `.ipynb` + `jupytext` для shared collaboration notebooks.
+
+---
+
+<KnowledgeCheck
+  question="Junior DE в команде впервые commit-ит .ipynb с большим графиком. PR показывает '+5000 −0 lines, 12 MB added to repo size'. Что не настроено и какой полный fix?"
+  answer="В репо не настроен nbstripout (или эквивалент) — outputs ноутбука (PNG графика как base64, ~5000 строк JSON, 12MB) попали в Git как есть. Через год active работы repo раздуется до гигабайт. Полный fix: (1) `pip install nbstripout` в dev-requirements. (2) Добавить в `.pre-commit-config.yaml` repo `kynan/nbstripout` + соответствующий hook. (3) `pre-commit install` — настроится автоматически для каждого коллеги. (4) Для уже tracked ноутбуков с outputs — повторно прогнать через nbstripout: `nbstripout notebooks/*.ipynb && git add . && git commit -m 'chore: strip notebook outputs'`. Это даст один большой 'cleanup' commit. (5) Для notebooks, где outputs ВАЖНЫ для документации — отдельная директория `docs/notebooks/` без nbstripout (можно через `.gitattributes` исключение). Длинный путь: рассмотреть `jupytext` для shared collaboration notebooks, тогда merge будет как Python код, а не JSON. На уровне команды: первое — pre-commit с nbstripout, второе (optional) — jupytext для notebooks, над которыми работают несколько человек."
+/>

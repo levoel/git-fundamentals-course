@@ -1,0 +1,286 @@
+---
+title: "Структура хорошего PR — title, description, atomic changes"
+description: "Структура: title в conventional commits, description (что/почему/как тестировать), screenshots для UI, ссылка на issue. Atomic PRs — одна логическая тема. Размер ~200-400 LOC max."
+order: 2
+difficulty: "beginner"
+estimatedTime: 25
+topics: ["pull-request", "conventional-commits", "atomic", "pr-size", "description", "review"]
+---
+
+# Структура хорошего PR
+
+Качество PR влияет на скорость review и риск багов в проде. Плохой PR — 5000 строк изменений в 10 разных модулях, title «update stuff», description пустой. Reviewer открывает, видит wall of code, ставит «I'll look later» — PR висит неделю, требует rebase, прокисает. Хороший PR — 200 строк по одной теме, ясный title, чёткое описание — review занимает 15 минут, merge тот же день.
+
+В этом уроке: как писать title в conventional commits, что должно быть в description, почему atomic PRs (одна тема) важнее «больших фич», и идеальный размер PR.
+
+---
+
+## Conventional Commits format для title
+
+[Conventional Commits](https://www.conventionalcommits.org/) — стандарт structured commit messages, расширенный на PR titles. Формат:
+
+```
+<type>(<scope>): <description>
+```
+
+| Type | Когда |
+|---|---|
+| `feat` | Новая функциональность |
+| `fix` | Исправление бага |
+| `docs` | Только документация |
+| `style` | Форматирование, без логических изменений |
+| `refactor` | Рефакторинг без изменения поведения |
+| `test` | Добавление/изменение тестов |
+| `chore` | Build, dependencies, infra |
+| `perf` | Performance улучшение |
+| `revert` | Отмена предыдущего коммита |
+
+Примеры PR titles:
+
+```
+feat(dags): add users ETL pipeline
+fix(dbt): handle null in customer_ltv calculation
+docs: update README with deployment instructions
+refactor(plugins): extract common Airflow hook
+test(spark): add integration tests for revenue job
+chore(deps): bump dbt-core to 1.7.0
+```
+
+`scope` опционален в скобках — конкретизирует область (`dags`, `dbt`, `plugins`, `infra`).
+
+### Зачем conventional commits
+
+1. **Автогенерация changelog**. Tools (semantic-release, conventional-changelog) парсят commit messages и собирают release notes.
+2. **Авто-bump SemVer**. `fix` -> patch, `feat` -> minor, `BREAKING CHANGE:` в body -> major.
+3. **CI hooks**. Запретить PR без правильного title через GitHub Action.
+4. **Читаемость**. Понятно с первого взгляда — это фича, баг или рефакторинг.
+
+<Callout type="tip">
+Заведи привычку префиксовать **все** commit messages этим форматом, не только PR titles. Через год работы у тебя будет красивая `git log --oneline` история, по которой автоматически генерится changelog.
+</Callout>
+
+---
+
+## Структура description
+
+Description — это **краткое объяснение для reviewer** что и зачем ты сделал. Шаблон:
+
+```markdown
+## Summary
+<1-3 bullet points: что меняем>
+
+## Why
+<Контекст: какую проблему решаем, ссылка на issue>
+
+## Changes
+<Список ключевых изменений>
+
+## Test plan
+<Чек-лист как протестировать>
+
+## Screenshots / Output
+<Если UI или output изменился>
+
+Closes #123
+```
+
+Пример хорошего description для dbt PR:
+
+```markdown
+## Summary
+- Adds `customer_ltv` mart model
+- Implements LTV calculation = sum of revenue per customer
+
+## Why
+PM запросил customer LTV для quarterly reporting. Existing
+`fct_orders` содержит revenue, но нет агрегации per customer.
+Issue: #456
+
+## Changes
+- `models/marts/customer_ltv.sql` — new model
+- `models/marts/schema.yml` — added tests (unique, not_null)
+- Updated `dbt_project.yml` — added model config
+
+## Test plan
+- [x] `dbt run --select customer_ltv` — passes
+- [x] `dbt test --select customer_ltv` — all tests pass
+- [x] Manual SQL: SELECT customer_id, SUM(revenue) FROM ... GROUP BY customer_id
+      — matches model output (sample 100 rows)
+- [x] downstream models (`weekly_report`) still pass
+
+## Output
+Example row:
+```
+customer_id | total_ltv | first_order | last_order
+        100 |    5432.10 | 2024-01-01 | 2026-05-13
+```
+
+Closes #456
+```
+
+Что здесь важно:
+
+1. **Summary в 1-3 пунктах** — что меняем. Reviewer читает первым делом.
+2. **Why** — контекст. Без него reviewer не поймёт «почему именно так».
+3. **Changes** — где смотреть. Особенно важно для больших PR.
+4. **Test plan** — что протестировано, как воспроизвести. Reviewer может перепроверить.
+5. **Closes #N** — magic link, GitHub автоматически закроет issue после merge.
+
+---
+
+## Atomic PRs — одна тема за раз
+
+«Atomic» = неделимый. Atomic PR — это PR, в котором **одна логическая тема**. Если ты в коммите делаешь «добавил DAG + поправил баг в hook + refactor utils» — это **три** темы, должны быть **три** PR.
+
+### Почему atomic важно
+
+1. **Review проще**. Reviewer фокусируется на одной теме за раз, не теряется в контексте.
+2. **Меньше конфликтов**. Smaller diff -> меньше шанс конфликта с другими PR.
+3. **Точечный revert**. Если что-то сломалось, revert одного PR — не затронет другие фичи.
+4. **Быстрее merge**. Большая PR висит дольше — никто не хочет ревьюить wall of code.
+
+### Anti-pattern: PR с тремя темами
+
+```
+PR #234: «Add users pipeline + fix bug + refactor»
+
+Files changed: 45
++ 1200 −800
+```
+
+Reviewer открывает: «не понимаю, что главное. Где границы? Бага fix замешан в feature changes. Не могу одобрить часть, отклонить другую».
+
+### Правильно: три PR
+
+```
+PR #234: «feat(dags): add users ETL pipeline»     (+400)
+PR #235: «fix(hooks): handle timeout in HTTP hook» (+50)
+PR #236: «refactor(utils): extract date parser»    (+150)
+```
+
+Каждый — focused, easy to review. Можно мержить параллельно (если нет dependencies).
+
+---
+
+## Размер PR
+
+Идеальный размер: **200-400 LOC** (lines of code) изменений. После 500 — reviewer уже устаёт. После 1000 — фактический review деградирует до «выглядит OK, approve».
+
+Исследования (Google Engineering, Microsoft Research) показывают: **75% багов** в PR находятся в первые 200 строк review. После — defect detection падает.
+
+### Как уменьшить большой PR
+
+1. **Раздели по слоям**. Сначала PR #1 «add data models», потом PR #2 «add migration», PR #3 «add API endpoint».
+2. **Stack PRs**. PR #2 базируется на ветке PR #1. Когда #1 merge — #2 автоматически rebase на main.
+3. **Feature flag**. PR #1 «add code with feature flag OFF», PR #2 «turn on flag». Тогда #1 безопасен для merge, #2 — отдельный rollout.
+4. **Скрытая работа**. Refactor -> PR #1 (refactor only, behavior unchanged). Feature -> PR #2 (на refactored код).
+
+<Callout type="warning">
+PR > 1000 LOC — red flag. Это сложно review-ить, легко пропустить баг, дольше висит, чаще требует rebase. Если ты junior и собираешься открыть такой PR — обсуди с tech lead, как раздробить.
+</Callout>
+
+---
+
+## Screenshots и output
+
+Для UI changes — обязательно скриншоты. Для CLI tools — example output. Для DE-репо:
+
+- **Airflow DAG**: скриншот graph view (или диаграмма) — как выглядит pipeline.
+- **dbt модель**: пример output (SELECT 10 rows), визуализация lineage (dbt docs serve).
+- **SQL changes**: EXPLAIN ANALYZE before/after, query plan.
+- **Performance**: benchmark before/after, графики.
+
+GitHub поддерживает drag-and-drop изображений прямо в description / комментарий. Markdown:
+
+```markdown
+## Output
+
+Before:
+![old query](url)
+
+After:
+![new query](url)
+
+Performance:
+- Before: 12s
+- After: 3s
+- Improvement: 4x
+```
+
+---
+
+## Linked issues
+
+`Closes #N`, `Fixes #N`, `Resolves #N` в description (или последнем коммите) **автоматически закроет** issue #N когда PR merge-нут. Это работает на GitHub и GitLab.
+
+```markdown
+Closes #123
+Fixes #456
+Resolves #789
+```
+
+Все три — синонимы. Поддерживаются множественные:
+
+```markdown
+Closes #123, closes #456
+```
+
+Без auto-close (просто mention):
+
+```markdown
+Related to #123
+See also #456
+```
+
+`Related to` не закрывает, но создаёт linkback в issue (видно «mentioned in PR #234»).
+
+---
+
+## DE-сценарий: разделение большого feature на несколько PR
+
+PM попросил: «добавить customer LTV report — pipeline + dashboard». Это 2000 LOC если делать одним PR. Лучше:
+
+```
+PR #1: feat(marts): add raw_customer_orders source     +150
+       — fix CDC source for orders
+
+PR #2: feat(marts): add fct_customer_orders            +200
+       — fact table on orders (depends on PR #1)
+
+PR #3: feat(marts): add dim_customer                   +150
+       — customer dimension (depends on PR #2)
+
+PR #4: feat(marts): add customer_ltv model             +200
+       — final LTV mart (depends on PR #3)
+
+PR #5: feat(dashboard): add LTV report                 +300
+       — Metabase dashboard config (depends on PR #4)
+```
+
+Каждый PR — atomic, размер 150-300 LOC, легко review. Merge поэтапно. Dashboard ничего не сломает, потому что предыдущие PR-ы уже на main и протестированы.
+
+---
+
+## Чек-лист перед открытием PR
+
+Прежде чем открывать PR, проверь:
+
+- [ ] Title в conventional commits формате
+- [ ] Description содержит Summary, Why, Test plan
+- [ ] Linked issue через `Closes #N`
+- [ ] Размер < 400 LOC (если больше — раздели)
+- [ ] Atomic (одна тема, не мешанина)
+- [ ] CI/линтер локально прошёл
+- [ ] Тесты добавлены/обновлены
+- [ ] Документация обновлена (если public API)
+- [ ] Self-review своего diff в GitHub UI
+
+Self-review — это просто: открой PR, нажми Files Changed, прочитай как reviewer. Обнаружишь debug-логи, забытые `print()`, неудачные имена переменных. Поправь — сэкономишь итерацию reviewer-а.
+
+---
+
+## Killer takeaway
+
+Хороший PR: title в conventional commits (`feat(scope): ...`), description с Summary + Why + Test plan + `Closes #N`, atomic (одна тема), размер 200-400 LOC. Большой PR раздели — stack PRs или feature flags. Self-review перед открытием — обнаружишь свои мелкие косяки до того как reviewer.
+
+<KnowledgeCheck quizSlug="11-pull-requests/02-creating-good-pr" />

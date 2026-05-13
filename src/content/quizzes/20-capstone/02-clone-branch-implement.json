@@ -1,0 +1,59 @@
+{
+  "lessonSlug": "20-capstone/02-clone-branch-implement",
+  "moduleId": "20-capstone",
+  "_meta": {
+    "idPrefix": "git-m20-02"
+  },
+  "questions": [
+    {
+      "id": "git-m20-02-q1",
+      "type": "multiple-choice",
+      "question": "JIRA ticket DE-1234 'Add user_events ingestion DAG'. Какое имя feature ветки следовать командной convention?",
+      "options": [
+        {"id": "a", "text": "fix-bug"},
+        {"id": "b", "text": "wip"},
+        {"id": "c", "text": "feat/de-1234-user-events-dag — feature, ticket-id, short slug"},
+        {"id": "d", "text": "junior-task-monday"}
+      ],
+      "correctAnswer": "c",
+      "explanation": "Стандарт naming: `<type>/<ticket-id>-<short-slug>`. Type: feat, fix, docs, chore, hotfix. Ticket: DE-1234. Slug: краткое описание (user-events-dag). Преимущества: (1) понятно что за branch без открытия PR; (2) grep-абельно в git log; (3) автоматически связывается с JIRA в smart commits; (4) красиво в URL: `github.com/.../tree/feat/de-1234-user-events-dag`. 'fix-bug', 'wip', 'junior-task' — anti-patterns: не информативны, не group-абельны, не link-абельны.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m20-02-q2",
+      "type": "multiple-choice",
+      "question": "Junior выполнил три логически разделённых задачи: добавил DAG, добавил tests, обновил README. Какой подход к commits?",
+      "options": [
+        {"id": "a", "text": "Один big commit 'Add DAG' с всеми изменениями"},
+        {"id": "b", "text": "Три separate conventional commits: 'feat(dags): add user_events_dag', 'test(user_events): add smoke tests', 'docs(dags): document user_events_dag' — каждый focused, easy для review и revert"},
+        {"id": "c", "text": "30 micro-commits 'wip', 'wip', 'wip'..."},
+        {"id": "d", "text": "Commits не нужны, push сразу"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Granular conventional commits — best practice. Каждый commit: (1) focused на one logical change; (2) self-explanatory message с conventional prefix; (3) easy revert single piece если что-то сломалось. Опции (a) — big commit hard to review, hard to revert одну часть. (c) — wip commits в production — noise. Если используется squash merge — все commits объединятся в один в main, но в PR review reviewer видит structure твоей работы. Если rebase merge — granularity сохраняется в main.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m20-02-q3",
+      "type": "multiple-choice",
+      "question": "Команда `git push --set-upstream origin feat/de-1234-user-events-dag` (или `-u`). Что делает --set-upstream и зачем нужен в первый push?",
+      "options": [
+        {"id": "a", "text": "Это alias для force push"},
+        {"id": "b", "text": "Связывает локальную ветку с remote ветку (tracking). После этого: git push без аргументов работает; git pull тоже; git status показывает 'ahead/behind' остатуса. Без --set-upstream в первый push Git не знает соответствия и спрашивает явно куда push"},
+        {"id": "c", "text": "Создаёт PR автоматически"},
+        {"id": "d", "text": "Сжимает commits в один"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "--set-upstream (короткая форма -u) — устанавливает tracking relationship между local и remote. Без него Git не знает, какой remote ветке соответствует локальная. Сообщение 'fatal: The current branch has no upstream branch'. После -u: `git push` (без аргументов) знает куда; `git pull` тоже; `git status` показывает ahead/behind. Это nice convenience для дальнейшей работы. Альтернатива: `git push origin feat/...` каждый раз. -u полезный pattern.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m20-02-q4",
+      "type": "true-false",
+      "question": "Перед `git push` локально нужно прогнать те же checks, что и CI (uv run ruff check, mypy, pytest). Это spares CI minutes (быстрый failure feedback локально) и снижает frustration коллег (CI не падает на твоём PR из-за тривиальной ошибки).",
+      "correctAnswer": true,
+      "explanation": "Локальный pre-push pipeline — отличительный признак mature DE. Делай локально: (1) ruff check + ruff format --check; (2) mypy; (3) pytest; (4) gitleaks (через pre-commit hook). 30 seconds локально vs 5 минут wait CI и red status. Reviewer открывает PR — видит зелёный CI сразу. Если CI красный — perception: 'junior не проверяет, расследую за него'. Pre-commit framework автоматизирует это (модуль 15). Junior с git push после успешного локального pipeline — выглядит profesional.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

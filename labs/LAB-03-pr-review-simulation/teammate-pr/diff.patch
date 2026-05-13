@@ -1,0 +1,90 @@
+diff --git a/models/fct_customer_orders.sql b/models/fct_customer_orders.sql
+new file mode 100644
+index 0000000..a1b2c3d
+--- /dev/null
++++ b/models/fct_customer_orders.sql
+@@ -0,0 +1,53 @@
++{{
++  config(
++    materialized='table'
++  )
++}}
++
++-- fct_customer_orders: aggregates order totals per customer.
++-- Used by Marketing retention dashboard.
++
++WITH orders AS (
++
++    SELECT *
++    FROM {{ ref('stg_orders') }}
++    WHERE order_date >= '2024-01-01'
++
++),
++
++customers AS (
++
++    SELECT userid AS customer_id, email, signup_date
++    FROM {{ ref('stg_customers') }}
++
++),
++
++joined AS (
++
++    SELECT
++        c.customer_id,
++        c.email,
++        c.signup_date,
++        o.order_id,
++        o.user_id,
++        o.order_date,
++        o.amount
++    FROM orders o
++    LEFT JOIN customers c ON o.user_id = c.customer_id
++
++),
++
++aggregated AS (
++
++    SELECT
++        customer_id,
++        COUNT(order_id) AS total_orders,
++        SUM(amount) AS total_revenue,
++        SUM(amount) * 0.15 AS estimated_profit,
++        MIN(order_date) AS first_order_date,
++        MAX(order_date) AS last_order_date
++    FROM joined
++    GROUP BY customer_id
++
++)
++
++SELECT * FROM aggregated
+diff --git a/schema.yml b/schema.yml
+index e4d5f67..7890abc 100644
+--- a/schema.yml
++++ b/schema.yml
+@@ -10,3 +10,25 @@ models:
+       - name: dummy_col
+         description: "..."
+
++  - name: fct_customer_orders
++    description: "Aggregates order totals per customer. Used by Marketing retention dashboard."
++    columns:
++      - name: customer_id
++        description: "Customer identifier."
++        tests:
++          - not_null
++
++      - name: total_orders
++        description: "Number of orders by this customer."
++
++      - name: total_revenue
++        description: "Sum of order amounts for this customer."
++
++      - name: estimated_profit
++        description: "Estimated profit (revenue * 0.15)."
++
++      - name: first_order_date
++        description: "Date of the first order."
++
++      - name: last_order_date
++        description: "Date of the last order."

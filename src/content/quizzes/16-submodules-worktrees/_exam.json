@@ -1,0 +1,89 @@
+{
+  "moduleId": "16-submodules-worktrees",
+  "title": "Module 16 Exam — Submodules, subtrees, worktrees",
+  "passThreshold": 70,
+  "_meta": {
+    "idPrefix": "git-m16-exam",
+    "description": "6-question integrated exam for Module 16"
+  },
+  "questions": [
+    {
+      "id": "git-m16-exam-q1",
+      "type": "multiple-choice",
+      "question": "Что такое submodule и какова главная проблема для team workflow?",
+      "options": [
+        { "id": "a", "text": "Submodule — копия чужого репо" },
+        { "id": "b", "text": "Submodule — ссылка на конкретный commit другого Git репо. Parent хранит gitlink (mode 160000 в tree + URL в .gitmodules) с SHA. Главная team проблема: после обычного git clone parent submodule директория ПУСТАЯ — нужно `git submodule update --init --recursive` или сразу `git clone --recurse-submodules`. Каждый коллега должен помнить. Решение навсегда — `git config --global submodule.recurse true` plus push.recurseSubmodules=on-demand plus diff.submodule=log" },
+        { "id": "c", "text": "Submodule всегда работает автоматически" },
+        { "id": "d", "text": "Submodule deprecated" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Submodule mechanics: pinned reference на commit другого репо. В parent tree специальный объект mode 160000 (gitlink) с SHA-1 hash. В .gitmodules метаданные (path, URL). Submodule репо — отдельный полноценный Git репо со своей историей. Главная team проблема — submodule не клонируется автоматически при `git clone parent`. Subsequent `git pull` тоже не обновляет submodule по default — gitlink в индексе обновляется, working tree submodule остаётся старым. Это создаёт subtle bugs: ImportError 'функция отсутствует' потому что submodule на старой версии. Полное решение через global config: (1) `git config --global submodule.recurse true` — recursive поведение для clone/pull/checkout/merge. (2) `git config --global push.recurseSubmodules on-demand` — auto-push submodule перед parent push. (3) `git config --global diff.submodule log` — git diff показывает commits inside submodule для лучшего review. (4) Onboarding doc — каждый новый коллега запускает эти три команды один раз. С этими настройками 90% submodule болей повседневной работы исчезают. Submodule остаётся правильным выбором для: shared internal library, strict SHA pinning, separate ownership teams.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m16-exam-q2",
+      "type": "multiple-choice",
+      "question": "Реальный DE сценарий: platform team в acme owns репо `acme-shared-utils` с S3/Snowflake connectors. Используется 5 DE-teams в разных pipeline проектах. Какой механизм Git выбрать?",
+      "options": [
+        { "id": "a", "text": "Copy-paste файлов" },
+        { "id": "b", "text": "Submodule идеален: (1) Multiple consumers (5 teams) с разными release cycles — каждая team решает когда update. (2) Strict SHA pinning для reproducibility production deploys. (3) Separate ownership — platform team owns lib, DE-teams consume. (4) Bumping submodule = explicit decision in PR. Setup в каждом DE-project: git submodule add acme-shared-utils, commit. Onboarding: коллеги настраивают global submodule.recurse=true и push.recurseSubmodules=on-demand" },
+        { "id": "c", "text": "Subtree подходит" },
+        { "id": "d", "text": "Каждой команде сделать свою копию shared-utils" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Анализ сценария: 5 team consumers, separate ownership, library нужна для production. Submodule подходит идеально по нескольким причинам: (1) Multiple consumers — submodule keeps each project's parent тонким (parent хранит только gitlink, не дублирует файлы 5 раз). (2) Strict pinning — каждый DE-project explicitly pin-ит SHA своей версии shared-utils. Это критично для production deploys — surprise updates неприемлемы для CI/CD. (3) Independent release cycle — team A может быть на v1.2, team B на v1.5. Update до new version — explicit `git submodule update --remote && git commit` в PR с testing. (4) Separate ownership — platform team works directly in shared-utils репо, не trogает DE-team's repos. DE-teams consume через bump submodule. (5) Tooling — submodule встроен в Git, нет dependency на extra tools. Subtree был бы хуже потому что: (a) Дублирование — содержимое shared-utils копируется в 5 parent репо (storage 5x). (b) Push back медленный (subtree split), для frequent contributions от platform team — pain. (c) Меньше strict pinning. Alternatives и почему не они: (a) Pip package на private PyPI — хорошо, если есть infrastructure (нужен private package server). Submodule бесплатнее. (b) Monorepo — невозможен из-за separate ownership. (c) Vendor copy — нет updates path, технический долг. Setup: shared-utils репо в acme org -> каждый DE-project: `git submodule add https://github.com/acme/shared-utils.git shared-utils && git commit -m 'chore: add shared-utils submodule'`. Onboarding: README с 'git config --global submodule.recurse true'. CI: actions/checkout с submodules: recursive.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m16-exam-q3",
+      "type": "multiple-choice",
+      "question": "В чём принципиальная разница между submodule, subtree, worktree?",
+      "options": [
+        { "id": "a", "text": "Это синонимы для одной операции" },
+        { "id": "b", "text": "Submodule = ссылка на commit другого репо (pinned SHA in gitlink). Subtree = содержимое другого репо мерджится в parent (реальные файлы, история сливается). Worktree = множественные working trees одного репо (shared .git, разные checkouts). Submodule и subtree — для включения ВНЕШНЕГО кода. Worktree — для parallel работы со СВОИМ репо" },
+        { "id": "c", "text": "Все три только для backup" },
+        { "id": "d", "text": "Только subtree используется в production" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Три разных concept-а с разными целями: (1) SUBMODULE — для подключения внешнего Git репо как ссылки. Parent не содержит файлов submodule, только pointer (gitlink + .gitmodules). Submodule репо — отдельная entity со своей историей. Use case: shared library между projects с strict SHA pinning. Trade-off: complex workflow (clone, update, push). (2) SUBTREE — для встраивания содержимого внешнего репо ВНУТРЬ parent. После `git subtree add` чужие файлы становятся обычными blob-ами parent, история мерджится. Никаких gitlinks, никаких .gitmodules — для пользователей это просто директория. Use case: vendoring read-mostly library, маленькие shared utils. Trade-off: размер parent растёт, push upstream медленный. (3) WORKTREE — для множественных working trees одного и того же репо. Один shared .git/objects/, разные working tree directories, каждая на своей ветке. Use case: PR review без stash, long-running tests с параллельной работой, parallel hotfix+feature. Не имеет отношения к external коду. Choosing: external code -> submodule (strict pinning) vs subtree (zero onboarding) vs pip package (если distributable). Internal workflow -> worktree. Можно использовать одновременно: submodule + worktree (work с submodule в parallel directories), хотя есть некоторые quirks.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m16-exam-q4",
+      "type": "multiple-choice",
+      "question": "Реальный DE workflow: пишешь feature ETL (15 modified files, дальше от commit), прилетает срочный hotfix для bug в production main. Также есть PR коллеги для review с long-running integration tests. Как worktrees решают это?",
+      "options": [
+        { "id": "a", "text": "Сделать stash для всех scenarios" },
+        { "id": "b", "text": "Три worktrees одновременно: (1) Main directory — feature/etl-rewrite (твоя работа, 15 modified intact); (2) `git worktree add ../parent-hotfix -b hotfix/critical main` — clean checkout от main, делаешь hotfix без потери своей работы, push, открываешь PR; (3) `git worktree add ../parent-pr-N pr-N` — review PR коллеги, запускаешь tests параллельно. Все три одновременно с shared .git. Никаких stash, IDE state intact" },
+        { "id": "c", "text": "Откладывать всё до завершения feature" },
+        { "id": "d", "text": "Сделать 3 разных clone репо" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Worktree workflow для multitasking DE: (1) Основная директория — твоя активная работа, feature/etl-rewrite, 15 modified files. Никаких изменений. (2) Hotfix worktree — `git worktree add ../parent-hotfix -b hotfix/critical-bug main`. Создаёт новую папку с clean checkout от main + новая ветка hotfix/critical-bug. Делаешь hotfix (edit src/critical.py, commit, push), открываешь PR на GitHub, merge, deploy. Время от 'упал production' до 'fixed' — 10 минут, без disruption твоей feature работы. (3) PR review worktree — `git fetch origin pull/N/head:pr-N && git worktree add ../parent-pr-N pr-N`. Открываешь в новом VS Code окне с отдельной venv для review-зависимостей. Запускаешь integration tests, они идут 30 минут — параллельно ты возвращаешься к своей feature. По завершении: code review с комментариями, approve если хорошо. (4) Все три directories: main, hotfix, pr-review — открыты в трёх окнах VS Code. Shared .git/objects/ — нет дублирования storage. (5) Когда закончил: `git worktree remove ../parent-hotfix` и `git worktree remove ../parent-pr-N`. Cleanup в одну команду. Без worktree это занимало бы час+ с риском потерять работу через stash conflicts, broken venv через mixed pip install, lost IDE state. С worktree — каждый context isolated, transitions instant (alt-tab между окнами), zero риск. Это canonical productivity workflow для production DE-команды.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m16-exam-q5",
+      "type": "multiple-choice",
+      "question": "Decision tree: какой механизм выбрать для разных DE сценариев?",
+      "options": [
+        { "id": "a", "text": "Всегда submodule" },
+        { "id": "b", "text": "(1) Public Python library -> pip install (не submodule/subtree). (2) Big data -> DVC (модуль 14). (3) Internal shared lib для 3+ projects with strict pinning -> submodule. (4) Vendoring read-mostly small library -> subtree. (5) Tightly coupled APIs -> monorepo (Bazel/Pants/Turborepo). (6) Parallel local workflows (PR review без stash) -> worktree" },
+        { "id": "c", "text": "Всё monorepo" },
+        { "id": "d", "text": "Случайно выбирать" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Полный decision tree для DE 2026: (1) Это public package на PyPI/npm? -> используй package manager (pip install / npm install). Не submodule, не subtree. (2) Это data/binary files? -> DVC (модуль 14.03) если нужен versioning, Git LFS (модуль 14.02) если в GitHub-stack, .gitignore + S3 если data в облаке и нет требований к versioning. Submodule на data-репо — antipattern. (3) Это internal shared library для multiple projects (3+) со strict pinning требованиями? -> submodule. Setup: git submodule add, global config submodule.recurse=true. (4) Это external library не на PyPI, single consumer, read-mostly? -> subtree. Setup: git subtree add --squash. Zero onboarding cost. (5) Это tightly coupled components (API+client с simultaneous changes)? -> monorepo. Tools: Bazel, Pants, Turborepo для polyglot monorepo. Single PR обновляет всё atomically. (6) Это вопрос parallel workflows (review PR без stash, long-running tests, parallel hotfix+feature)? -> worktree. Не имеет отношения к external code. Эти 6 опций покрывают 99% DE сценариев. Wrong choices: submodule на data — slow, не очень pinning. Subtree на big lib — раздувает parent. Monorepo на independent teams — coordination hell. Каждый instrument имеет своё место, главное — правильный выбор. Junior DE, который understanding tradeoffs всех шести опций — value к команде.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m16-exam-q6",
+      "type": "true-false",
+      "question": "Каноничный setup для production DE команды, работающей с submodules, включает: (1) git config --global submodule.recurse true; (2) git config --global push.recurseSubmodules on-demand; (3) git config --global diff.submodule log; (4) CI с actions/checkout submodules: recursive; (5) README с onboarding инструкциями. С этими настройками submodules становятся почти прозрачным механизмом.",
+      "correctAnswer": true,
+      "explanation": "Точно. Каноничный team setup для submodules: (1) `submodule.recurse=true` — clone/pull/checkout/merge автоматически работают с submodules. Без этого: switch branch -> submodule stuck -> ImportError. (2) `push.recurseSubmodules=on-demand` — auto-push submodule перед parent push. Без этого: забыл push submodule -> коллеги fатал 'reference is not a tree'. (3) `diff.submodule=log` — git diff в parent показывает commits внутри submodule. Без этого: PR review submodule изменений требует open shared-utils repo separately. (4) CI workflow с actions/checkout `submodules: recursive` (для GitHub Actions; аналог в GitLab CI). Без этого: CI runs с пустыми submodules -> tests fail with ImportError. (5) README или CONTRIBUTING.md с onboarding section: 'after clone, run these git config commands'. Без этого: каждый новый коллега страдает через те же footguns. (6) Дополнительно для polished setup: alias `git pr-review N` для worktree-based PR review (см. урок 04). Опции global vs per-repo: лучше global (один раз настроил — работает везде), per-repo нужен только если у разработчика конфликтующие настройки для разных проектов (rare). С этими 5 пунктами submodules становятся seamless: pull автоматически обновляет, push автоматически push-ит submodules, diff читаемый, CI работает. Без этого setup submodules знамениты болью, с ним — обычный инструмент. Junior DE, который вводит этот setup в новую команду — реальная демонстрация professional infrastructure thinking.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

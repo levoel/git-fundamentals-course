@@ -1,0 +1,63 @@
+{
+  "lessonSlug": "14-lfs-big-data/02-git-lfs",
+  "moduleId": "14-lfs-big-data",
+  "_meta": {
+    "idPrefix": "git-m14-02",
+    "description": "Quiz for lesson 02 of module 14 — Git LFS"
+  },
+  "questions": [
+    {
+      "id": "git-m14-02-q1",
+      "type": "multiple-choice",
+      "question": "Что хранится в Git репозитории вместо реального файла, когда он tracked через Git LFS?",
+      "options": [
+        { "id": "a", "text": "Сам файл, как в обычном Git" },
+        { "id": "b", "text": "Pointer-файл — текстовый блок ~130 байт с тремя строками: version (LFS spec), oid sha256:<hash> (хеш реального содержимого), size <bytes>. Реальный контент хранится в отдельном LFS storage (бакет рядом с Git-сервером), скачивается через smudge filter при checkout" },
+        { "id": "c", "text": "Zip-архив файла" },
+        { "id": "d", "text": "Символическая ссылка" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "LFS pointer-файл выглядит так: 'version https://git-lfs.github.com/spec/v1\\noid sha256:4cac1962...\\nsize 104857600'. Это всё, что попадает в Git. Реальный 100MB файл живёт в LFS storage (на GitHub встроенный backend, на self-hosted — S3-compatible). При commit clean filter заменяет реальный контент на pointer перед записью в индекс. При checkout smudge filter читает pointer, скачивает реальный контент по hash из storage, заменяет pointer на бинарь в working tree. Прозрачно для пользователя — работаешь как с обычным файлом, но в Git хранится только метаданные. Делает .git/ маленьким и clone быстрым. Pointer-файл committed в Git — ты можешь его открыть в редакторе и увидеть три строки текста.",
+      "studyHint": "Повторите урок 02 — раздел 'Mental model: pointer file вместо контента'",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m14-02-q2",
+      "type": "multiple-choice",
+      "question": "Какой правильный порядок действий для подключения LFS к существующему репо для tracking *.parquet?",
+      "options": [
+        { "id": "a", "text": "`git add parquet` — Git сам разберётся" },
+        { "id": "b", "text": "(1) `brew install git-lfs` (один раз на машину); (2) `git lfs install` в репо — активирует LFS; (3) `git lfs track '*.parquet'` — добавляет правило в .gitattributes; (4) `git add .gitattributes && git commit` — commit правил FIRST; (5) `git add my-file.parquet && git commit` — добавляешь файлы; (6) `git push` — LFS контент идёт отдельным каналом" },
+        { "id": "c", "text": "`git lfs push origin main` напрямую" },
+        { "id": "d", "text": "Достаточно прописать в .gitignore" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Полный workflow: (1) Install git-lfs утилиту на машину — `brew install git-lfs` на macOS, `apt install git-lfs` на Ubuntu. (2) `git lfs install` — регистрирует clean/smudge filters в global ~/.gitconfig (или в .git/config репо). Без этого filters не активируются. (3) `git lfs track '*.parquet'` — добавляет в .gitattributes строку `*.parquet filter=lfs diff=lfs merge=lfs -text`. (4) КРИТИЧНО: commit .gitattributes ПЕРЕД добавлением больших файлов. Иначе они попадут в обычный Git как blob-ы. (5) Только потом — `git add my-file.parquet`. clean filter превратит в pointer. (6) `git push` отправит и pointer-ы (в Git), и реальные файлы (в LFS storage) — параллельно. На GitHub LFS storage встроен, на self-hosted — нужен `lfs-test-server` или Giftless.",
+      "studyHint": "Повторите урок 02 — раздел 'Workflow: tracking файлов'",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m14-02-q3",
+      "type": "multiple-choice",
+      "question": "У вас репо с 500MB LFS-файлов, активная команда (50 push/pull в день), CI запускается 100 раз в день. Что главное надо понимать про GitHub LFS pricing?",
+      "options": [
+        { "id": "a", "text": "Storage — главная стоимость, bandwidth бесплатно" },
+        { "id": "b", "text": "Bandwidth — главный footgun. Free tier — 1GB bandwidth/месяц (выгорает за час при активной работе). Каждый pull/clone/CI-job потребляет bandwidth. 100 CI × 500MB = 50GB/день = 1500GB/месяц. Нужны Data Packs ($5/50GB) или self-hosted LFS backend (S3) — иначе счёт может вырасти до сотен долларов" },
+        { "id": "c", "text": "Free tier всегда хватает" },
+        { "id": "d", "text": "Pricing зависит от количества файлов, не от размера" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "LFS pricing на GitHub имеет два метрики: storage (один раз заплатил, всегда хранится) и bandwidth (каждый download тратит). Bandwidth — это главный footgun: free tier 1GB/месяц выгорает мгновенно. Сценарий: 100 CI runs/day × 500MB LFS = 50GB/day. CI часто не использует LFS cache между runs (fresh runners). За месяц — 1.5TB bandwidth. На Data Packs $5/50GB = $150/месяц только за bandwidth, плюс storage отдельно. Решения: (1) Кешировать LFS objects в CI (actions/cache); (2) Использовать `GIT_LFS_SKIP_SMUDGE=1` в CI, который не нуждается в data; (3) Self-hosted LFS-сервер с S3 backend (`Giftless`, `lfs-test-server`) — платишь только S3 storage и transfer (дешевле GitHub). (4) Перейти на DVC + ваш S3 (нет дополнительных fees, transfer в том же regional bucket бесплатен). Для small teams free tier часто хватает, для активных production команд — нужен план.",
+      "studyHint": "Повторите урок 02 — раздел 'GitHub LFS quotas'",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m14-02-q4",
+      "type": "true-false",
+      "question": "Чтобы перенести уже существующие большие файлы (которые в обычной истории Git) в LFS без потери истории, используется команда `git lfs migrate import --include='*.parquet' --everything`, после чего нужен force-push и пересоздание всех клонов команды.",
+      "correctAnswer": true,
+      "explanation": "Да. `git lfs migrate import` переписывает историю репо — каждый коммит, где есть matched файл, переписывается так, что blob становится pointer-ом, а реальный файл идёт в local LFS cache. `--include='*.parquet'` — паттерн файлов для миграции. `--everything` — все ветки, не только current. Эта операция изменяет SHA коммитов, поэтому: (1) `git push --force-with-lease` обязателен — обычный push отклонит non-fast-forward. (2) Все open PRs ломаются, их нужно пересоздавать. (3) Все клоны команды становятся 'не той' истории — `git pull` не сработает, нужен fresh clone. (4) Открытые ссылки на commit-SHA (в Jira, Slack, документации) перестанут резолвиться. ПОЭТОМУ: делать только в момент 'тишины' (всех опросить, заморозить PRs на день), оповестить команду о необходимости пересоздать клоны, и быть осторожным. Полезный pre-step — `git lfs migrate info` чтобы увидеть, что планируется мигрировать.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

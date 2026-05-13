@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "10-stash-tags-cherry-pick/04-patches-format-am",
+  "moduleId": "10-stash-tags-cherry-pick",
+  "_meta": { "idPrefix": "git-m10-04" },
+  "questions": [
+    {
+      "id": "git-m10-04-q1",
+      "type": "multiple-choice",
+      "question": "Что создаёт `git format-patch -1 HEAD`?",
+      "options": [
+        { "id": "a", "text": "Diff-файл текущего working tree" },
+        { "id": "b", "text": "Файл 0001-<subject>.patch с одним коммитом (HEAD) в email-формате: From, Date, Subject, body, diff. Содержит full commit metadata (author, timestamp, message) — не просто diff. Можно применить через git am и восстановить commit с original метаданными" },
+        { "id": "c", "text": "Tar архив с .git/objects" },
+        { "id": "d", "text": "JSON с коммит-данными" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "format-patch создаёт patches в email формате (RFC 822). Каждый файл начинается с email headers (From, Date, Subject), содержит полное commit message, заканчивается diff. -1 означает 'один коммит, считая назад от HEAD'. Можно -3 (последние три), main..HEAD (все коммиты между main и HEAD). Это full sereal коммитов — author/date/message восстановятся при git am. Не просто diff.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m10-04-q2",
+      "type": "multiple-choice",
+      "question": "Чем `git am` отличается от `git apply`?",
+      "options": [
+        { "id": "a", "text": "am — alias для apply" },
+        { "id": "b", "text": "git apply применяет ТОЛЬКО diff (изменения в working tree, без коммита). git am применяет полный patch (с метаданными): создаёт commit с original author, date, message — как если бы автор сам коммитил. am нужен patches от format-patch, apply — для plain diff" },
+        { "id": "c", "text": "am работает на удалённой машине" },
+        { "id": "d", "text": "Apply применяет несколько patches" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Семантически разные: apply = «применить diff к файлам, без git tracking», am = «применить mailbox patch как коммит». Apply подобен patch unix-команде (parse diff, apply hunks). Am понимает email headers и создаёт commit. Apply используют для plain diffs из git diff, am — для patches из git format-patch. Если делаешь am на git diff output — не сработает (нет From/Subject headers).",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m10-04-q3",
+      "type": "multiple-choice",
+      "question": "Когда patches (format-patch/am workflow) уместны в 2026 году?",
+      "options": [
+        { "id": "a", "text": "Это устаревший workflow, никогда не используется" },
+        { "id": "b", "text": "(1) Contribuiting в Linux kernel / некоторые Apache projects где mailing list-based; (2) Передача изменений коллеге БЕЗ shared remote (изолированные сети, security-sensitive fix); (3) Offline workflows; (4) Audit/forensics — patch как самодостаточный artifact. В DE 99% времени junior работает с GitHub PR; patches — 1-2 раза в год edge case" },
+        { "id": "c", "text": "Всегда вместо PR" },
+        { "id": "d", "text": "Только для read-only репо" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "GitHub/GitLab PR — стандарт DE-мира с 2018+. Patches остались для: Linux kernel, GNU projects, некоторые Apache (хотя большинство мигрировало на PR), edge cases offline transfer. Junior может встретить format-patch если contributing в специфический open-source. Знание формата полезно для понимания 'что такое патч' концептуально и для редких offline transfer (передать fix коллеге через Slack без push доступа).",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m10-04-q4",
+      "type": "multiple-choice",
+      "question": "После `git am 0001-fix.patch` посмотрел git log: author = «Иван Иванов», твоё имя «Лев Неганов». Норма?",
+      "options": [
+        { "id": "a", "text": "Это баг, надо amend" },
+        { "id": "b", "text": "Норма — patch содержит original author (Иван). git am сохраняет author из patch headers (это и есть точка patches: contribution attribution remains). Committer (тот кто применил) — ты. git log --format='%an / %cn' покажет обоих. Это правильно для open-source contribution: автор fix-а получает credit, мейнтейнер только merger" },
+        { "id": "c", "text": "Это нарушение лицензии" },
+        { "id": "d", "text": "Надо переписать author" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Git разделяет author (кто написал код) и committer (кто внёс в репо). Обычно совпадают, но не при patches/cherry-pick/rebase. format-patch сохраняет original author. am восстанавливает его. Committer = текущий пользователь (тот кто применил). Это правильное поведение: contribution attribution preserved. git log по умолчанию показывает author, но --format='%an / %cn' покажет обоих. В open-source это важно — фикс из community сохраняет имя контрибьютора.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m10-04-q5",
+      "type": "true-false",
+      "question": "git format-patch и git diff производят одинаковый формат.",
+      "correctAnswer": false,
+      "explanation": "Нет. git diff производит чистый diff (unified format) — только изменения файлов, никаких метаданных. format-patch производит email-формат: header (From/Date/Subject) + commit message + diff + footer. format-patch файл можно применить через git am (восстановит коммит с метаданными), git diff output — только через git apply (применит изменения без коммита, без author info). Разница: format-patch = sereal коммита, diff = плоский diff файлов.",
+      "bloomLevel": "conceptual"
+    }
+  ]
+}

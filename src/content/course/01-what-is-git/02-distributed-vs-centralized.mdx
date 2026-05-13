@@ -1,0 +1,227 @@
+---
+title: "Distributed vs Centralized — почему это меняет всё"
+description: "Чем DVCS отличается от CVCS, что значит «каждый клиент = полная копия», fork model, оффлайн-работа, преимущества и компромиссы"
+order: 2
+difficulty: "beginner"
+estimatedTime: 16
+topics: ["Git", "DVCS", "CVCS", "Distributed", "Subversion"]
+---
+
+# Distributed vs Centralized — почему это меняет всё
+
+В предыдущем уроке мы прошли историю VCS. Самое крупное различие в этой истории — между централизованными системами (CVS, SVN) и распределёнными (Git, Mercurial). Это не просто архитектурное различие в выборе протокола. Это другая модель работы команд, другой workflow, другие границы возможного. В этом уроке разберём, что именно меняется.
+
+После урока вы должны интуитивно понимать, почему `git commit` работает без интернета, что такое «своя полная история репозитория на ноутбуке», и почему fork-based contributions в open-source стали стандартом именно с появлением Git.
+
+---
+
+## Централизованная модель: один сервер — единственная правда
+
+В CVCS (Centralized Version Control System) есть **единственный** репозиторий, который живёт на сервере. У всех разработчиков на машинах — только **рабочие копии** (working copies) текущего состояния файлов. Это не репозитории — это просто файлы с метаданными о том, откуда их взяли.
+
+<DiagramContainer title="CVCS — звёздная топология" color="amber">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Сервер" variant="highlight" tooltip="Единственная физическая локация репозитория. На нём — все commits, вся история, все ветки. SPOF (single point of failure)">Central repo</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Разработчик A" tooltip="Только working copy текущего состояния. История на сервере. Без интернета — log/diff/commit недоступны">Working copy</DataBox>
+      <DataBox label="Разработчик B" tooltip="То же. Если попал в самолёт без Wi-Fi — может только редактировать файлы локально. Сохранить версию нельзя">Working copy</DataBox>
+      <DataBox label="Разработчик C" tooltip="То же. Все ходят за каждой операцией к серверу">Working copy</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Что это означает на практике:
+
+- **Commit требует интернета.** Если вы написали важную часть кода в самолёте — сохранить её как commit нельзя. Можно только редактировать файлы и ждать, пока появится сеть.
+- **История находится на сервере.** Чтобы посмотреть, что изменил коллега месяц назад — нужен сервер.
+- **Падение сервера = вся команда не работает.** Если у вас 50 разработчиков и SVN-сервер упал на полдня — это 50 человеко-часов простоя. Реальная история.
+- **Branching медленный.** Создание ветки требует обращения к серверу, в SVN — копирования директории. На больших репозиториях это секунды-минуты.
+
+Подход подходит, когда команда сидит в одном офисе, сеть стабильная, а серверная инфраструктура надёжная. Это была реальность 1990-х — 2000-х.
+
+---
+
+## Распределённая модель: каждый клиент = полный репозиторий
+
+В DVCS (Distributed VCS) у каждого разработчика на машине — **полная копия репозитория**: все commits, вся история, все ветки, все теги. Не «рабочая копия» — а сам репозиторий целиком.
+
+<DiagramContainer title="DVCS — каждый узел самодостаточен" color="emerald">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Разработчик A" variant="highlight" tooltip="Полный репозиторий локально: .git/ содержит ВСЮ историю. Все операции — commit, log, diff, branch — работают офлайн">Full repo</DataBox>
+      <DataBox label="Разработчик B" variant="highlight" tooltip="Тоже полный репозиторий. Может работать офлайн, делать локальные ветки, экспериментировать">Full repo</DataBox>
+      <DataBox label="Разработчик C" variant="highlight" tooltip="Тоже самодостаточен">Full repo</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Обмен через push/pull" tooltip="Явная синхронизация: git push отправляет ваши коммиты, git fetch/pull забирает чужие. Это не автомат — вы решаете, когда">Sync</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="«Origin» — это просто соглашение" tooltip="GitHub-сервер часто называют origin. Но это просто один из удалённых репозиториев. Технически origin — не более центральный, чем любой клон">No master</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Главное здесь: **технически в Git нет «центрального сервера»**. Все клоны равноправны. То, что мы называем «origin» (обычно GitHub) — это просто соглашение команды: «договорились, что вот этот клон будет каноническим». С точки зрения протокола Git между GitHub и вашим ноутбуком нет иерархии.
+
+Это, конечно, не значит, что в реальной команде GitHub не играет особую роль. Играет. Но это organizational соглашение, а не технический протокол.
+
+---
+
+## Что распределённость даёт практически
+
+Конкретные сценарии, где DVCS выигрывает.
+
+### 1. Работа без интернета
+
+Вы в самолёте, в поезде, в кафе с плохим Wi-Fi. С DVCS вы делаете полноценный workflow:
+
+```bash
+git add .
+git commit -m "Implement OAuth2 flow"
+git switch -c experiment/cache
+git commit -m "Try Redis caching"
+git log --oneline -10
+git diff main feature
+```
+
+Всё работает. Интернет понадобится только когда захотите `git push` и `git pull` — обмен с командой.
+
+### 2. Скорость операций
+
+`git log` показывает историю мгновенно — она лежит локально. `git diff` сравнивает любые две версии без сетевых запросов. На больших репозиториях разница огромная.
+
+<DiagramContainer title="Скорость операций — DVCS vs CVCS" color="indigo">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="git log" tooltip="Git: миллисекунды на 100k commits. SVN: секунды на каждом log, потому что запрашивает у сервера">~ms</DataBox>
+      <DataBox label="git diff" tooltip="Git: миллисекунды между любыми двумя коммитами. SVN: каждый diff — round trip к серверу">~ms</DataBox>
+      <DataBox label="git status" tooltip="Git: миллисекунды. SVN: secunds + сетевой round trip. На больших проектах разница в 100x">~ms</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="svn log" tooltip="SVN: round trip к серверу. На стабильном LAN — 100-500ms. На WAN с задержкой — секунды" variant="warning">~ms-sec</DataBox>
+      <DataBox label="svn diff" tooltip="То же — round trip к серверу" variant="warning">~sec</DataBox>
+      <DataBox label="svn status" tooltip="Локально — быстро, но при -u (с обновлением) — round trip" variant="warning">~ms-sec</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+### 3. Эксперименты без страха
+
+В Git создание ветки — мгновенно (запись 41 байта в файл). Можно создать ветку, поэкспериментировать, понять, что идея плохая, удалить ветку — никто никогда не узнает. В SVN ветка — это копия в `/branches/`, доступная всем. Каждый эксперимент виден.
+
+### 4. Fork-based open-source
+
+Самое драматичное изменение: Git позволил **fork-based contributions** в open-source.
+
+<DiagramContainer title="Fork-based workflow (стандарт open-source с Git)" color="purple">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Upstream" tooltip="Каноническая копия проекта. Например, github.com/apache/airflow. На неё могут писать только мейнтейнеры">apache/airflow</DataBox>
+      <Arrow direction="right" label="fork" />
+      <DataBox label="Ваш fork" tooltip="Полный клон upstream на ваш аккаунт: github.com/your-name/airflow. Здесь у вас полные права. Работаете там">your-name/airflow</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Ваш ноутбук" tooltip="git clone вашего fork. Делаете изменения, push в ваш fork">Local clone</DataBox>
+      <Arrow direction="right" label="push" />
+      <DataBox label="Ваш fork" tooltip="Изменения на GitHub в вашем fork">your-name/airflow</DataBox>
+      <Arrow direction="right" label="Pull Request" />
+      <DataBox label="Upstream" tooltip="Создаёте PR из вашего fork в upstream. Мейнтейнеры рассматривают, обсуждают, мержат">apache/airflow</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Эта модель — невозможна в CVCS. В SVN вы либо имеете права писать в репозиторий, либо нет. В Git вы можете сделать полный клон любого открытого репозитория, делать в нём что угодно, потом предложить владельцам забрать ваши изменения. Это перевернуло open-source: GitHub был построен именно вокруг fork-based contributions.
+
+---
+
+## Что распределённость требует взамен
+
+Это не бесплатно. DVCS приносит сложность.
+
+### 1. Каждый клон содержит ВСЮ историю
+
+Если репозиторий весит 5 GB, ваш клон тоже весит 5 GB. Для большинства проектов это нормально (1-100 MB). Для огромных репозиториев (Linux kernel — ~2 GB, monorepos некоторых компаний — 100+ GB) — это проблема. Решения: shallow clones, partial clones, sparse-checkout, Git LFS. Мы покроем в модуле 14.
+
+### 2. Синхронизация — явная
+
+В SVN вы делаете `svn commit` и изменение немедленно видно всем. В Git нужны два шага: `git commit` (локально) + `git push` (на сервер). Junior часто забывают второй шаг — «я закоммитил, почему ты не видишь?». Запомните: **commit ≠ push**.
+
+<DiagramContainer title="Двухшаговая синхронизация в Git" color="rose">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Working tree" tooltip="Ваши файлы как они есть на диске">Файлы</DataBox>
+      <Arrow direction="right" label="git add" />
+      <DataBox label="Index (staging)" tooltip="Промежуточное состояние — что попадёт в следующий commit">Stage</DataBox>
+      <Arrow direction="right" label="git commit" />
+      <DataBox label="Local repo" tooltip="Локальные коммиты. На сервере их пока нет!" variant="warning">Local</DataBox>
+      <Arrow direction="right" label="git push" />
+      <DataBox label="Remote" tooltip="Только после push коллеги увидят ваши изменения">GitHub</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+### 3. История может расходиться
+
+В CVCS у вас всегда одна линейная история на сервере. В DVCS у разных разработчиков может быть **разная история**, которая потом сводится через merge или rebase. Это даёт гибкость, но требует понимания.
+
+Например: вы сделали 3 коммита локально. Коллега сделал 2 коммита и запушил. Когда вы делаете `git push` — Git говорит «история расходится, сначала сделай pull». Дальше — либо merge (создаст merge commit), либо rebase (перепишет ваши коммиты поверх коллегиных). Это новый класс операций, которого в SVN не было. Покроем в модулях 06-07.
+
+### 4. Конфликты на push
+
+В SVN конфликт случался при `svn update`. В Git может случиться при `git push`: вы пытаетесь запушить, а на сервере есть коммиты, которые вы ещё не забрали. `git push` отказывается, требует сначала `git pull`.
+
+<Callout type="warning">
+Junior часто реагируют на «push rejected» так: пробуют `git push --force`. Это перепишет историю на сервере и удалит коммиты коллег. Никогда не делайте `--force` на shared веток, особенно на main. Правильный способ — сначала `git pull --rebase`, потом `git push`. Подробно — в модуле 07.
+</Callout>
+
+---
+
+## Когда что выбирать в 2026 году
+
+Если коротко: **всегда выбирайте Git**. В 2026 году это де-факто стандарт. GitHub, GitLab, Bitbucket, Gitea — все основные хостинги работают с Git. Любой коллега, нанятый в команду, ожидает Git.
+
+SVN остался в нескольких нишах:
+
+- **Legacy enterprise** (банки, госструктуры со 100-летней инерцией)
+- **Очень большие репозитории**, где DVCS-модель экономически нерентабельна (но даже Microsoft с их 300 GB Windows-repo перешли на Git со своим расширением GVFS)
+- **Команды с очень слабым tooling в команде**, где SVN-простота берёт верх
+
+Mercurial был жив до 2020 года в Facebook (теперь Meta), Mozilla. Сейчас Meta перешла на свой fork Mercurial (Sapling), а Mozilla — на Git. Mercurial живёт, но не растёт.
+
+В вашей будущей работе как Junior DE с вероятностью 95% будет Git. Оставшиеся 5% — какие-нибудь legacy-SVN-репозитории, к которым лучше готовиться отдельно (по запросу).
+
+---
+
+## Попробуй сам
+
+Сравните, как работают `git` и команды на простом эксперименте:
+
+```bash
+mkdir -p ~/git-sandbox/lesson-01-dvcs
+cd ~/git-sandbox/lesson-01-dvcs
+
+git init
+echo "hello" > a.txt
+git add a.txt
+git commit -m "First commit"
+
+# Включите wifi-off в системе — отключите интернет
+# Сделайте ещё один коммит
+echo "world" > b.txt
+git add b.txt
+git commit -m "Second commit, offline"
+
+# Посмотрите историю — работает без интернета
+git log --oneline
+```
+
+С DVCS — оба коммита создаются без проблем без интернета. С SVN такое было бы невозможно: `svn commit` упал бы с «cannot connect to server».
+
+---
+
+<KnowledgeCheck
+  question="Junior говорит коллеге «я сделал commit», коллега не видит изменений на GitHub. В чём вероятная ошибка Junior?"
+  answer="Junior забыл, что в Git коммит — локальная операция. `git commit` создаёт коммит только в локальной `.git/` директории. Чтобы коллеги его увидели на GitHub, нужно отдельно сделать `git push`. Это фундаментальная разница с CVCS (Subversion): в SVN `svn commit` сразу отправлял изменения на сервер. В Git две стадии: commit (локально) -> push (на сервер). Junior привыкает к этому после нескольких таких случаев. Правильный полный flow: `git add` -> `git commit` -> `git push`. Подробно про push разберём в модуле 05 о remotes."
+/>

@@ -1,0 +1,70 @@
+{
+  "lessonSlug": "13-gitignore-attributes/02-gitignore-templates",
+  "moduleId": "13-gitignore-attributes",
+  "_meta": {
+    "idPrefix": "git-m13-02",
+    "description": "Quiz for lesson 02 of module 13 — шаблоны и debugging"
+  },
+  "questions": [
+    {
+      "id": "git-m13-02-q1",
+      "type": "multiple-choice",
+      "question": "Где находится канонический источник .gitignore шаблонов?",
+      "options": [
+        { "id": "a", "text": "github.com/github/gitignore — публичный репо с шаблонами для языков, фреймворков и ОС" },
+        { "id": "b", "text": "git.kernel.org — встроенный в Git" },
+        { "id": "c", "text": "Stack Overflow топики — нужно искать вручную" },
+        { "id": "d", "text": "Не существует единого источника" }
+      ],
+      "correctAnswer": "a",
+      "explanation": "github/gitignore — официальный репозиторий шаблонов от GitHub. Содержит ~200 файлов: Python.gitignore, Node.gitignore, Go.gitignore и т.д. в корне; macOS.gitignore, Windows.gitignore в Global/; JupyterNotebooks, dbt в community/. Регулярно обновляется community, проверен миллионами проектов. Использовать можно через: (1) GitHub UI при создании репо — dropdown 'Add .gitignore'; (2) `gh gist gitignore` через extension; (3) прямой curl с raw.githubusercontent.com; (4) сервис gitignore.io / toptal.com/developers/gitignore — комбинирует несколько шаблонов одним запросом.",
+      "studyHint": "Повторите урок 02 — раздел 'github/gitignore: каноничный источник'",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m13-02-q2",
+      "type": "multiple-choice",
+      "question": "Команда `git ls-files --ignored --exclude-standard` показывает пустой вывод. Что это значит?",
+      "options": [
+        { "id": "a", "text": ".gitignore не работает — нужно перенастроить" },
+        { "id": "b", "text": "Нет файлов, которые одновременно tracked в Git И матчат правила .gitignore — это хороший результат" },
+        { "id": "c", "text": "В репо нет .gitignore файла вообще" },
+        { "id": "d", "text": "Git сломан" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`git ls-files --ignored --exclude-standard` показывает файлы, которые: (1) уже tracked в Git И (2) подпадают под правила .gitignore. Пустой вывод = таких файлов нет, всё корректно. Если же команда что-то показывает — это всегда проблема: файл был случайно закоммичен ДО добавления в .gitignore. Решение: `git rm --cached <file>` + commit, чтобы убрать из индекса. Затем .gitignore начнёт работать как ожидается. Эта команда — главный sanity check после настройки .gitignore: 'не закоммитили ли мы случайно что-то, что должно было игнорироваться?'",
+      "studyHint": "Повторите урок 02 — раздел 'git ls-files: какие файлы УЖЕ отслеживаются'",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m13-02-q3",
+      "type": "multiple-choice",
+      "question": "Самый быстрый способ собрать .gitignore для проекта Python + Jupyter + macOS + VSCode?",
+      "options": [
+        { "id": "a", "text": "Писать руками с нуля — единственный способ контроля" },
+        { "id": "b", "text": "Сервис gitignore.io (toptal): `curl 'https://www.toptal.com/developers/gitignore/api/python,jupyternotebooks,macos,vscode' > .gitignore` — одной командой комбинирует все шаблоны" },
+        { "id": "c", "text": "Скачать только Python.gitignore — остальное не нужно" },
+        { "id": "d", "text": "Спросить в Slack у коллег" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "gitignore.io (он же toptal.com/developers/gitignore) — сервис, который через API собирает шаблоны из github/gitignore в один файл по списку: `curl 'https://www.toptal.com/developers/gitignore/api/python,jupyternotebooks,macos,vscode,linux' > .gitignore`. Возвращает аккуратный файл с заголовками-секциями для каждой технологии. Это самый быстрый способ старта. Альтернатива — `gh gitignore set Python > .gitignore` через расширение `hectcastro/gh-gitignore`, но это требует установки. Прямой curl с github/gitignore тоже работает, но даёт по одному шаблону за раз — нужно конкатенировать. После генерации добавляешь project-specific правила (секреты, данные, dbt artifacts).",
+      "studyHint": "Повторите урок 02 — раздел 'Способ 2: gh gist gitignore'",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m13-02-q4",
+      "type": "multiple-choice",
+      "question": "В чём антипаттерн — что НЕ должно быть в repo .gitignore (commit-ится в проект)?",
+      "options": [
+        { "id": "a", "text": ".env, .venv/, __pycache__/ — это всё OK" },
+        { "id": "b", "text": "logs/, data/raw/ — это OK" },
+        { "id": "c", "text": ".idea/, .vscode/ — IDE-специфичный мусор: это личный выбор разработчика, должно быть в global .gitignore, а не навязываться всей команде" },
+        { "id": "d", "text": "*.parquet, *.csv — это OK" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "Антипаттерн — класть IDE-конфиги в repo .gitignore. Например, `.idea/` (JetBrains) или `.vscode/` (VS Code) — это не свойство проекта, а свойство твоей среды разработки. Коллега может использовать vim, neovim, или Emacs, и ему `.idea/` тоже не нужен — но он сам решит, что игнорировать. Правильно: положи `.idea/` и `.vscode/` в глобальный ~/.gitignore_global (применяется ко всем твоим репо). Repo .gitignore — для правил проекта (язык, framework, секреты). Исключение: если команда договорилась commit-ить общие IDE-настройки (например, `.vscode/settings.json` с recommended extensions), тогда часть .vscode/ остаётся, а часть в `.gitignore`.",
+      "studyHint": "Повторите урок 02 — раздел 'Антипаттерны: что НЕ класть в .gitignore'",
+      "bloomLevel": "conceptual"
+    }
+  ]
+}

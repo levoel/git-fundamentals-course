@@ -1,0 +1,78 @@
+{
+  "moduleId": "02-install-config",
+  "_meta": { "idPrefix": "git-m02-exam" },
+  "questions": [
+    {
+      "id": "git-m02-exam-q1",
+      "type": "multiple-choice",
+      "question": "Junior настраивает Git первый раз на новом ноутбуке. Какая последовательность правильно отражает иерархию конфигов и что должно быть на каком уровне?",
+      "options": [
+        { "id": "a", "text": "Всё в --local репозитория: user.name, user.email, init.defaultBranch — чтобы не засорять глобальный конфиг." },
+        { "id": "b", "text": "--system (всем юзерам ОС, обычно админ): редко используется. --global (~/.gitconfig, для всех репо юзера): user.name, user.email, init.defaultBranch=main, pull.rebase, core.editor. --local (.git/config репо): перекрывает global, например другой email для work-репозиториев." },
+        { "id": "c", "text": "Всё в --system, чтобы конфиг работал у всех пользователей машины." },
+        { "id": "d", "text": "Конфиг не нужен — Git берёт user.name из имени ОС автоматически." }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Иерархия: system -> global -> local, каждый последующий перекрывает предыдущий. Стандартная практика: базовые user/email/init/pull в global, специфика проекта (например work email) — в local. Вариант (a) неудобен — придётся настраивать в каждом репо; (c) — system требует sudo и редко уместен для user-specific (имя/email); (d) — Git НЕ берёт автоматически и без user.name/user.email не даст сделать commit (выдаст warning или error).",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m02-exam-q2",
+      "type": "multiple-choice",
+      "question": "Зачем устанавливать `git config --global init.defaultBranch main` в 2025 году?",
+      "options": [
+        { "id": "a", "text": "Чтобы новые репозитории создавались с веткой `main` вместо устаревшего `master` — соответствие современному стандарту GitHub/GitLab/индустрии, плюс избежание warning от Git 2.28+ при init без явного выбора." },
+        { "id": "b", "text": "Чтобы Git работал быстрее — branch `main` короче, чем `master`." },
+        { "id": "c", "text": "Это требование Linux Foundation и без этой настройки `git init` не работает." },
+        { "id": "d", "text": "Эта настройка автоматически защищает ветку от force-push." }
+      ],
+      "correctAnswer": "a",
+      "explanation": "GitHub в 2020 переименовал default branch на main, остальные хостинги последовали. Без явной настройки Git 2.28+ при init выводит advice/warning. Вариант (b) — длина имени не влияет на производительность; (c) — `git init` работает с любым defaultBranch, это не блокер; (d) — настройка только задаёт имя ветки при init, защита от force-push — отдельная история (branch protection rules на стороне GitHub/GitLab).",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m02-exam-q3",
+      "type": "multiple-choice",
+      "question": "Junior генерирует SSH-ключ для GitHub. В туториале 2015 года написано `ssh-keygen -t rsa -b 4096`. Какой современный (2025) совет?",
+      "options": [
+        { "id": "a", "text": "RSA-4096 по-прежнему лучший выбор — он самый совместимый." },
+        { "id": "b", "text": "`ssh-keygen -t ed25519 -C \"email@example.com\"` — ed25519 короче, быстрее, криптографически современнее (Curve25519), поддерживается GitHub/GitLab. RSA допустим для совместимости со старыми системами, но для новых ключей предпочтителен ed25519." },
+        { "id": "c", "text": "DSA — это стандарт по умолчанию в OpenSSH." },
+        { "id": "d", "text": "Использовать `-t rsa -b 1024` — экономия места на диске." }
+      ],
+      "correctAnswer": "b",
+      "explanation": "ed25519 — современный EdDSA на Curve25519: ~68 символов публичный ключ vs ~700 у RSA-4096, быстрее в подписи/верификации, более устойчив к side-channel атакам. GitHub поддерживает с 2014, рекомендует в актуальной документации. Вариант (a) — RSA-4096 рабочий, но устаревший выбор по умолчанию; (c) — DSA давно deprecated и удалён из OpenSSH 7.0+; (d) — RSA-1024 криптографически слаб, NIST не рекомендует с 2014, многие сервисы отвергают.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m02-exam-q4",
+      "type": "multiple-choice",
+      "question": "Команда хочет, чтобы коммиты были подписаны и GitHub показывал зелёный 'Verified' badge. Что выбрать — GPG или SSH signing?",
+      "options": [
+        { "id": "a", "text": "Только GPG — это единственный поддерживаемый Git способ подписи." },
+        { "id": "b", "text": "Оба варианта валидны. GPG — классика, требует управления ключами в gpg-keyring. SSH signing появился в Git 2.34 (ноябрь 2021), позволяет переиспользовать существующий SSH-ключ (ed25519). Для новых команд SSH signing часто проще, GitHub поддерживает оба." },
+        { "id": "c", "text": "GitHub поддерживает только SSH signing с 2023 года, GPG больше не работает." },
+        { "id": "d", "text": "Подпись коммитов не нужна — `git commit` и так показывает автора." }
+      ],
+      "correctAnswer": "b",
+      "explanation": "С Git 2.34 (ноябрь 2021) SSH signing — официальная альтернатива GPG. GitHub принимает оба типа подписей и показывает Verified. SSH signing проще — переиспользует ed25519 ключ, не нужен gpg/keyring. GPG остаётся для тех, у кого уже есть PKI. Вариант (a) — устаревшее знание до 2.34; (c) — GitHub поддерживает оба; (d) — поле author в commit можно подделать (`git commit --author=...`), подпись доказывает что коммит сделан владельцем ключа.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m02-exam-q5",
+      "type": "true-false",
+      "question": "Конфиг уровня --local (хранится в .git/config репозитория) всегда имеет приоритет над --global и --system при работе внутри этого репо.",
+      "correctAnswer": true,
+      "explanation": "Иерархия Git config: system -> global -> local -> command-line, каждый следующий перекрывает предыдущий. Внутри репо при чтении конфига (например user.email для commit) Git сначала смотрит local, потом global, потом system. Это позволяет в work-репо иметь user.email=work@company.com, в личных — personal@gmail.com. Команды git config без флага читают/пишут по умолчанию в local, флаг --global/--system меняет уровень.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m02-exam-q6",
+      "type": "true-false",
+      "question": "Настройка `pull.rebase=true` в global config заставляет `git pull` делать rebase вместо merge, что часто рекомендуется для линейной истории — но это меняет поведение по умолчанию для ВСЕХ репозиториев пользователя.",
+      "correctAnswer": true,
+      "explanation": "`pull.rebase=true` глобально меняет поведение `git pull` с дефолтного merge на rebase для всех репо пользователя. Это даёт линейную историю (без merge-коммитов от pull), но имеет нюансы: при наличии локальных коммитов на отстающей ветке Git перепишет их на новый base — что недопустимо для уже опубликованных (push'нутых) коммитов. Команды/проекты с разными правилами могут переопределить через --local: `git config --local pull.rebase false`.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

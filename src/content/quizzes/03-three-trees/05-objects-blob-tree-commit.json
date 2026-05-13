@@ -1,0 +1,74 @@
+{
+  "lessonSlug": "03-three-trees/05-objects-blob-tree-commit",
+  "moduleId": "03-three-trees",
+  "_meta": {
+    "idPrefix": "git-m03-05",
+    "description": "Quiz for lesson 3.5 — Объектная модель Git"
+  },
+  "questions": [
+    {
+      "id": "git-m03-05-q1",
+      "type": "multiple-choice",
+      "question": "Сколько типов объектов в Git и какие они?",
+      "options": [
+        { "id": "a", "text": "2: file и directory" },
+        { "id": "b", "text": "4: blob (содержимое файла), tree (snapshot директории), commit (snapshot + metadata), tag (annotated tag — именованный указатель с подписью)" },
+        { "id": "c", "text": "6: blob, tree, commit, branch, tag, remote" },
+        { "id": "d", "text": "Зависит от версии Git" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Ровно 4 типа объектов в Git: blob (содержимое файла, только байты), tree (список записей mode+type+SHA+name внутри директории, может ссылаться на blob или другие tree), commit (snapshot всего tree + метаданные + parent), tag (annotated tag-объект с метаданными). Branch — это НЕ объект, а ref (файл с одним SHA в .git/refs/heads/). Lightweight tag — тоже ref, не объект. Эта простая модель — одна из ключевых причин технического превосходства Git.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m03-05-q2",
+      "type": "multiple-choice",
+      "question": "Что такое blob в Git?",
+      "options": [
+        { "id": "a", "text": "Большой бинарный файл" },
+        { "id": "b", "text": "Содержимое файла как последовательность байт — без имени, без прав, без даты. SHA blob полностью определён содержимым: одинаковое содержимое = один blob, хранится один раз" },
+        { "id": "c", "text": "Branch с метаданными" },
+        { "id": "d", "text": "Зашифрованный архив файла" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Blob — это просто содержимое файла как байты, ничего больше. Никаких метаданных (имя файла, права, дата) — это всё хранится в tree-объекте, который на blob ссылается. SHA blob = SHA-1 от содержимого с префиксом 'blob <size>\\0<content>'. Detail: если два разных файла имеют одинаковое содержимое — у них один blob. Дедупликация автоматическая.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m03-05-q3",
+      "type": "multiple-choice",
+      "question": "Что описывает tree-объект?",
+      "options": [
+        { "id": "a", "text": "Ветку Git" },
+        { "id": "b", "text": "Snapshot одной директории: список записей вида 'mode type SHA name'. Записи могут указывать на blob-ы (файлы) или на другие tree (поддиректории), образуя рекурсивную структуру" },
+        { "id": "c", "text": "Историю коммитов" },
+        { "id": "d", "text": "Список авторов" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Tree описывает директорию: список её содержимого. Каждая запись: mode (100644 = regular file, 100755 = executable, 040000 = directory, 120000 = symlink, 160000 = submodule), type (blob или tree), SHA того объекта, имя файла/директории. Если в директории есть поддиректория, tree этой директории содержит запись '040000 tree <sha-другого-tree> subdirname'. Так образуется рекурсивная структура. Корневой tree коммита описывает корень репозитория.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m03-05-q4",
+      "type": "multiple-choice",
+      "question": "Какая разница между lightweight tag и annotated tag?",
+      "options": [
+        { "id": "a", "text": "Lightweight на одну строку короче" },
+        { "id": "b", "text": "Lightweight — это просто ref (файл в .git/refs/tags/ с SHA коммита). Annotated — полноценный объект типа tag в .git/objects/ с метаданными (имя автора, дата, сообщение тега), может быть подписан GPG/SSH. Для release-tags рекомендуется annotated" },
+        { "id": "c", "text": "Annotated не отображается в git log" },
+        { "id": "d", "text": "Lightweight нельзя удалить" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Lightweight tag — это просто файл в .git/refs/tags/<name> с одним SHA коммита, никакого объекта нет. `git tag v1.0` создаёт lightweight. Annotated tag — это полноценный объект типа `tag` в .git/objects/ с метаданными (tagger, date, message), может быть подписан. `git tag -a v1.0 -m '...'` создаёт annotated. Для официальных релизов — annotated, потому что у них есть подпись, метаданные, и история. Lightweight для временных пометок.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m03-05-q5",
+      "type": "true-false",
+      "question": "Если вы сделали `git reset --hard HEAD~1` и хотите восстановить коммит — это уже невозможно, объект коммита удалён.",
+      "correctAnswer": false,
+      "explanation": "Нет. git reset двигает только refs (HEAD, ветка), но НЕ удаляет объекты. Сам commit, его tree и blob-ы остаются в .git/objects/, потому что они immutable. Восстановить можно через git reflog (модуль 09) или просто `git checkout <SHA>` если знаете SHA. Объекты удаляются только когда: 1) на них не указывает никакая ветка/тег, 2) reflog их забыл (стандартный grace period 30 дней), 3) запущен git gc. До этого все объекты живут — даже если вы их «откатили». Это и есть «безопасный» Git.",
+      "bloomLevel": "conceptual"
+    }
+  ]
+}

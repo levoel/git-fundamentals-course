@@ -1,0 +1,89 @@
+{
+  "moduleId": "12-workflows",
+  "title": "Module 12 Exam — Git workflows: GitHub Flow, GitFlow, trunk-based",
+  "passThreshold": 70,
+  "_meta": {
+    "idPrefix": "git-m12-exam",
+    "description": "6 вопросов покрывающих GitHub Flow, GitFlow, Trunk-Based и decision matrix"
+  },
+  "questions": [
+    {
+      "id": "git-m12-exam-q1",
+      "type": "multiple-choice",
+      "question": "Concept комплекс: какой workflow подходит для какого case?",
+      "options": [
+        { "id": "a", "text": "Все workflow эквивалентны" },
+        { "id": "b", "text": "GitHub Flow (main always production, short feature branches, ~90% DE SaaS); GitFlow (main+develop+feature/*+release/*+hotfix/*, для versioned products: mobile, library, packaged software); Trunk-Based (direct commits в main with feature flags, FAANG-level high velocity, requires mature infra); Solo dev = direct push to main" },
+        { "id": "c", "text": "GitFlow для всего" },
+        { "id": "d", "text": "TBD для всего" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Каждый workflow optimized для разного. Match определяется: deploy frequency (continuous -> GitHub Flow/TBD; bi-weekly -> GitFlow), product type (SaaS -> GH Flow; mobile/library -> GitFlow), team size + maturity (small -> simple; mature large -> TBD). Нет 'one workflow fits all'. Понимание trade-offs > заучивание команд.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m12-exam-q2",
+      "type": "multiple-choice",
+      "question": "Команда dbt из 10 DE, SaaS продукт, daily auto-deploy на BigQuery. Какой workflow и почему?",
+      "options": [
+        { "id": "a", "text": "GitFlow для stability" },
+        { "id": "b", "text": "GitHub Flow. Match factors: SaaS (continuous deploy fit), medium team (10 DE — sweet spot), no versioned releases (просто rolling forward), CI/CD mature (dbt parse/test on PR, auto-deploy on merge). GitHub Flow = main always production, feature branches 1-3 days, PR + CI + review -> merge -> auto-deploy. ~90% DE teams именно так. GitFlow overhead не нужен (нет release versions); TBD overkill (10 DE managable без TBD complexity)" },
+        { "id": "c", "text": "Trunk-Based с aggressive flags" },
+        { "id": "d", "text": "Direct push to main" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Classic DE SaaS setup. GitHub Flow simplicity matches team scale. CI gates main (no needs для release branches). dbt-specific CI: dbt parse, dbt run/test on staging, sqlfluff. Deploy on merge через GitHub Actions / dbt Cloud. Feature flags если нужно large change — но через GH Flow + flags, не TBD. Junior productive в этом setup в 2-3 weeks.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m12-exam-q3",
+      "type": "multiple-choice",
+      "question": "Hotfix в GitFlow процедура?",
+      "options": [
+        { "id": "a", "text": "Push в main и забыть" },
+        { "id": "b", "text": "(1) git switch main && git pull (latest release); (2) git switch -c hotfix/v2.0.1-null-fix; (3) implement fix + commit; (4) git switch main && git merge --no-ff hotfix/...; (5) git tag -a v2.0.1 -m 'Hotfix 2.0.1'; (6) git push origin main --follow-tags; (7) КРИТИЧНО: git switch develop && git merge --no-ff hotfix/... — иначе fix потеряется в next release (regression!); (8) git branch -d hotfix/..." },
+        { "id": "c", "text": "Только merge в main" },
+        { "id": "d", "text": "Cherry-pick на feature" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Hotfix dual-merge — critical pattern GitFlow. Хотфикс solves prod issue (новый patch release tag на main). Но develop branch продолжает с фичами для next major release. Без merge hotfix в develop -> next release из develop не имеет fix -> buggy код в проде опять. Это известная ловушка GitFlow, multiple teams потеряли часы на debugging регрессии. Discipline: всегда merge hotfix BOTH в main+develop. То же для release branches.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m12-exam-q4",
+      "type": "multiple-choice",
+      "question": "TBD lifecycle нового dbt mart `customer_ltv` за 4 дня?",
+      "options": [
+        { "id": "a", "text": "Один big PR в конце недели" },
+        { "id": "b", "text": "Day 1 AM: PR #1 'scaffold mart with flag OFF' (placeholder SELECT 1) -> merge -> main updated, prod не affected. Day 1 PM: PR #2 'add real LTV logic' -> merge -> flag still OFF в prod. Day 2: PR #3 'add tests' -> merge. Day 2 PM: enable flag для 5% canary через LaunchDarkly UI (не git). Day 3: monitor metrics, gradual rollout до 100%. Day 4: PR #4 'remove flag, cleanup dead code'. 4 PR, each small, each safe — production controlled через flags, не git" },
+        { "id": "c", "text": "Push прямо в main без PR" },
+        { "id": "d", "text": "Создать develop ветку" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "TBD canonical pattern. Granular PRs, each merges to main, production safety через flags. Rollout decoupled от deploy: code в проде с day 1 (flag OFF), feature activated через config server gradually. Metrics-based rollout decisions. Final PR — flag removal + dead code cleanup (critical для tech debt management). 4-day cycle для feature — невозможно через GitFlow (release process), trudno через GitHub Flow (один большой PR), naturally fits TBD.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m12-exam-q5",
+      "type": "multiple-choice",
+      "question": "Hybrid workflow examples в реальных DE командах?",
+      "options": [
+        { "id": "a", "text": "Hybrid не существует" },
+        { "id": "b", "text": "(1) Apache Airflow: GitHub Flow + release branches (v2-5-stable, v2-6-stable) для supported versions; (2) Many SaaS dbt teams: GitHub Flow + tagged releases (без release branches, просто markers); (3) Mobile companies: GitFlow без release branches (только develop + main + feature + hotfix); (4) FAANG-adjacent: TBD на core кодбаз + GitHub Flow на peripheral repos. Pure workflows редко match real needs — hybrids нормально и common" },
+        { "id": "c", "text": "Только Google использует hybrid" },
+        { "id": "d", "text": "Все используют чистый GitHub Flow" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Real-world hybrid examples illustrate principles. Apache Airflow combine GitHub Flow для active dev + release branches для customer support across versions. SaaS dbt teams: tags заменяют release branches (deployment artifacts, no separate branches). Mobile с GitFlow lite (без release/* — just develop+main+feature+hotfix). FAANG: разные репо разный workflow. Hybrid = adapting к specific team needs, не cargo cult копирование template.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m12-exam-q6",
+      "type": "true-false",
+      "question": "Junior DE в продуктовой компании 2026 года в 90% случаев работает по GitHub Flow или его варианту.",
+      "correctAnswer": true,
+      "explanation": "Да. DE командах SaaS / internal analytics / dbt repos / Airflow company репо — это primary workflow. Hybrid OK (с release branches для legacy support, с tagged releases для deploy markers). GitFlow редкость в DE (~5-10% — versioned libraries или legacy enterprise). TBD редкость в junior-heavy teams (требует mature infra и culture). Освой GitHub Flow first — это твоё primary знание. Через 1-2 года, если попадёшь в large platform team — possibly TBD. GitFlow столкнёшься редко.",
+      "bloomLevel": "conceptual"
+    }
+  ]
+}

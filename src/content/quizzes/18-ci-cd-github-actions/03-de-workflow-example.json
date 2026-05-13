@@ -1,0 +1,59 @@
+{
+  "lessonSlug": "18-ci-cd-github-actions/03-de-workflow-example",
+  "moduleId": "18-ci-cd-github-actions",
+  "_meta": {
+    "idPrefix": "git-m18-03"
+  },
+  "questions": [
+    {
+      "id": "git-m18-03-q1",
+      "type": "multiple-choice",
+      "question": "Junior настраивает CI и видит, что каждый push на feature ветку тратит 60 секунд на установку зависимостей (uv sync). Как ускорить?",
+      "options": [
+        {"id": "a", "text": "Удалить uv sync — Python работает без зависимостей"},
+        {"id": "b", "text": "actions/cache@v4 с key включающим hashFiles('uv.lock') — venv кешируется, восстанавливается за 5 sec вместо 60. Или использовать astral-sh/setup-uv@v3 с enable-cache: true (готовое решение)"},
+        {"id": "c", "text": "Переключиться на macos-latest — он быстрее"},
+        {"id": "d", "text": "Запускать CI только раз в неделю"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "actions/cache@v4 — стандартное решение. Key = `venv-${OS}-py3.13-${hashFiles('uv.lock')}`. Первый раз — cache miss -> uv sync -> save to cache. Следующие runs (если uv.lock не менялся) — cache hit, restore .venv за 5 sec. Когда uv.lock меняется (добавил deps) — cache miss, пересборка. astral-sh/setup-uv@v3 с enable-cache: true — built-in cache support, проще писать. macos-latest — в 10x дороже, не быстрее. Удалить uv sync — нелепо (без зависимостей пайплайн упадёт).",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m18-03-q2",
+      "type": "multiple-choice",
+      "question": "В CI workflow `uv sync --frozen` отличается от `uv sync` тем, что:",
+      "options": [
+        {"id": "a", "text": "--frozen работает быстрее в 10x"},
+        {"id": "b", "text": "--frozen падает, если uv.lock не соответствует текущему pyproject.toml — гарантия что lockfile up-to-date, и CI ставит точно те же версии, что и разработчик локально"},
+        {"id": "c", "text": "--frozen ставит только prod зависимости"},
+        {"id": "d", "text": "--frozen использует cached versions без проверки"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "--frozen — strict mode для CI. Проверяет, что uv.lock полностью соответствует текущему состоянию pyproject.toml. Если разработчик добавил dependency в pyproject.toml, но забыл `uv lock` локально перед commit — lockfile устарел, --frozen падает с понятной ошибкой. Это гарантирует, что lockfile в репо актуальный, и все среды (CI, prod, dev) ставят идентичные версии. Без --frozen — `uv sync` может обновить lockfile, что нежелательно в CI (non-deterministic).",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m18-03-q3",
+      "type": "multiple-choice",
+      "question": "Какой подход для AWS credentials в GitHub Actions СОВРЕМЕННЕЕ и БЕЗОПАСНЕЕ хранения long-lived secrets?",
+      "options": [
+        {"id": "a", "text": "AWS_ACCESS_KEY_ID в GitHub Secrets, rotate раз в год"},
+        {"id": "b", "text": "OIDC trust: GitHub Actions получает JWT, AWS обменивает на temporary credentials (1 час validity). aws-actions/configure-aws-credentials@v4 с role-to-assume"},
+        {"id": "c", "text": "Зашифрованный .env файл, коммитнутый в репо с GPG"},
+        {"id": "d", "text": "Root account credentials для simplicity"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "OIDC — золотой стандарт 2026. Permissions: id-token: write в workflow, role-to-assume в configure-aws-credentials. AWS IAM Role trust policy: 'разрешить sts:AssumeRole для GitHub OIDC issuer, conditioned на repo=org/repo и ref=refs/heads/main'. Workflow получает temporary credentials (STS), valid 1 час. Никаких long-lived AWS keys в Secrets — невозможно leak. Действие при компрометации workflow — просто revoke role или change trust condition.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m18-03-q4",
+      "type": "true-false",
+      "question": "В DE CI используется `dbt build --select state:modified+ --defer --favor-state`. Флаги --defer и --favor-state означают, что для не-изменённых upstream моделей dbt использует prod-версии (через cross-database reference), вместо запуска их локально в CI schema — это резко экономит warehouse credits.",
+      "correctAnswer": true,
+      "explanation": "Без --defer dbt бы запустил всю цепочку upstream-зависимостей в CI schema (всё с нуля — пересчёт всех таблиц, на которые ссылается изменённая модель). --defer + --favor-state: dbt видит, что upstream-модель не изменена, и вместо local CI run использует ссылку на prod-версию таблицы. CI запускает ТОЛЬКО изменённые модели + downstream, ссылки на upstream идут в prod-таблицы. Экономия 90%+ для крупных проектов. Это must-have pattern для serious dbt CI в 2026.",
+      "bloomLevel": "analytical"
+    }
+  ]
+}

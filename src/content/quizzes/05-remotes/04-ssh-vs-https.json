@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "05-remotes/04-ssh-vs-https",
+  "moduleId": "05-remotes",
+  "_meta": { "idPrefix": "git-m05-04" },
+  "questions": [
+    {
+      "id": "git-m05-04-q1",
+      "type": "multiple-choice",
+      "question": "Какой алгоритм SSH-ключа рекомендован в 2026 году?",
+      "options": [
+        { "id": "a", "text": "DSA — самый быстрый" },
+        { "id": "b", "text": "RSA-1024 — широко поддерживается" },
+        { "id": "c", "text": "ed25519 — современный, быстрый, маленький, безопасный" },
+        { "id": "d", "text": "ECDSA — единственный вариант для GitHub" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "Ed25519 — elliptic-curve алгоритм, современный стандарт. Преимущества: маленький ключ (256 бит), быстрая подпись, хорошая криптостойкость. RSA-2048 ещё работает, но устаревший. RSA-1024 — слишком слабый, многие сервисы уже отказываются. DSA — deprecated. ECDSA — приемлемый, но ed25519 предпочтительнее. Команда: `ssh-keygen -t ed25519 -C 'email@example.com'`. Обязательно ставь passphrase + используй ssh-agent.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m05-04-q2",
+      "type": "true-false",
+      "question": "В 2026 году ты можешь использовать обычный пароль от GitHub-аккаунта для git push через HTTPS.",
+      "correctAnswer": "false",
+      "explanation": "GitHub отключил парольную аутентификацию для Git-операций в августе 2021 года. Для HTTPS теперь нужен Personal Access Token (PAT) — генерируется в Settings -> Developer settings -> Personal access tokens. Пароль от аккаунта работает только для входа в веб-интерфейс. Альтернативы: (1) GitHub CLI `gh auth login` — OAuth через браузер, (2) SSH с ed25519 ключом, (3) Git Credential Manager.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m05-04-q3",
+      "type": "multiple-choice",
+      "question": "Что хранится в приватном файле `~/.ssh/id_ed25519`, и что нужно делать с публичным `id_ed25519.pub`?",
+      "options": [
+        { "id": "a", "text": "Приватный — секрет, никогда не покидает компьютер; публичный — добавляется на GitHub/GitLab" },
+        { "id": "b", "text": "Оба секретные, не показывай никому" },
+        { "id": "c", "text": "Приватный — на GitHub, публичный — локально" },
+        { "id": "d", "text": "Они идентичны, можно использовать любой" }
+      ],
+      "correctAnswer": "a",
+      "explanation": "Базовая криптография: приватный ключ — секрет, остаётся **только** на твоей машине, защищён passphrase. Если кто-то украдёт приватный ключ — сможет пушить от твоего имени (если нет passphrase) или попытаться брутить passphrase. Публичный ключ — наоборот, безопасно показывать. Его добавляют в Settings -> SSH keys на GitHub/GitLab. SSH использует asymmetric crypto: сервер шлёт challenge, ты подписываешь приватным, сервер проверяет публичным.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m05-04-q4",
+      "type": "multiple-choice",
+      "question": "Какая команда настраивает credential helper для запоминания HTTPS-токенов на macOS?",
+      "options": [
+        { "id": "a", "text": "git config --global credential.helper osxkeychain" },
+        { "id": "b", "text": "git remember-password" },
+        { "id": "c", "text": "git config save-token true" },
+        { "id": "d", "text": "git auth save" }
+      ],
+      "correctAnswer": "a",
+      "explanation": "`git config --global credential.helper osxkeychain` использует macOS Keychain для хранения PAT-токенов. После первого ввода токен сохраняется, и дальнейшие push/pull работают без запросов. На Linux эквивалент — `libsecret` (GNOME Keyring/KWallet), на Windows — `manager-core` (Windows Credential Manager). Без credential helper придётся вводить токен каждый раз. Альтернатива для удобства — `gh auth login` (GitHub CLI), который сам всё настраивает через OAuth.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m05-04-q5",
+      "type": "multiple-choice",
+      "question": "В каком сценарии HTTPS-транспорт предпочтительнее SSH?",
+      "options": [
+        { "id": "a", "text": "Всегда — SSH устарел" },
+        { "id": "b", "text": "В корпоративной сети с firewall, где порт 22 (SSH) закрыт, а 443 (HTTPS) открыт" },
+        { "id": "c", "text": "Для open-source — публичные ключи нельзя в opensource" },
+        { "id": "d", "text": "Когда работаешь с приватными репо — HTTPS требует MFA" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Корпоративные firewalls часто закрывают порт 22 для SSH, оставляя только 443 для HTTPS. В таких сетях SSH просто не работает. HTTPS-трафик идёт через стандартный HTTPS-порт и проходит через firewall как обычный веб-запрос. Дополнительно: для GitHub Enterprise с SSO (Single Sign-On) HTTPS+OAuth работает нативно, SSH требует дополнительной настройки SSH cert. На личном Mac/Linux без сетевых ограничений — SSH с ed25519 удобнее. Многие используют гибрид: HTTPS на работе, SSH дома.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

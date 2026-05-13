@@ -1,0 +1,95 @@
+{
+  "lessonSlug": "20-capstone/_exam",
+  "moduleId": "20-capstone",
+  "examTitle": "Экзамен: Capstone — реальный DE-workflow",
+  "passThreshold": 70,
+  "_meta": {
+    "idPrefix": "git-m20-exam"
+  },
+  "questions": [
+    {
+      "id": "git-m20-exam-q1",
+      "type": "multiple-choice",
+      "question": "Junior на day 1 в DE-команде. Optimal first-day workflow для нового тикета DE-1234?",
+      "options": [
+        {"id": "a", "text": "Сразу в main: коммитить, пушить. Если что — fix позже"},
+        {"id": "b", "text": "(1) Clone репо, 15-min sweep (README, similar DAG, CI, CODEOWNERS); (2) feat/de-1234-<slug> branch; (3) implement с conventional commits; (4) локально pytest+ruff+mypy зелёные; (5) push -u + gh pr create с body; (6) wait CI зелёный; (7) request review"},
+        {"id": "c", "text": "Скачать AWS production credentials, deploy сразу"},
+        {"id": "d", "text": "Создать new репо с copy-paste кода"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Full standard junior DE day-1 workflow. (1) Sweep — context awareness; (2) Conventional branch name — discoverable; (3) Granular conventional commits; (4) Local verification — fast feedback, спасает CI minutes; (5) Push + PR с meaningful body (summary, changes, testing, checklist); (6) Wait CI — не дёргать reviewer на сломанном коде; (7) Request review. Каждый шаг — best practice, применяется в любой serious DE-team. Direct push в main — anti-pattern, blocked by branch protection.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m20-exam-q2",
+      "type": "multiple-choice",
+      "question": "Reviewer оставил comment: 'This hardcoded value `SNOWFLAKE_STAGE = \"@RAW.S3_STAGE\"` should differ per environment. Use Variable.get() like fact_orders_dag.py does.' Это какой тип comment?",
+      "options": [
+        {"id": "a", "text": "Praise"},
+        {"id": "b", "text": "Blocker — anti-pattern (env-specific in code), must fix per established team convention. Reviewer explicit references existing pattern для применения. Junior fixes, commits, response с SHA"},
+        {"id": "c", "text": "Question — может ответить и не менять код"},
+        {"id": "d", "text": "Nit — minor, можно ignore"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Признаки blocker: (1) указывается anti-pattern (hardcoded env-specific); (2) cross-reference established pattern (fact_orders_dag.py); (3) реальная проблема (production stage в dev = data corruption). Junior должен: (a) посмотреть fact_orders_dag.py для understanding pattern; (b) применить такой же подход; (c) commit с message 'fix(user_events_dag): use Variable.get() for stage name'; (d) push + response в PR с commit SHA и кратким объяснением. Без fix — merge blocked.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m20-exam-q3",
+      "type": "multiple-choice",
+      "question": "После rebase на updated main junior сделал `git push --force` без --with-lease. Какой риск?",
+      "options": [
+        {"id": "a", "text": "Никакой"},
+        {"id": "b", "text": "Если коллега в момент твоего rebase сделал push в эту feature ветку (например fix от другого PR or pair-programming push) — твой --force слепо overwrite, его commit потерян. --force-with-lease отказался бы push с warning 'remote ref changed, fetch and retry'"},
+        {"id": "c", "text": "GitHub автоматически блокирует force push"},
+        {"id": "d", "text": "Slower push performance"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "--force без --with-lease — слепое overwrite. Сценарий: ты делаешь rebase 5 минут. Тем временем коллега чем-то помог твоему PR и push-нул минорный fix в твою ветку (или CI auto-bot pushed формat fix). Ты делаешь force push — все его commits **уничтожены**, нет warning. --force-with-lease проверяет, что remote ref совпадает с твоим last fetch, и refuses если кто-то pushed. Best practice: всегда --force-with-lease. Branch protection НЕ блокирует force push на feature branches (только main), полагается на инженеров делать correctly.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m20-exam-q4",
+      "type": "multiple-choice",
+      "question": "Merge strategy 'Squash and merge' vs 'Create a merge commit'. Какие practical differences?",
+      "options": [
+        {"id": "a", "text": "Squash: один commit в main, granular PR commits объединены. Easy revert одного логического change. Best для feature PRs. Merge commit: сохраняется branch structure и all PR commits, видно когда и что merged, easy archeology. Best для big features где history value-able"},
+        {"id": "b", "text": "Squash быстрее"},
+        {"id": "c", "text": "Merge commit deletes branch"},
+        {"id": "d", "text": "Это разные synonyms"}
+      ],
+      "correctAnswer": "a",
+      "explanation": "Каждая strategy — свой trade-off. Squash: main выглядит как series of feature-completions; revert одной feature = revert одного commit; clean. Merge commit: full history sevedence — видно branch когда создан, intermediate commits, когда merged back; полезно для archeology ('почему это было сделано так?'). Большинство DE-команд default = Squash. Rebase merge — middle ground (linear, granular). Branch deletion — orthogonal (Settings -> Automatically delete head branches).",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m20-exam-q5",
+      "type": "multiple-choice",
+      "question": "Capstone дает foundation для real DE work. Какие 3 follow-ups максимизируют carrier growth после capstone?",
+      "options": [
+        {"id": "a", "text": "(1) 5-10 open-source PR в DE projects (Airflow/dbt/GE); (2) Build public portfolio через GitHub contributions; (3) Изучать topics вне курса (monorepo Bazel, GitOps ArgoCD, conventional commits + semantic-release automation, sqlfluff pre-commit)"},
+        {"id": "b", "text": "Прочитать курс ещё раз"},
+        {"id": "c", "text": "Запомнить все команды наизусть"},
+        {"id": "d", "text": "Бросить программирование"}
+      ],
+      "correctAnswer": "a",
+      "explanation": "Real learning после foundation: (1) Open-source contributions дают real review от senior engineers + portfolio для recruiter; (2) GitHub profile с merged PRs — strong evidence для interview; (3) Topics не покрытые в курсе — monorepo (Bazel/Pants), GitOps (ArgoCD/Flux), conventional commits automation (semantic-release auto-changelog), SQL linting (sqlfluff), Terraform linting (tflint) — next-level skills. Re-reading курса даёт ограниченную пользу. Запоминание команд — wrong focus (judgement > memorization). 5-10 real PRs в month + selective learning — fast track к middle.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m20-exam-q6",
+      "type": "multiple-choice",
+      "question": "Final takeaway: что в курсе было главным insight, который остаётся после забывания конкретных команд?",
+      "options": [
+        {"id": "a", "text": "Mental models > syntax. Git хранит objects (blob/tree/commit) content-addressed в .git/objects; ref = pointer на SHA; reflog = log движений refs. Понимая это, recovery, branch ops, history rewrite — intuitive. Команды forgetable, models persist"},
+        {"id": "b", "text": "Запоминание flags rebase"},
+        {"id": "c", "text": "Скорость typing"},
+        {"id": "d", "text": "Знание всех GitHub Actions"}
+      ],
+      "correctAnswer": "a",
+      "explanation": "Core philosophy курса: Git — система objects + refs + index, не magic. Once internalized: (1) `git reset --hard HEAD@{1}` after disaster — intuitive (reflog хранит movements); (2) `git restore --staged file` — clearance (index -> working tree); (3) understanding 'commit immutable, SHA = content hash' — clear почему секреты в Git катастрофа; (4) понимание branch как pointer — fearless rebase, cherry-pick, merge. Flags забываются (`man git` поможет), models stay. Это distinguishing senior от forever-junior — фундаментальная модель.",
+      "bloomLevel": "analytical"
+    }
+  ]
+}

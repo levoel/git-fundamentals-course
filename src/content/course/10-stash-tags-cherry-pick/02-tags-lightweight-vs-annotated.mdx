@@ -1,0 +1,301 @@
+---
+title: "Теги: lightweight vs annotated — версионирование релизов"
+description: "Lightweight tag = просто ref. Annotated tag = full object с author/date/message/GPG sig. Для releases ВСЕГДА annotated: git tag -a v1.0.0 -m. Push --tags. Semver basics."
+order: 2
+difficulty: "beginner"
+estimatedTime: 20
+topics: ["tags", "annotated", "lightweight", "release", "semver", "versioning"]
+---
+
+# Теги: lightweight vs annotated
+
+Тег в Git — это **именованный указатель на коммит**. В отличие от ветки, он не двигается — если поставил `v1.0.0` на коммит `abc1234`, он там и останется навсегда (пока не удалишь). Теги используют для **версионирования**: пометить «вот этот коммит — релиз 1.0.0».
+
+В Git есть два типа тегов: **lightweight** и **annotated**. Поверхностно они выглядят одинаково (`git tag v1.0.0` создаёт один, `git tag -a v1.0.0 -m "..."` — другой). Под капотом разница огромная — и для production releases правильный выбор всегда annotated.
+
+---
+
+## Lightweight тег — просто указатель
+
+```bash
+$ git tag v1.0.0
+$ ls .git/refs/tags/
+v1.0.0
+
+$ cat .git/refs/tags/v1.0.0
+abc1234567890...
+```
+
+Это **файл с хэшем коммита**. Никаких метаданных — кто поставил, когда, зачем. Просто alias для коммита. Точно так же устроены ветки (`refs/heads/`), только без movement.
+
+Преимущества:
+- Простота: ничего лишнего.
+- Можно ставить локально для своих заметок без церемоний.
+
+Недостатки:
+- **Нет author/date** — кто и когда поставил тег? Неизвестно.
+- **Нет message** — что значил релиз? Неизвестно.
+- **Не подписывается** — нельзя верифицировать происхождение через GPG.
+
+Lightweight tag — это «закладка в книге». Нормально для приватных заметок, плохо для публичных релизов.
+
+---
+
+## Annotated тег — полноценный Git object
+
+```bash
+$ git tag -a v1.0.0 -m "Release 1.0.0 — initial production"
+
+$ ls .git/refs/tags/
+v1.0.0
+
+$ cat .git/refs/tags/v1.0.0
+def4567890abc...                   # хэш не коммита, а tag-object!
+```
+
+Annotated tag создаёт **отдельный object в .git/objects**, который хранит:
+
+- Хэш коммита, на который указывает.
+- Tag name.
+- Tagger (имя + email из `git config`).
+- Tag date.
+- Tag message.
+- Опциональная GPG signature.
+
+```bash
+$ git cat-file -p v1.0.0
+object abc1234567890...
+type commit
+tag v1.0.0
+tagger Иван Иванов <ivan@example.com> 1715594400 +0300
+
+Release 1.0.0 — initial production
+```
+
+Это полноценная **метаинформация о релизе**: ясно кто релизнул, когда, с каким комментарием. Можно подписать GPG: `git tag -s v1.0.0 -m "..."` (требует настроенного GPG ключа).
+
+<DiagramContainer title="Разница в Git objects: lightweight vs annotated">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox tooltip="Просто файл с хэшем коммита, как ветка">Lightweight</DataBox>
+      <FlowNode tooltip="">refs/tags/v1.0.0</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="Указатель прямо на коммит">commit abc1234</FlowNode>
+    </FlowRow>
+    <FlowRow>
+      <DataBox tooltip="Полноценный object с метаданными">Annotated</DataBox>
+      <FlowNode tooltip="">refs/tags/v1.0.0</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="Tag object: tagger + date + message + signature">tag def4567</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="Tag object содержит указатель на commit">commit abc1234</FlowNode>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+---
+
+## Когда что использовать
+
+**Annotated** — **всегда** для:
+
+- Релизов прода: `v1.0.0`, `v2.3.1`.
+- Внешних distributions: библиотеки, пакеты, образы Docker.
+- Любых тегов, которые видят другие.
+- GPG signed releases (security-critical).
+
+**Lightweight** — **только** для:
+
+- Локальных закладок: «запомнить этот коммит для дебага».
+- Временных меток в скриптах.
+
+Production-правило DE-команд: **в репо для Airflow/dbt/Spark — только annotated tags**. Это видно в `git tag --list` через `n1` flag (показать первую строку message):
+
+```bash
+$ git tag --list -n1
+v1.0.0          Release 1.0.0 — initial production
+v1.1.0          Release 1.1.0 — add user pipeline
+v1.1.1          Hotfix 1.1.1 — fix null handling
+```
+
+Lightweight теги в этом списке будут пустыми (нет message).
+
+---
+
+## Создание тегов
+
+```bash
+# Annotated на HEAD
+$ git tag -a v1.0.0 -m "Release 1.0.0"
+
+# Annotated на конкретный коммит
+$ git tag -a v0.9.0-beta abc1234 -m "Beta release"
+
+# Lightweight (не рекомендую)
+$ git tag v1.0.0-local
+
+# Signed (GPG)
+$ git tag -s v1.0.0 -m "Signed release 1.0.0"
+```
+
+После `git tag` тег существует **только локально**. Чтобы запушить:
+
+```bash
+# Один тег
+$ git push origin v1.0.0
+
+# Все теги
+$ git push origin --tags
+
+# С коммитами и тегами одновременно
+$ git push --follow-tags
+```
+
+<Callout type="note">
+По умолчанию `git push` НЕ пушит теги. Это сделано намеренно — теги не должны накапливаться от каждого `push`. Явно — `--follow-tags` (только annotated) или `--tags` (все).
+</Callout>
+
+---
+
+## Просмотр тегов
+
+```bash
+$ git tag                          # список всех тегов
+$ git tag --list "v1.*"            # фильтр по паттерну
+$ git tag --list -n3 "v1.*"        # с первыми 3 строками message
+$ git show v1.0.0                  # детали тега + diff коммита
+$ git log v1.0.0..HEAD             # коммиты между тегом и HEAD
+$ git log --tags --simplify-by-decoration --oneline    # история тегов
+```
+
+Особенно полезен `git log v1.0.0..v1.1.0 --oneline` — что изменилось между релизами. Это автоматически генерируемый changelog.
+
+---
+
+## Удаление тегов
+
+```bash
+# Локально
+$ git tag -d v1.0.0
+
+# Из remote (надо явно)
+$ git push origin --delete v1.0.0
+
+# Или старая форма (deprecated)
+$ git push origin :refs/tags/v1.0.0
+```
+
+<Callout type="warning">
+Удалять опубликованные теги — плохая практика. Если кто-то закачал `v1.0.0`, а ты его удалил и заново поставил на другой коммит, у людей будут **разные версии под одним именем**. SemVer диктует: «опубликовал — не трогай». Если ошибся — выпусти `v1.0.1` с корректным контентом.
+</Callout>
+
+---
+
+## Semantic Versioning basics
+
+В DE-мире обычно используют **SemVer**: `MAJOR.MINOR.PATCH`.
+
+| Часть | Когда увеличивать | Пример |
+|---|---|---|
+| MAJOR | Breaking changes — обратной совместимости нет | 1.x -> 2.0 |
+| MINOR | Новые features, обратно совместимо | 1.0 -> 1.1 |
+| PATCH | Bug fixes, обратно совместимо | 1.1.0 -> 1.1.1 |
+
+Pre-release suffixes:
+- `v1.0.0-alpha.1`, `v1.0.0-beta.2`, `v1.0.0-rc.1`
+
+DE-сценарии:
+
+| Изменение | Bump |
+|---|---|
+| Добавили новый DAG | minor (1.1.0 -> 1.2.0) |
+| Исправили баг в существующем DAG | patch (1.2.0 -> 1.2.1) |
+| Поменяли schema БД, требует миграции | major (1.2.1 -> 2.0.0) |
+| Удалили deprecated table | major |
+| Refactor без изменения поведения | minor или ничего |
+
+Для Airflow / dbt repos не всегда применимо строго (это не «библиотека для других»), но дисциплина SemVer помогает с changelog и rollback решениями.
+
+---
+
+## Tag + GitHub Releases
+
+GitHub автоматически распознаёт annotated tags как Releases. Workflow:
+
+```bash
+$ git tag -a v1.0.0 -m "Release 1.0.0"
+$ git push origin v1.0.0
+```
+
+В GitHub UI появится `Tags` секция. Можно вручную создать `Release` из тега, прикрепить changelog, бинари, screenshots.
+
+Через CLI:
+
+```bash
+$ gh release create v1.0.0 --notes "Initial production release"
+$ gh release create v1.0.0 --notes-file CHANGELOG.md
+$ gh release create v1.0.0 --generate-notes    # авто из PR
+```
+
+`--generate-notes` — GitHub читает merged PRs между предыдущим тегом и этим, генерирует changelog по их title-ам. Магически работает в team с дисциплиной PR-title.
+
+---
+
+## DE-сценарий: версионирование dbt репо
+
+Команда dbt держит models в Git. Каждый production-release — это тег.
+
+```bash
+# В feature ветке
+$ git tag -a v2.3.1 -m "Hotfix: fix customer LTV calculation"
+$ git push origin v2.3.1
+
+# CI/CD pipeline на push tag
+# 1. Парсит SemVer
+# 2. Билдит dbt artifacts
+# 3. Деплоит на prod warehouse
+# 4. Создаёт GitHub Release с changelog
+```
+
+Tag триггерит deployment — это стандартный паттерн «tag-based releases». Альтернатива — branch-based (deploy on merge to `release/2.3.x`). Tag-based проще для аудита: ясно «v2.3.1 — это вот тот коммит, тот деплой».
+
+---
+
+## Попробуй сам
+
+```bash
+$ mkdir tag-demo && cd tag-demo
+$ git init
+$ echo "v1" > app.py && git add . && git commit -m "Initial"
+$ echo "v2" > app.py && git commit -am "Add feature"
+
+# Lightweight
+$ git tag v1.0-local
+
+# Annotated
+$ git tag -a v1.0.0 -m "First release"
+
+# Сравни
+$ git show v1.0-local      # просто коммит
+$ git show v1.0.0          # есть tagger, date, message + diff
+
+# В .git/objects
+$ cat .git/refs/tags/v1.0-local      # хэш коммита
+$ cat .git/refs/tags/v1.0.0          # хэш tag-object
+
+# git tag -ln1
+$ git tag -n1
+v1.0-local
+v1.0.0          First release          # видно только у annotated
+
+# Diff между тегами
+$ git diff v1.0-local..HEAD
+```
+
+---
+
+## Killer takeaway
+
+Annotated tags (`git tag -a v1.0.0 -m "..."`) — это full Git object с author/date/message/signature. Lightweight — просто файл с хэшем. **Для любого релиза, который видит кто-то кроме тебя — только annotated**. Push тегов не автоматический — `git push --follow-tags` или `--tags`. SemVer `MAJOR.MINOR.PATCH` — стандарт для версионирования. Tag-based deployment в CI — частый pattern DE-команд.
+
+<KnowledgeCheck quizSlug="10-stash-tags-cherry-pick/02-tags-lightweight-vs-annotated" />

@@ -1,0 +1,499 @@
+---
+title: "pre-commit framework: shared hooks через YAML"
+description: "pre-commit.com — Python framework, который решает shared hooks. Декларативный config, community hooks, реальная конфигурация для Python DE проекта"
+order: 2
+difficulty: "intermediate"
+estimatedTime: 26
+topics: ["pre-commit", "ruff", "mypy", "linting", "automation"]
+---
+
+# pre-commit framework: shared hooks через YAML
+
+`pre-commit` — Python framework, который решает главную проблему нативных git hooks: они не shareable. С `pre-commit` ты декларируешь все нужные проверки в одном YAML файле, который commit-ится в репо. Каждый коллега после `pip install pre-commit && pre-commit install` автоматически получает все hooks. Никаких "не забудь скопировать скрипт" — workflow становится надёжным и переносимым.
+
+Это **обязательный инструмент в Python DE-проектах 2026 года**. Не использовать его — это техдолг с первого дня. В этом уроке: как работает, как настроить, реальная конфигурация для Python ETL проекта (ruff, mypy, nbstripout, gitleaks, check-added-large-files).
+
+---
+
+## Как работает: high-level
+
+<DiagramContainer title="pre-commit: declarative YAML -> автоматический setup" color="emerald">
+  <FlowColumn className="p-4 gap-3">
+    <Tooltip content=".pre-commit-config.yaml в репо — описание всех hooks">
+      <DataBox label=".pre-commit-config.yaml" className="border-emerald-500/30 w-96 mx-auto">
+        <div className="text-xs space-y-1">
+          <div>repos: список hooks</div>
+          <div>версии (rev) — pinned для reproducibility</div>
+          <div>commit-ится в Git</div>
+        </div>
+      </DataBox>
+    </Tooltip>
+    <Arrow direction="down" label="pre-commit install" />
+    <Tooltip content="Framework читает YAML и устанавливает в .git/hooks/">
+      <DataBox label="Auto-generated .git/hooks/pre-commit" className="border-blue-500/30 w-96 mx-auto">
+        <div className="text-xs space-y-1">
+          <div>скрипт, который вызывает pre-commit</div>
+          <div>pre-commit запускает каждый hook из YAML</div>
+        </div>
+      </DataBox>
+    </Tooltip>
+    <Arrow direction="down" label="git commit" />
+    <Tooltip content="При каждом commit запускаются все hooks из YAML">
+      <DataBox label="Hooks run" className="border-purple-500/30 w-96 mx-auto">
+        <div className="text-xs">ruff, mypy, nbstripout, gitleaks etc</div>
+      </DataBox>
+    </Tooltip>
+  </FlowColumn>
+</DiagramContainer>
+
+Workflow для команды:
+
+1. Один человек создаёт `.pre-commit-config.yaml`, commit-ит в репо.
+2. Все коллеги делают `pip install pre-commit` + `pre-commit install` после clone.
+3. Каждый commit автоматически проходит проверки.
+
+Под капотом pre-commit:
+- Клонирует hook-репозитории (например, `https://github.com/astral-sh/ruff-pre-commit`) в свой cache (`~/.cache/pre-commit/`)
+- Создаёт виртуальные окружения для каждого hook (Python, Node, Ruby, Rust, Go — поддерживается всё)
+- Запускает hooks в этих окружениях против staged файлов
+
+Это очень удобно: не надо ставить ruff, mypy, prettier глобально или в каждый venv. pre-commit делает это в изолированных средах.
+
+---
+
+## Установка и базовый setup
+
+```bash
+# Установка (один раз на машину)
+pip install pre-commit
+# Или через pipx:
+pipx install pre-commit
+
+# Проверка
+pre-commit --version
+# pre-commit 3.7.0
+```
+
+В корне репо:
+
+```bash
+# 1. Создать .pre-commit-config.yaml
+$ pre-commit sample-config > .pre-commit-config.yaml
+
+# Это сгенерит минимальный конфиг — посмотрим:
+$ cat .pre-commit-config.yaml
+repos:
+-   repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+    -   id: trailing-whitespace
+    -   id: end-of-file-fixer
+    -   id: check-yaml
+    -   id: check-added-large-files
+
+# 2. Активировать
+$ pre-commit install
+pre-commit installed at .git/hooks/pre-commit
+
+# 3. Закоммитить config
+$ git add .pre-commit-config.yaml
+$ git commit -m "chore: add pre-commit config"
+```
+
+Теперь любой следующий commit запустит эти 4 hooks: `trailing-whitespace`, `end-of-file-fixer`, `check-yaml`, `check-added-large-files`. Если хоть один не прошёл — commit отменён.
+
+```bash
+# Создаём файл с trailing whitespace и без newline в конце
+echo "x = 1   " > main.py   # пробелы в конце + нет \n
+git add main.py
+git commit -m "test"
+
+# Вывод:
+# trim trailing whitespace.................................Failed
+# - hook id: trailing-whitespace
+# - exit code: 1
+# - files were modified by this hook
+
+# Fixing main.py
+
+# fix end of files.........................................Failed
+# - hook id: end-of-file-fixer
+# - exit code: 1
+# - files were modified by this hook
+# Fixing main.py
+
+# Commit отменён, но hooks автоматически починили файл
+```
+
+pre-commit не просто говорит "плохо" — большинство hooks **автофиксят** проблемы. После повторного `git add + commit` файл уже исправлен, и commit проходит.
+
+---
+
+## Анатомия .pre-commit-config.yaml
+
+```yaml
+repos:
+  # Каждый repo — это Git репозиторий с одним или несколькими hook-ами
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0    # ВЕРСИЯ — закрепляется для reproducibility
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ['--maxkb=1024']    # аргументы к hook
+```
+
+Ключевые поля:
+
+- `repo` — URL git репозитория, где лежит hook (или `local` для своих скриптов)
+- `rev` — конкретная версия (tag или SHA) — KEEP THIS PINNED, иначе reproducibility страдает
+- `hooks` — список hook-ов из этого repo
+- `id` — имя hook-а, определяется в `.pre-commit-hooks.yaml` репозитория-источника
+- `args` — аргументы к hook
+- `files` — паттерн файлов (regex)
+- `exclude` — паттерн для исключения
+- `language` — runtime (python, node, ruby, system, etc.) — обычно автоматический
+
+Опциональные параметры hook:
+
+```yaml
+- id: ruff
+  args: ['--fix']
+  files: ^src/.*\.py$       # только в src/
+  exclude: ^tests/fixtures/  # не в fixtures
+  stages: [pre-commit]       # когда запускать (есть pre-commit, pre-push, etc.)
+```
+
+---
+
+## Реальный config для Python DE проекта
+
+Вот production-ready конфиг для типичного Python ETL проекта (airflow, dbt, Python scripts, Jupyter notebooks):
+
+```yaml
+# .pre-commit-config.yaml
+
+# Что не проходить
+exclude: ^(\.git/|\.venv/|data/raw/|target/|migrations/)
+
+repos:
+  # === Базовые проверки ===
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        exclude: ^helm/.*/templates/.*\.yaml$
+      - id: check-toml
+      - id: check-json
+      - id: check-added-large-files
+        args: ['--maxkb=1024']    # 1MB max
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: mixed-line-ending
+        args: ['--fix=lf']
+
+  # === Python: Ruff (replaces black, isort, flake8, pyupgrade) ===
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.5.0
+    hooks:
+      - id: ruff             # linting
+        args: ['--fix']
+      - id: ruff-format      # formatting (replaces black)
+
+  # === Python: mypy (type checking) ===
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.10.0
+    hooks:
+      - id: mypy
+        additional_dependencies:
+          - types-requests
+          - types-PyYAML
+          - pandas-stubs
+        args: ['--ignore-missing-imports', '--no-strict-optional']
+        exclude: ^(tests/|notebooks/)
+
+  # === Jupyter Notebooks ===
+  - repo: https://github.com/kynan/nbstripout
+    rev: 0.7.1
+    hooks:
+      - id: nbstripout
+
+  # === Secrets scanning ===
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+
+  # === SQL formatting (если у вас dbt) ===
+  - repo: https://github.com/sqlfluff/sqlfluff
+    rev: 3.0.7
+    hooks:
+      - id: sqlfluff-lint
+        files: ^models/.*\.sql$
+        args: ['--dialect=postgres']
+      - id: sqlfluff-fix
+        files: ^models/.*\.sql$
+        args: ['--dialect=postgres']
+
+  # === YAML formatting (Airflow DAGs) ===
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.35.1
+    hooks:
+      - id: yamllint
+        args: ['-c=.yamllint']
+```
+
+Что это даёт после `pre-commit install`:
+
+1. **Базовая гигиена**: trailing whitespace, EOF, YAML/JSON syntax, не commit-ить большие файлы (>1MB), не commit-ить SSH-ключи (`detect-private-key`)
+2. **Ruff** — линтит и форматирует Python (заменяет black + isort + flake8 + pyupgrade одним инструментом, быстрый, в Rust)
+3. **mypy** — type checking
+4. **nbstripout** — outputs из Jupyter notebooks
+5. **gitleaks** — поиск секретов (паролей, AWS keys, GitHub tokens)
+6. **sqlfluff** — линт/формат SQL (для dbt-проектов)
+7. **yamllint** — формат YAML (для Airflow DAG-ов)
+
+---
+
+## Команды pre-commit
+
+```bash
+# Установить hooks в .git/hooks/
+pre-commit install
+
+# Запустить hooks на всех файлах (не только staged)
+pre-commit run --all-files
+
+# Запустить конкретный hook
+pre-commit run ruff --all-files
+pre-commit run gitleaks --all-files
+
+# Обновить версии hooks до latest
+pre-commit autoupdate
+
+# Очистить cache (если что-то поломалось)
+pre-commit clean
+
+# Удалить hooks из .git/hooks/
+pre-commit uninstall
+```
+
+`pre-commit run --all-files` — самая важная команда вне commit-ов. Перед первым PR с новой конфигурацией ты прогоняешь её на всём репо, чтобы привести существующие файлы в порядок. Это создаст один большой "chore: apply pre-commit" коммит.
+
+---
+
+## Onboarding для команды
+
+В README проекта:
+
+```markdown
+## Setup
+
+```bash
+# 1. Clone repo
+git clone https://github.com/acme/de-project.git
+cd de-project
+
+# 2. Install Python deps
+poetry install   # or pip install -r requirements-dev.txt
+
+# 3. Install pre-commit hooks
+pre-commit install
+
+# 4. (Optional) Run all checks now to verify setup
+pre-commit run --all-files
+```
+
+После этого каждый `git commit` автоматически проходит проверки.
+```
+
+Идеально автоматизировать через `Makefile` или `task`:
+
+```makefile
+# Makefile
+.PHONY: setup
+
+setup:
+	poetry install
+	pre-commit install
+	@echo "Setup complete!"
+
+check:
+	pre-commit run --all-files
+```
+
+Коллега: `make setup` после clone — всё готово.
+
+---
+
+## CI integration: belt + suspenders
+
+Локальный pre-commit можно обойти через `--no-verify`. Чтобы это не было loophole, в CI запускается тот же pre-commit:
+
+```yaml
+# .github/workflows/lint.yml
+name: Lint
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: pre-commit/action@v3.0.1
+```
+
+GitHub Actions при каждом PR запустит все pre-commit hooks. Даже если кто-то локально обошёл через --no-verify, CI его поймает. Branch protection rule "require status checks" блокирует merge PR с failing checks.
+
+Это **belt + suspenders**: pre-commit для quick local feedback, CI — для guaranteed enforcement.
+
+---
+
+## Production gotchas
+
+### 1. Pinning versions (важно)
+
+```yaml
+- repo: https://github.com/astral-sh/ruff-pre-commit
+  rev: v0.5.0     # OK pinned
+  # rev: HEAD     # NEVER — поломается случайно при обновлении ruff
+```
+
+Версии фиксируем — иначе одна и та же конфигурация может давать разные результаты у разных людей.
+
+Для обновления: `pre-commit autoupdate` — обновит до latest и закоммитит в `.pre-commit-config.yaml`.
+
+### 2. additional_dependencies для mypy
+
+mypy hook запускается в своём venv. Если твой код использует `pandas`, mypy в pre-commit без `additional_dependencies` не найдёт types:
+
+```yaml
+- id: mypy
+  additional_dependencies:
+    - pandas-stubs
+    - types-PyYAML
+    - types-requests
+```
+
+Эти deps устанавливаются в pre-commit-cache venv. Без них mypy будет ругаться "Cannot find implementation for pandas".
+
+### 3. `exclude` патерны
+
+Часто нужно исключить generated файлы, миграции, fixtures:
+
+```yaml
+exclude: ^(\.venv/|data/raw/|target/|migrations/|.*\.min\.js)
+```
+
+Это global исключение для всех hooks. Per-hook:
+
+```yaml
+- id: mypy
+  exclude: ^(tests/|notebooks/)
+```
+
+### 4. Performance
+
+Большие репо с большой конфигурацией могут долго запускать hooks. Опции:
+
+- `pre-commit run` (без `--all-files`) запускает только на staged — быстро
+- `--from-ref` / `--to-ref` для запуска на range commits (для CI)
+- параллельный режим (по умолчанию pre-commit запускает hooks параллельно)
+
+### 5. Cache
+
+`~/.cache/pre-commit/` может разрастаться. Если у тебя несколько репо с разными версиями hooks, cache гигабайты. `pre-commit gc` периодически чистит unused.
+
+---
+
+## Hands-on: настроить pre-commit на тестовом репо
+
+```bash
+# Создать новый репо
+mkdir pc-demo && cd pc-demo
+git init
+echo "x=1" > main.py
+
+# Установить pre-commit
+pip install pre-commit ruff
+
+# Создать конфиг
+cat > .pre-commit-config.yaml <<'EOF'
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.5.0
+    hooks:
+      - id: ruff
+        args: ['--fix']
+      - id: ruff-format
+EOF
+
+# Install hooks
+pre-commit install
+
+# Тест 1: ruff fix
+echo "import os; x=1" > main.py    # ruff не любит ; и no space around =
+git add main.py
+git commit -m "test"
+
+# Вывод:
+# trim trailing whitespace.................................Passed
+# fix end of files.........................................Failed (но автофикс)
+# check for added large files..............................Passed
+# ruff.....................................................Failed (autofix)
+# ruff-format..............................................Failed (autofix)
+
+# Файл изменился — ruff поправил
+cat main.py
+# import os
+#
+# x = 1
+
+# Перезапустить
+git add main.py
+git commit -m "test"
+# Все hooks Passed
+
+# Тест 2: попытка commit-нуть большой файл
+dd if=/dev/zero of=big.bin bs=1M count=1
+git add big.bin
+git commit -m "big file"
+# check for added large files..............................Failed
+# big.bin (1024 KB) exceeds 500 KB
+```
+
+Готово, ты теперь умеешь настраивать pre-commit. На реальном проекте — копируй production-конфиг сверху, адаптируй под стек.
+
+---
+
+## Cross-link
+
+- **Урок 03** — conventional commits и commit-msg валидация (commitlint через pre-commit)
+- **Урок 04** — альтернативы: husky, lefthook
+- **Модуль 14, урок 4** — nbstripout через pre-commit (мы выше использовали)
+- **Модуль 17** — gitleaks/detect-secrets через pre-commit
+
+---
+
+<KnowledgeCheck
+  question="В команде из 5 DE половина использует macOS, половина WSL Ubuntu. Вы хотите ввести единые linting + formatting + secrets scanning для всех commits. Какой полный setup и почему именно pre-commit framework, а не нативные .git/hooks?"
+  answer="Setup: (1) Создать `.pre-commit-config.yaml` в корне репо с hooks: pre-commit-hooks (basic), ruff (lint+format), mypy (types), gitleaks (secrets), nbstripout (notebooks). Pinning versions через `rev: vX.Y.Z`. (2) В README + Makefile добавить инструкции: `pip install pre-commit && pre-commit install`. (3) `pre-commit run --all-files` на всех файлах для один раз нормализации. (4) В CI настроить `pre-commit/action@v3.0.1` чтобы PR без passing hooks блокировались (belt+suspenders). Почему pre-commit framework, а НЕ нативный .git/hooks: (a) `.git/hooks/` не versioned — твой hook у коллеги отсутствует после clone. (b) Pre-commit конфиг живёт в `.pre-commit-config.yaml` — versioned, все получают одинаковый setup. (c) Cross-platform — pre-commit запускает hooks в изолированных venv, работает одинаково на macOS и WSL. (d) Community hooks — gitleaks, ruff, mypy, nbstripout pre-готовы, не надо писать с нуля. (e) Auto-fix — большинство hooks починят сами (форматирование, EOF). (f) Pinned versions — у всех в команде одинаковые версии ruff/mypy/gitleaks. (g) Onboarding — один `pre-commit install` после clone, дальше всё работает. Нативные hooks подойдут для одиночного проекта, для team это технически возможно (core.hooksPath + bootstrap скрипт) но хрупко: кто-то забудет bootstrap -> дыра в защите. Pre-commit framework — индустриальный стандарт в Python projects 2026."
+/>

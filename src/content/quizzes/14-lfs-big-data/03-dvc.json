@@ -1,0 +1,70 @@
+{
+  "lessonSlug": "14-lfs-big-data/03-dvc",
+  "moduleId": "14-lfs-big-data",
+  "_meta": {
+    "idPrefix": "git-m14-03",
+    "description": "Quiz for lesson 03 of module 14 — DVC"
+  },
+  "questions": [
+    {
+      "id": "git-m14-03-q1",
+      "type": "multiple-choice",
+      "question": "Чем DVC принципиально отличается от Git LFS по архитектуре?",
+      "options": [
+        { "id": "a", "text": "Это синонимы" },
+        { "id": "b", "text": "LFS интегрирован в Git через filter mechanism — git push отправляет и Git, и LFS вместе. DVC — параллельная система рядом с Git: свои команды (dvc push, dvc pull), .dvc файлы (метаданные с hash) commit-ятся в Git, реальные данные хранятся в любом S3/GCS/Azure backend независимо от Git" },
+        { "id": "c", "text": "DVC только для Python проектов" },
+        { "id": "d", "text": "LFS только для GitHub, DVC только для GitLab" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Архитектурные различия определяют когда что выбрать. LFS — extension Git: использует filter mechanism, transparent для пользователя (после setup), интегрирован с push/pull workflow Git. Минусы: storage обычно встроен в hosting (GitHub LFS), bandwidth fees, hard quotas. DVC — параллельная система: свои команды (`dvc init`, `dvc add`, `dvc push`, `dvc pull`), свои метаданные (`.dvc` файлы — мини YAML 200 байт), свои backend-ы (любой S3-compatible storage, SSH, local). Преимущества DVC: (1) Используешь свой existing S3 — нет дублирующих storage costs; (2) Никаких bandwidth fees от GitHub; (3) DVC pipelines (`dvc.yaml`) — описание DAG-зависимостей с автоматическим re-run только изменившегося; (4) DVC experiments для ML metrics tracking. Минусы DVC: (1) Сложнее setup (нужно настроить S3); (2) Команда должна выучить отдельный CLI; (3) Не для случайных бинарей (LFS проще для PDF/видео).",
+      "studyHint": "Повторите урок 03 — раздел 'DVC vs LFS: ключевые различия'",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m14-03-q2",
+      "type": "multiple-choice",
+      "question": "Что попадает в Git репозиторий при `dvc add data/features.parquet`?",
+      "options": [
+        { "id": "a", "text": "Сам файл features.parquet" },
+        { "id": "b", "text": "Маленький YAML `data/features.parquet.dvc` с тремя полями (md5 hash, size, path), плюс DVC автоматически добавляет `features.parquet` в `data/.gitignore`. Реальный файл остаётся в working tree (data/features.parquet) и в `.dvc/cache/` локально, но не в Git" },
+        { "id": "c", "text": "Симлинк на файл в облаке" },
+        { "id": "d", "text": "Pointer-файл как у LFS" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "DVC создаёт два артефакта при `dvc add file`: (1) `<file>.dvc` — мини YAML вида: `outs: [{md5: 4cac1962..., size: 104857600, path: features.parquet}]`. Этот .dvc файл commit-ится в Git. (2) Update в `.gitignore` — DVC автоматически добавляет `/features.parquet` в `data/.gitignore`, чтобы реальный файл не попал в Git. Сам файл остаётся на месте в working tree, плюс копия в `.dvc/cache/<md5-2-prefix>/<md5-rest>` (локальный hash-storage). Загрузка в remote происходит через `dvc push` — это отдельная команда после `git commit`. Workflow: `dvc add file` -> `git add file.dvc data/.gitignore` -> `git commit -m '...'` -> `dvc push`. Pull в обратном порядке: `git pull` (даст .dvc файлы) -> `dvc pull` (скачает реальные данные по hash из remote).",
+      "studyHint": "Повторите урок 03 — раздел 'Добавление файлов в DVC'",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m14-03-q3",
+      "type": "multiple-choice",
+      "question": "В каком сценарии DVC однозначно лучший выбор чем LFS?",
+      "options": [
+        { "id": "a", "text": "Маленький личный проект с парой PDF" },
+        { "id": "b", "text": "Production ML/DE команда: уже есть S3/GCS с прод-данными, нужна reproducibility (git commit + data version), часто меняющиеся data, planning ML pipelines/experiments. DVC: использует existing S3 без дублирования, нет bandwidth fees от Git-хостинга, DAG поддержка через dvc.yaml, experiments через dvc exp" },
+        { "id": "c", "text": "Команда новичков, никогда не работавших с Git" },
+        { "id": "d", "text": "Open-source репо без своей инфраструктуры" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "DVC оптимален для production ML/DE по нескольким причинам: (1) Существующий S3 — DVC использует его напрямую, нулевой дополнительный storage cost. LFS на GitHub дублирует — отдельный storage, отдельный billing. (2) Bandwidth — GitHub LFS платит за каждый download. DVC через S3 в том же regional — внутри AWS трафик дешёвый или бесплатный. (3) Reproducibility — `git checkout v1.2.0 && dvc pull` атомарно возвращает code+data того релиза. Для prod incidents 'воспроизвести баг от 3 месяцев назад' это золото. (4) DAG поддержка — dvc.yaml описывает зависимости между stages (prepare -> train -> evaluate), DVC автоматически re-runs только изменившееся (smart caching через hashes). (5) Experiments — dvc exp run с разными params, dvc exp show — таблица сравнения метрик. Это уровень MLflow, но прямо в Git workflow. LFS не для этого — он просто 'большие файлы как обычные', без pipeline и experiment слоёв.",
+      "studyHint": "Повторите урок 03 — раздел 'Когда DVC лучше LFS'",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m14-03-q4",
+      "type": "multiple-choice",
+      "question": "Команда коллег только что склонировала ваш DVC репо. Какие команды нужны для получения реальных данных, и что они делают?",
+      "options": [
+        { "id": "a", "text": "Достаточно `git clone` — DVC автоматически скачивает" },
+        { "id": "b", "text": "(1) `pip install dvc[s3]` — установить DVC с S3 backend; (2) Проверить AWS credentials (AWS_ACCESS_KEY_ID или ~/.aws/credentials) — DVC использует boto3; (3) `dvc pull` — читает .dvc файлы из repo, идёт в S3 по hash-ам, скачивает реальные файлы в working tree. После этого все DVC-tracked файлы доступны как обычные" },
+        { "id": "c", "text": "`git lfs pull`" },
+        { "id": "d", "text": "Файлы автоматически появятся после `git push`" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Полный onboarding DVC-репо: (1) `git clone` — приносит код + .dvc метаданные, но НЕ реальные данные (реальные в S3). После clone working tree содержит .dvc файлы, нет настоящих parquet. (2) Установить DVC с правильным backend — `pip install dvc[s3]` для S3, `dvc[gs]` для GCS, `dvc[azure]` для Azure. Без backend pip установит только базовый DVC без cloud поддержки. (3) Credentials — для S3: переменные `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, или `aws configure`, или IAM role (на EC2). DVC использует boto3, стандартная AWS auth chain. Аналогично для других: GCP service account JSON, Azure service principal. (4) `dvc pull` — читает все .dvc файлы в репо, для каждого hash смотрит remote (S3), скачивает blob, кладёт в working tree. Можно фильтровать: `dvc pull data/features.parquet` для конкретного файла, `dvc pull --remote myremote` для специфичного remote. После pull — все DVC-tracked данные доступны локально, Python код работает нормально. Без `dvc pull` будут только .dvc файлы, и `pd.read_parquet('data/features.parquet')` упадёт с FileNotFoundError.",
+      "studyHint": "Повторите урок 03 — раздел 'Push и pull'",
+      "bloomLevel": "applied"
+    }
+  ]
+}

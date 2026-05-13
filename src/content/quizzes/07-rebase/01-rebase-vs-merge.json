@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "07-rebase/01-rebase-vs-merge",
+  "moduleId": "07-rebase",
+  "_meta": { "idPrefix": "git-m07-01" },
+  "questions": [
+    {
+      "id": "git-m07-01-q1",
+      "type": "multiple-choice",
+      "question": "Главное отличие между `git merge` и `git rebase` для синхронизации feature ветки с main?",
+      "options": [
+        { "id": "a", "text": "rebase быстрее, merge медленнее" },
+        { "id": "b", "text": "merge сохраняет историю как было (создаёт merge commit), rebase переписывает коммиты с новыми SHA на новой базе (линейная история)" },
+        { "id": "c", "text": "rebase работает только для local веток, merge — для remote" },
+        { "id": "d", "text": "Никакой разницы — это синонимы" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Концептуальная разница: (1) **merge** сохраняет реальную историю — создаёт merge commit с двумя родителями (твой коммит + commit из main). История становится 'ёлкой', SHA не меняются, безопасно для shared веток. (2) **rebase** переписывает твои коммиты как новые коммиты с новыми SHA на новой базе (на main). История остаётся линейной, но локальные SHA теряются (доступны через reflog). Опасно для shared веток — требует force-push. Аналогия: merge = дневник (как было), rebase = книга (переписанная для чтения).",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m07-01-q2",
+      "type": "true-false",
+      "question": "После `git rebase main` на feature ветке SHA твоих коммитов остаются теми же, потому что содержимое файлов не изменилось.",
+      "correctAnswer": "false",
+      "explanation": "Это **неправильно**. SHA коммита вычисляется из tree (snapshot файлов) + parent + author + message + timestamp. При rebase меняется parent (был C0, стал M3 или предыдущий rebased коммит). Этого достаточно, чтобы SHA полностью изменился. Даже если изменения в файлах остались идентичными, parent изменился — SHA новый. Старые коммиты не удалены сразу, они в `.git/objects/` без указателей, доступны через `git reflog` (минимум 30-90 дней). После rebase локальный push требует `--force-with-lease`, потому что новые SHA не являются продолжением старых.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m07-01-q3",
+      "type": "multiple-choice",
+      "question": "Какая настройка делает `git pull` использовать rebase вместо merge по дефолту?",
+      "options": [
+        { "id": "a", "text": "pull.merge=false" },
+        { "id": "b", "text": "pull.rebase=true" },
+        { "id": "c", "text": "rebase.pull=true" },
+        { "id": "d", "text": "git.style=rebase" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`git config --global pull.rebase true` делает `git pull` = `git fetch + git rebase` (вместо дефолтного `fetch + merge`). Полезно когда часто синхронизируешься с main и хочешь чистую линейную историю без merge commits 'Merge branch main into feature'. Дополнительная защита для junior'ов — `pull.ff=only`: pull либо делает fast-forward, либо падает с ошибкой; в этом случае ты явно решаешь rebase vs merge.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m07-01-q4",
+      "type": "multiple-choice",
+      "question": "Squash merge на GitHub/GitLab — что делает?",
+      "options": [
+        { "id": "a", "text": "Полностью удаляет историю PR" },
+        { "id": "b", "text": "Объединяет все коммиты feature ветки в один squashed коммит, который ложится на main без merge commit" },
+        { "id": "c", "text": "Создаёт merge commit без diff" },
+        { "id": "d", "text": "Замораживает ветку" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Squash merge: все коммиты feature (например, F1, F2, F3, F4) объединяются в один новый коммит S, содержащий объединённые изменения. S ложится на main без merge commit. Плюсы: (1) одна атомарная единица в main history — легко откатить через `git revert <S>`, (2) не загромождает main промежуточными wip/typo коммитами. Минусы: (1) теряется детальная история работы, (2) `git blame` указывает на S, не на original commits. Многие команды используют squash как дефолт merge strategy для PR. Локальный эквивалент — `git merge --squash feature && git commit`.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m07-01-q5",
+      "type": "multiple-choice",
+      "question": "В команде настроен `pull.rebase = true`. Junior на своей feature ветке делает `git pull`. Что произойдёт?",
+      "options": [
+        { "id": "a", "text": "Pull создаст merge commit как обычно" },
+        { "id": "b", "text": "Команда выполнит git fetch + git rebase origin/feature — переписывает локальные коммиты junior'а на новые SHA, история линейная" },
+        { "id": "c", "text": "Pull откажется работать" },
+        { "id": "d", "text": "Pull удалит локальные коммиты" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "С `pull.rebase = true`: `git pull` = `git fetch + git rebase origin/<branch>`. Локальные коммиты junior'а переписываются с новыми SHA на новой базе. История остаётся линейной, без merge commits. Junior может этого и не заметить — внешне всё работает. Подвох: (1) если junior уже показал кому-то SHA своих коммитов (для review) — эти SHA теперь invalid. (2) Если возник конфликт во время pull — он будет требовать разрешения **для каждого коммита по отдельности**, в отличие от merge (один раз для всего). (3) Junior должен знать настройки команды, чтобы не путаться.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

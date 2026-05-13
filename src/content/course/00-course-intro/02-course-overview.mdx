@@ -1,0 +1,164 @@
+---
+title: "Обзор 21 модуля"
+description: "Что внутри каждого модуля, как они связаны и какой темп взять"
+order: 2
+difficulty: "beginner"
+estimatedTime: 15
+topics: ["Git", "Учебный план", "Прогрессия"]
+---
+
+# Обзор 21 модуля
+
+В этом уроке — карта всего курса. Цель не запомнить, а получить ощущение, что вас ждёт впереди: какие темы пойдут когда, что зависит от чего, и в какой момент урок «настоящего инструмента» станет применим в реальной работе.
+
+Курс структурирован как пирамида. Каждый последующий модуль опирается на предыдущие. Пропускать модули можно, но в большинстве случаев — себе во вред. К пятому модулю вы будете спокойно работать с локальным репозиторием. К десятому — уверенно с удалённым. К пятнадцатому — на уровне Middle.
+
+---
+
+## Структура курса в одной диаграмме
+
+<DiagramContainer title="Дорожная карта курса" color="purple" description="21 модуль, разбитые на 4 содержательных блока. Стрелки — направление обязательной зависимости.">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="00-04" variant="highlight" tooltip="Фундамент: введение, история VCS, установка, three trees, ветки. Без этого блока остальное не имеет смысла">Фундамент</DataBox>
+      <Arrow direction="right" label="dependencies" />
+      <DataBox label="05-10" tooltip="Ежедневная работа: remotes, конфликты, rebase, история, reflog, stash. То, что Junior делает каждый день">Ежедневная работа</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="11-15" tooltip="Командная работа: PR, workflows, .gitignore, LFS, хуки. То, что отличает соло-разработчика от командного игрока">Команда</DataBox>
+      <Arrow direction="right" label="dependencies" />
+      <DataBox label="16-20" tooltip="Production: submodules, секреты, GitHub Actions, восстановление, capstone-проект">Production</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+---
+
+## Модули 00-04: Фундамент
+
+Цель блока — за 4-5 часов вы должны спокойно создавать репозиторий, делать коммиты, переключаться между ветками и делать простые merges. Если после этого блока вы ещё не уверены — не идите дальше, перечитайте.
+
+<DiagramContainer title="Модули 00-04 — фундамент" color="indigo">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="00 Intro" tooltip="3 урока: про курс, обзор модулей, как учиться. ~30 минут чтения">3 урока</DataBox>
+      <DataBox label="01 Что такое Git" tooltip="4 урока: история VCS, distributed vs centralized, snapshots vs deltas, почему Git победил. ~1 час">4 урока</DataBox>
+      <DataBox label="02 Установка" tooltip="4 урока: установка на 3 OS, git config, SSH-ключи (ed25519), GPG/SSH подписи коммитов. ~1.5 часа">4 урока</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="03 Три дерева" tooltip="5 уроков: working tree/index/repo, git init, add/commit/status, анатомия commit, blob/tree/commit objects. ~2 часа. КЛЮЧЕВОЙ модуль">5 уроков</DataBox>
+      <DataBox label="04 Ветки и merge" tooltip="5 уроков: что такое ветка (41 байт!), создание веток, fast-forward, three-way merge, HEAD/detached HEAD. ~2 часа">5 уроков</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Особое внимание модулю 03 — это самый важный модуль курса. Если вы поймёте три дерева и модель объектов Git, то всё остальное в курсе будет лёгким. Если не поймёте — будете путаться даже в `git commit -am`.
+
+---
+
+## Модули 05-10: Ежедневная работа
+
+Здесь начинается «настоящая жизнь». Вы будете работать с удалёнными репозиториями (GitHub/GitLab), решать конфликты, переписывать историю через rebase, искать баги через `git log` и `git bisect`, и восстанавливать «потерянные» коммиты через reflog.
+
+<DiagramContainer title="Модули 05-10 — ежедневная работа" color="emerald">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="05 Remotes" tooltip="origin, upstream, fetch vs pull vs push, отслеживающие ветки, форки. Здесь впервые видишь GitHub">Удалёнки</DataBox>
+      <DataBox label="06 Conflicts" tooltip="Как Git понимает, что у нас конфликт, маркеры конфликта, mergetool, стратегии разрешения, длинные конфликты">Конфликты</DataBox>
+      <DataBox label="07 Rebase" tooltip="rebase vs merge, interactive rebase (squash/fixup/reword), КОГДА можно rebase публичных веток (НИКОГДА)">Rebase</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="08 История" tooltip="git log с фильтрами, git diff, git blame, git bisect (бинарный поиск багов), git show">Инспекция</DataBox>
+      <DataBox label="09 Reflog" tooltip="git reset --soft/mixed/hard, git revert, git reflog, восстановление удалённых коммитов и веток. СПАСАЕТ КАРЬЕРУ">Отмена</DataBox>
+      <DataBox label="10 Stash/Tags" tooltip="git stash (временно отложить изменения), теги lightweight vs annotated, cherry-pick (перенос commit между ветками)">Stash, Tags</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Это самый объёмный блок курса — около 18-20 часов. Здесь начинается реальная разница между Junior, который понимает Git, и Junior, который умеет только `git add . && git commit -m "fix"`.
+
+<Callout type="warning">
+Не пропускайте модуль 09 «Reflog». Однажды вы случайно удалите ветку, в которой неделя работы. Reflog — это инструмент, который восстанавливает её за 30 секунд. Junior без знания reflog в такой ситуации сидит и горько плачет.
+</Callout>
+
+---
+
+## Модули 11-15: Команда
+
+В этом блоке — переход от соло-разработчика к командному игроку. Pull Requests, code review, выбор workflow для команды, правильный `.gitignore` (чтобы не запушить `.env` с паролями), Git LFS для больших файлов, хуки и pre-commit автоматизация.
+
+<DiagramContainer title="Модули 11-15 — командная работа" color="amber">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="11 Pull Requests" tooltip="Создание PR на GitHub, как описать PR, как делать code review, как реагировать на review, draft PRs, squash vs merge">PR + Review</DataBox>
+      <DataBox label="12 Workflows" tooltip="GitHub Flow (простой), GitFlow (избыточен для большинства), trunk-based (быстрый). Что выбрать для команды">Workflows</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="13 .gitignore" tooltip=".gitignore паттерны, .gitattributes (line endings, diff drivers), что НЕ коммитить (секреты, кэши, бинарники)">Игнорирование</DataBox>
+      <DataBox label="14 LFS" tooltip="Git LFS для больших файлов (модели ML, образцы данных), когда нужен LFS и когда нет, цена LFS на GitHub">LFS</DataBox>
+      <DataBox label="15 Хуки" tooltip="pre-commit хуки, pre-commit framework (Python), husky (JS), что валидируется на commit time">Хуки</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+После этого блока вы будете готовы пройти первое собеседование на Junior DE и работать в команде с минимальным надзором.
+
+---
+
+## Модули 16-20: Production
+
+Финальный блок. Здесь — продвинутые темы, которые встречаются на работе у Junior DE через 3-6 месяцев: submodules для подключения внешних репозиториев (часто в DE-инфраструктуре), секреты и `git-crypt`/`age`/Vault, CI/CD через GitHub Actions, восстановление сломанного репозитория, и финальный capstone-проект.
+
+<DiagramContainer title="Модули 16-20 — production" color="rose">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="16 Submodules" tooltip="Git submodules (вложенные репозитории), worktrees (несколько checkout одного репо), subtrees (альтернатива submodules). Реальные кейсы DE">Submodules</DataBox>
+      <DataBox label="17 Секреты" tooltip="Почему НЕЛЬЗЯ коммитить секреты, что делать если случайно закоммитил, git-secrets, BFG Repo-Cleaner, переписывание истории">Безопасность</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="18 GitHub Actions" tooltip="CI/CD basics, workflow YAML, GitHub-hosted runners, кэширование, секреты в Actions, типичные CI для DE (тесты + lint + dbt run)">CI/CD</DataBox>
+      <DataBox label="19 Восстановление" tooltip="git fsck, повреждение objects, восстановление .git/, миграция между хостингами (GitHub -> GitLab)">Recovery</DataBox>
+      <DataBox label="20 Capstone" tooltip="Реальный DE-workflow: клонируешь проект, фиксишь баг, делаешь PR, разрешаешь конфликт, проходишь CI. Финальный проект">Capstone</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+---
+
+## Рекомендации по темпу
+
+Курс рассчитан на 50-55 часов чистого времени. Это включает чтение, упражнения и квизы, но не включает реальную работу над собственным проектом.
+
+<DiagramContainer title="Варианты темпа прохождения курса" color="indigo">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Спринт" tooltip="2 модуля в день. Не рекомендуется, мышечная память не успевает закрепиться. Можно для повторения, если вы уже что-то знали">2 недели</DataBox>
+      <DataBox label="Стандарт" variant="highlight" tooltip="1 модуль в день. Рабочий темп. Утром или вечером 2-3 часа на модуль, упражнения, квиз">3-4 недели</DataBox>
+      <DataBox label="Спокойно" tooltip="1 модуль за 2 дня. Когда совмещаешь с другими занятиями (работа, учёба). Лучше для усвоения">6-8 недель</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Лично я рекомендую стандартный темп — модуль в день, 3-4 недели — с одной оговоркой: после модулей 03, 04, 07 и 09 устройте день паузы. Эти модули перегружены концептами, и мозгу нужно время «уложить» новое знание в долгосрочную память. После паузы вы вернётесь и обнаружите, что куски, которые казались мутными, стали очевидными.
+
+---
+
+## Что после курса
+
+Курс «Git для Junior DE» — самостоятельный продукт, который закрывает версионирование кода. Дальше вам пригодятся:
+
+- **Курс «SQL Fundamentals»** — если ещё не знаете SQL глубже SELECT
+- **Курс «Python Fundamentals»** — если Python пока шатается
+- **Курс «Airflow»** — следующий шаг в DE-стеке после Git
+- **Курс «System Design для DE»** — когда захотите идти на Middle
+
+Все курсы бесплатные, на этой же платформе. Cross-link на них появится в каждом релевантном уроке.
+
+В следующем уроке поговорим, как именно учиться: какие привычки нарабатывать, как организовать терминал, и почему ваш собственный «git-sandbox» — обязательная часть учёбы.
+
+---
+
+<KnowledgeCheck
+  question="Почему в курсе блок «Фундамент» (модули 00-04) занимает примерно столько же времени, сколько весь блок «Ежедневная работа» (модули 05-10)? Не лучше ли быстрее перейти к реальным инструментам?"
+  answer="Потому что фундамент — это то, что определяет всё дальнейшее понимание. Если вы не понимаете three trees (модуль 03) — вы будете путаться в каждом конфликте. Если не понимаете, что ветка — это просто SHA-указатель (модуль 04) — rebase будет казаться магией. Опыт показывает: Junior, который потратил на фундамент 8 часов и понял глубоко, в итоге проходит остальной курс быстрее, чем Junior, который пробежал фундамент за 2 часа и теперь возвращается к каждой главе с вопросом «а как это связано». Не торопитесь."
+/>

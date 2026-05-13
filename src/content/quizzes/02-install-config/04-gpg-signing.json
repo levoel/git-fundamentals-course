@@ -1,0 +1,74 @@
+{
+  "lessonSlug": "02-install-config/04-gpg-signing",
+  "moduleId": "02-install-config",
+  "_meta": {
+    "idPrefix": "git-m02-04",
+    "description": "Quiz for lesson 2.4 — Подпись коммитов"
+  },
+  "questions": [
+    {
+      "id": "git-m02-04-q1",
+      "type": "multiple-choice",
+      "question": "Зачем подписывать коммиты?",
+      "options": [
+        { "id": "a", "text": "Это шифрует содержимое коммита от чужих глаз" },
+        { "id": "b", "text": "Подпись криптографически подтверждает, что коммит создан владельцем приватного ключа — защищает от impersonation, потому что поле Author в Git это просто строка, которую любой может подделать" },
+        { "id": "c", "text": "Это требование GitHub для всех публичных репозиториев" },
+        { "id": "d", "text": "Для отображения аватарки в commit history" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "В Git поле Author — это просто строка, никаких проверок. Любой может сделать `git -c user.name='Linus Torvalds' commit ...` и в истории будет «Linus Torvalds wrote this». Это impersonation problem. Подпись коммита — криптографическая метка, привязанная к приватному ключу. Только владелец ключа может её создать. GitHub проверяет подпись и показывает «Verified». Это не шифрование (содержимое коммита всё ещё открыто), а аутентификация авторства.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m02-04-q2",
+      "type": "multiple-choice",
+      "question": "С какой версии Git появилась возможность подписывать коммиты через SSH-ключ (а не только через GPG)?",
+      "options": [
+        { "id": "a", "text": "Git 1.0 (2005)" },
+        { "id": "b", "text": "Git 2.0 (2014)" },
+        { "id": "c", "text": "Git 2.34 (ноябрь 2021)" },
+        { "id": "d", "text": "Git 3.0 (планируется)" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "SSH signing появился в Git 2.34 (ноябрь 2021). GitHub поддерживает с августа 2022. До этого был только GPG, который требовал отдельной программы gnupg и отдельных ключей. SSH signing использует тот же ключ, что и для аутентификации — один ключ для двух задач. Намного проще в настройке. На май 2026 это уже зрелая, проверенная фича.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m02-04-q3",
+      "type": "multiple-choice",
+      "question": "Какие настройки включают автоматическую подпись коммитов через SSH-ключ?",
+      "options": [
+        { "id": "a", "text": "git config --global signing true" },
+        { "id": "b", "text": "git config --global gpg.format ssh && git config --global user.signingkey ~/.ssh/id_ed25519.pub && git config --global commit.gpgsign true" },
+        { "id": "c", "text": "git config --global commit.sign yes" },
+        { "id": "d", "text": "git sign --enable" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Три настройки: `gpg.format ssh` — формат подписи SSH (по умолчанию openpgp), `user.signingkey ~/.ssh/id_ed25519.pub` — путь к публичному ключу, `commit.gpgsign true` — включить автоподпись. Названия используют «gpg» по историческим причинам, но реальный формат определяется gpg.format. Также для локальной верификации нужен файл allowed_signers.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m02-04-q4",
+      "type": "multiple-choice",
+      "question": "На GitHub при добавлении SSH-ключа есть выбор Key type: Authentication Key или Signing Key. В чём разница?",
+      "options": [
+        { "id": "a", "text": "Authentication для приватных репо, Signing для публичных" },
+        { "id": "b", "text": "Authentication используется для аутентификации при git push, Signing — для проверки подписи коммитов. Можно добавить ОДИН и тот же ключ дважды — как Authentication и как Signing — и Git будет использовать его для обеих задач" },
+        { "id": "c", "text": "Это разные алгоритмы шифрования" },
+        { "id": "d", "text": "Authentication ключ дешевле, Signing — премиум" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "GitHub различает два use case одного и того же SSH-ключа. Authentication keys используются при SSH-handshake во время git push/clone. Signing keys — для проверки криптографических подписей коммитов. Один и тот же публичный ключ можно (и нужно) добавить дважды, с двумя разными типами. Git использует один ключ для обеих операций, GitHub различает их по типу в profile.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m02-04-q5",
+      "type": "true-false",
+      "question": "Если коммит на GitHub помечен как «Verified», это значит, что код в коммите проверен на безопасность.",
+      "correctAnswer": false,
+      "explanation": "Нет. «Verified» означает только одно: коммит криптографически подписан, подпись валидна, и публичный ключ подписи принадлежит автору (привязан к его GitHub-аккаунту). Это про АУТЕНТИЧНОСТЬ авторства, не про качество или безопасность кода. Verified-коммит может содержать баги, vulnerabilities, плохой код — Git вообще ничего не знает про содержимое. Verified подтверждает только «этот коммит создан тем, кто заявлен в Author, а не подделкой».",
+      "bloomLevel": "applied"
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "08-history-inspection/02-git-diff",
+  "moduleId": "08-history-inspection",
+  "_meta": { "idPrefix": "git-m08-02" },
+  "questions": [
+    {
+      "id": "git-m08-02-q1",
+      "type": "multiple-choice",
+      "question": "Что показывает `git diff` без флагов?",
+      "options": [
+        { "id": "a", "text": "Все изменения с момента последнего коммита" },
+        { "id": "b", "text": "Изменения в working tree, которые ещё НЕ добавлены в index (unstaged changes)" },
+        { "id": "c", "text": "Diff между текущей веткой и main" },
+        { "id": "d", "text": "Историю всех коммитов" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`git diff` без флагов сравнивает **working tree vs index** — показывает изменения, которые ты сделал в файлах, но **ещё не сделал `git add`**. После `git add` файла он переходит в index, и `git diff` его больше не показывает. Чтобы увидеть staged changes — `git diff --staged` (index vs HEAD). Чтобы увидеть всё (и staged, и unstaged) — `git diff HEAD`. Три области Git: working tree, index, repository (HEAD) — `git diff` сравнивает любую пару.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m08-02-q2",
+      "type": "multiple-choice",
+      "question": "Какая команда покажет что готово к коммиту (но ещё не закоммичено)?",
+      "options": [
+        { "id": "a", "text": "git diff" },
+        { "id": "b", "text": "git diff --staged (или --cached, синонимы)" },
+        { "id": "c", "text": "git diff HEAD" },
+        { "id": "d", "text": "git status" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`git diff --staged` (или `git diff --cached` — синонимы) показывает изменения, которые в index, но ещё не в HEAD. То есть 'что я сейчас закоммичу, если сделаю git commit'. **Привычка перед каждым commit**: `git diff --staged` — поймает много багов: случайный `print()` для debug, забытый TODO, неправильно скопированный код. `git diff` показывает unstaged, `git diff HEAD` — все изменения (staged + unstaged) относительно последнего коммита.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m08-02-q3",
+      "type": "multiple-choice",
+      "question": "В чём разница между `git diff main..feature` и `git diff main...feature`?",
+      "options": [
+        { "id": "a", "text": "Никакой — синонимы" },
+        { "id": "b", "text": ".. (две точки) — diff между верхушками двух веток. ... (три точки) — diff от merge base (точки расхождения) до верхушки feature; показывает только то, что добавилось в feature после ветвления" },
+        { "id": "c", "text": ".. для feature, ... для main" },
+        { "id": "d", "text": "Различаются цветом вывода" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Важная разница для code review: (1) **`main..feature`** — diff между верхушками. Показывает: что нужно изменить в верхушке main, чтобы получить верхушку feature. Если в main за время работы коллеги были hotfix'ы, они появятся в diff как 'минусы' — будто feature их удалил, что сбивает. (2) **`main...feature`** — diff от merge base до verхушки feature. Показывает только то, что коллега добавил в своей ветке. **Это то, что показывает GitHub в 'Files Changed' вкладке PR**. Привыкай к `...` для PR review.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m08-02-q4",
+      "type": "true-false",
+      "question": "Флаг `-w` в `git diff` игнорирует whitespace-only изменения.",
+      "correctAnswer": "true",
+      "explanation": "`git diff -w` (или `--ignore-all-space`) игнорирует все whitespace различия — пробелы, табы, переносы строк, изменения отступов. Полезно когда: (1) coлега переформатировал код (Black, prettier, isort) и весь файл показывает изменения, (2) перенесли с CRLF на LF (Windows ↔ Unix), (3) хочешь увидеть смысловые изменения, отделив cosmetic. Альтернативы: `-b` (`--ignore-space-change`) — игнорирует количество пробелов, но не пустые строки; `--ignore-blank-lines` — игнорирует пустые строки. `-w` самый агрессивный.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m08-02-q5",
+      "type": "multiple-choice",
+      "question": "Утилита `delta` (git-delta) — что это и зачем?",
+      "options": [
+        { "id": "a", "text": "Git plugin для управления базой данных" },
+        { "id": "b", "text": "Современный pager для git diff/log, написан на Rust — подсветка синтаксиса, side-by-side view, подсветка изменений внутри строк" },
+        { "id": "c", "text": "Утилита для удаления коммитов" },
+        { "id": "d", "text": "Альтернатива rebase" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`delta` — современный pager для git diff/log с лучшим визуальным отображением: подсветка синтаксиса (Python, JS, SQL...), side-by-side view (опционально), подсветка изменений **внутри** строк (не только построчно), нумерация строк, navigation между файлами через `n`/`N`. Установка: `brew install git-delta` (macOS) или `cargo install git-delta`. Настройка: `git config --global core.pager delta`. После настройки `git diff`, `git log -p`, `git show` будут использовать delta автоматически. Альтернатива — `diff-so-fancy`. Это quality-of-life upgrade для всех, кто часто работает с diff'ами.",
+      "bloomLevel": "conceptual"
+    }
+  ]
+}

@@ -1,0 +1,375 @@
+---
+title: "Подпись коммитов: SSH signing вместо GPG"
+description: "Зачем подписывать коммиты, верифицированные коммиты на GitHub, SSH signing с Git 2.34+, GPG как legacy, commit.gpgsign=true"
+order: 4
+difficulty: "beginner"
+estimatedTime: 16
+topics: ["Git", "Подпись", "SSH signing", "GPG", "verified commits"]
+---
+
+# Подпись коммитов: SSH signing вместо GPG
+
+В предыдущем уроке мы настроили SSH для аутентификации при push. Это решает «может ли этот клиент пушить в репозиторий». Подпись коммитов решает другую задачу — «действительно ли этот коммит написан тем, кто заявлен в Author»? В этом уроке разберём, зачем это нужно и как настраивать.
+
+После урока у вас будут подписанные коммиты, GitHub будет показывать на них «Verified» зелёным значком, и вы будете понимать, как защититься от impersonation-атак в open-source.
+
+---
+
+## Зачем подписывать коммиты
+
+В Git поле `Author` коммита — это **просто строка**. Никаких проверок. Я могу прямо сейчас сделать коммит «от имени Linus Torvalds»:
+
+```bash
+git -c user.name="Linus Torvalds" \
+    -c user.email="torvalds@linux-foundation.org" \
+    commit -m "Look, mom, I'm Linus"
+```
+
+И в `git log` этот коммит будет числиться от Linus. Если я запушу его на GitHub в свой публичный репозиторий — в истории будет «Linus Torvalds wrote this code». Это и есть **impersonation problem**: ничто в Git не гарантирует, что автор реален.
+
+<DiagramContainer title="Impersonation: Author — это просто строка" color="rose">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Author field" tooltip="Поле commit-объекта. Просто текст, никаких подписей. Любой может написать туда что угодно" variant="warning">Just string</DataBox>
+      <Arrow direction="right" label="git log показывает" />
+      <DataBox label="«Linus Torvalds wrote»" tooltip="Без подписи невозможно проверить — это правда Linus или подделка">Иллюзия аутентичности</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Для open-source это реальная угроза. Например, злоумышленник может:
+
+1. Сделать PR в популярный репозиторий под именем известного мейнтейнера
+2. Включить в PR коммиты с вредоносным кодом, помеченные «от имени» доверенного контрибьютора
+3. Невнимательный мейнтейнер замержит, думая, что коммиты — от своих
+
+Подпись коммитов решает это. Подписанный коммит подтверждается **криптографически**: только владелец приватного ключа мог его создать. GitHub проверяет подпись по публичному ключу, опубликованному в профиле — и показывает «Verified».
+
+---
+
+## Verified-коммиты на GitHub
+
+Если открыть commit на GitHub, рядом с автором будет один из значков:
+
+<DiagramContainer title="Статусы коммитов на GitHub" color="indigo">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Verified" variant="highlight" tooltip="Зелёный значок. Коммит подписан, подпись проверена, email автора привязан к подтверждённому ключу в его профиле">verified</DataBox>
+      <DataBox label="Без значка" tooltip="Коммит не подписан. Это не значит «плохой» — большинство коммитов в open-source без подписи. Но и доверять автоматически не стоит">unsigned</DataBox>
+      <DataBox label="Unverified" variant="warning" tooltip="Подписан, но подпись не проходит проверку. Это явный red flag — что-то не так">red flag</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Чем хорош Verified-значок:
+
+- В open-source: показывает, что коммиты от настоящего автора
+- В энтерпрайз-командах: некоторые компании требуют, чтобы все коммиты были verified (политики через branch protection)
+- В вашем профиле: красивые зелёные значки в commit history
+
+Современный Git предлагает два способа подписи: **SSH signing** (новое, Git 2.34+) и **GPG** (классическое). Разберём оба, начнём с SSH — это проще.
+
+---
+
+## SSH signing: используем уже сгенерированный ключ
+
+Самый красивый подход: использовать тот же SSH-ключ, что и для аутентификации. Один ключ — две задачи: и push, и подпись. Не нужно генерировать ничего нового.
+
+Эта возможность появилась в **Git 2.34 (ноябрь 2021)**, в GitHub поддерживается с августа 2022. На май 2026 — стабильная, проверенная фича.
+
+<DiagramContainer title="SSH signing vs GPG signing" color="emerald">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="SSH signing" variant="highlight" tooltip="Git 2.34+. Использует ваш существующий SSH-ключ. Простая настройка. Поддерживается GitHub с 2022">Простое</DataBox>
+      <DataBox label="GPG signing" tooltip="Классический способ. Требует отдельной программы (gnupg), отдельных ключей. Сложнее в настройке. Работает везде" variant="warning">Legacy</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Ключей нужно" tooltip="Один и тот же ключ для аутентификации и подписи">1</DataBox>
+      <DataBox label="Ключей нужно" tooltip="Один для SSH (аутентификация), отдельный для GPG (подпись)">2</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+---
+
+## Настройка SSH signing — пошагово
+
+### 1. Настроить Git использовать SSH для подписи
+
+```bash
+git config --global gpg.format ssh
+git config --global user.signingkey ~/.ssh/id_ed25519.pub
+```
+
+Первая команда: «формат подписи — ssh» (по умолчанию `openpgp`).
+Вторая: «ключ для подписи — публичный ключ из ~/.ssh/».
+
+### 2. Включить автоподпись коммитов
+
+```bash
+git config --global commit.gpgsign true
+git config --global tag.gpgsign true
+```
+
+С этого момента каждый ваш `git commit` будет подписан. `git tag -a` тоже.
+
+Названия настроек называются `gpgsign` (legacy от GPG), но они работают и для SSH — параметр `gpg.format` определяет реальный формат подписи.
+
+### 3. Указать список «доверенных подписантов»
+
+Локально Git тоже проверяет подписи (например, при `git log --show-signature`). Для этого ему нужен список «кому я доверяю». Создаём файл:
+
+```bash
+mkdir -p ~/.config/git
+echo "$(git config user.email) $(cat ~/.ssh/id_ed25519.pub)" > ~/.config/git/allowed_signers
+git config --global gpg.ssh.allowedSignersFile ~/.config/git/allowed_signers
+```
+
+Файл `allowed_signers` имеет формат: одна строка на ключ, формат `<email> <key>`. Например:
+
+```text
+ivan.petrov@example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGxV6...
+```
+
+### 4. Загрузить публичный ключ на GitHub как Signing Key
+
+На GitHub: Settings -> SSH and GPG keys -> New SSH key
+
+- Title: «Signing key — MacBook Pro M3»
+- Key type: **Signing Key** (важно — не Authentication!)
+- Key: содержимое `~/.ssh/id_ed25519.pub`
+
+<Callout type="note">
+GitHub различает Authentication Keys (для push) и Signing Keys (для проверки подписи коммитов). ОДИН и ТОТ ЖЕ публичный ключ можно добавить с разными типами — Git будет использовать его и для push, и для signing. Просто добавьте его дважды: один раз как Authentication, второй — как Signing.
+</Callout>
+
+### 5. Проверка
+
+Сделайте коммит в любом репозитории:
+
+```bash
+cd ~/git-sandbox
+mkdir test-signing && cd test-signing
+git init
+echo "test" > file.txt
+git add file.txt
+git commit -m "Test signed commit"
+```
+
+Посмотрите, что коммит подписан:
+
+```bash
+git log --show-signature
+# commit a1b2c3d4...
+# Good "git" signature for ivan.petrov@example.com with ED25519 key SHA256:...
+# Author: Ivan Petrov <ivan.petrov@example.com>
+# ...
+```
+
+Запушите в GitHub — рядом с коммитом появится зелёный «Verified».
+
+---
+
+## GPG signing (классический подход)
+
+Если SSH signing у вас не работает (старый Git, специфичный сервер), или вы хотите более «классический» путь — используйте GPG. Это сложнее в настройке, но универсально.
+
+### Установка GPG
+
+```bash
+# macOS
+brew install gnupg
+
+# Ubuntu/Debian
+sudo apt install -y gnupg
+
+# Windows: входит в Git for Windows
+```
+
+### Генерация ключа
+
+```bash
+gpg --full-generate-key
+```
+
+Программа задаст серию вопросов:
+
+- Kind of key: **(9) ECC (sign and encrypt)** (быстрый и современный)
+- Elliptic curve: **(1) Curve 25519** (тот же ed25519 что и для SSH)
+- Valid for: 0 (никогда не истекает) или например `2y` (2 года)
+- Real name: ваше имя (должно совпадать с user.name в Git)
+- Email: ваш email (должен совпадать с user.email в Git и быть в GitHub)
+- Comment: можно оставить пустым
+- Passphrase: пароль для приватного ключа (рекомендуется)
+
+После генерации:
+
+```bash
+gpg --list-secret-keys --keyid-format=long
+# /Users/ivan/.gnupg/pubring.kbx
+# sec   ed25519/3AA5C34371567BD2 2026-05-13 [SC]
+#       ABCD1234...
+# uid                 [ultimate] Ivan Petrov <ivan@example.com>
+```
+
+Ваш Key ID — `3AA5C34371567BD2`. Запомните.
+
+### Настройка Git на GPG
+
+```bash
+git config --global gpg.format openpgp
+git config --global user.signingkey 3AA5C34371567BD2
+git config --global commit.gpgsign true
+```
+
+### Экспорт публичного ключа
+
+```bash
+gpg --armor --export 3AA5C34371567BD2
+# -----BEGIN PGP PUBLIC KEY BLOCK-----
+# ...многострочный текст...
+# -----END PGP PUBLIC KEY BLOCK-----
+```
+
+Скопируйте всё (включая BEGIN/END строки) и добавьте на GitHub: Settings -> SSH and GPG keys -> New GPG key.
+
+---
+
+## Проверка из командной строки
+
+```bash
+git log --show-signature -1
+```
+
+Покажет последний коммит с информацией о подписи. Что вы должны увидеть:
+
+```text
+commit 1a2b3c4d...
+gpg: Signature made Tue May 13 15:30:21 2026 +0300
+gpg:                using EDDSA key ABCD1234...
+gpg: Good signature from "Ivan Petrov <ivan@example.com>" [ultimate]
+```
+
+Или для SSH:
+
+```text
+commit 1a2b3c4d...
+Good "git" signature for ivan@example.com with ED25519 key SHA256:abc...
+```
+
+«Good signature» — это успех.
+
+---
+
+## Когда подпись срывается
+
+### `gpg failed to sign the data`
+
+Самая частая ошибка GPG. Причины:
+
+1. `gpg-agent` не запущен. На macOS поставьте `pinentry-mac`:
+
+```bash
+brew install pinentry-mac
+echo "pinentry-program /opt/homebrew/bin/pinentry-mac" >> ~/.gnupg/gpg-agent.conf
+killall gpg-agent
+```
+
+2. `GPG_TTY` не настроен. Добавьте в `.bashrc` / `.zshrc`:
+
+```bash
+export GPG_TTY=$(tty)
+```
+
+3. Ключ истёк. Проверьте: `gpg --list-secret-keys`.
+
+### Подпись «Unverified» на GitHub
+
+- Проверьте, что email коммита совпадает с email, к которому привязан ключ
+- Проверьте, что email подтверждён в GitHub Account -> Emails
+- Проверьте, что ключ добавлен как Signing Key (не только Authentication)
+- Для GPG: проверьте, что вы добавили ВЕСЬ блок включая BEGIN/END
+
+---
+
+## Подпись существующих коммитов (postfactum)
+
+Если коммит уже сделан без подписи, переподписать его:
+
+```bash
+# Подписать последний коммит
+git commit --amend --no-edit -S
+
+# Подписать N последних коммитов
+git rebase -i HEAD~N
+# В редакторе изменить pick -> reword (или edit) для каждого
+# Дальше для каждого: git commit --amend --no-edit -S; git rebase --continue
+```
+
+Внимание: Если коммиты уже запушены — переподпись меняет SHA, и `git push` потребует `--force`. Это плохо для shared веток. Подробно про переписывание истории — модуль 07.
+
+Лучшая практика: настроить `commit.gpgsign true` с самого начала, и не думать.
+
+---
+
+## Стоит ли подписывать каждый коммит?
+
+Это компромисс:
+
+<DiagramContainer title="За и против обязательной подписи" color="purple">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="За" tooltip="Защита от impersonation. Verified-значки. Профессиональный вид профиля. Требования некоторых корпораций" variant="highlight">+</DataBox>
+      <DataBox label="Зелёные значки" tooltip="Все ваши коммиты на GitHub — Verified. Видно «настоящего» автора">Reputation</DataBox>
+      <DataBox label="Защита" tooltip="Никто не сможет сделать коммит от вашего имени без вашего приватного ключа">Anti-impersonation</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Против" tooltip="Сложность настройки. На чужой машине — коммиты идут без подписи. Pin-entry при passphrase">−</DataBox>
+      <DataBox label="Настройка" tooltip="20 минут разобраться, потом работает">Once-time</DataBox>
+      <DataBox label="Pin-entry" tooltip="Если стоит passphrase — может запрашивать. На macOS с Keychain — почти прозрачно">UX-цена</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Моё мнение как автора курса: **да, стоит**. Один раз настроить SSH signing — это 5 минут. Дальше всё работает. Защита от impersonation бесплатна. Verified-значки на коммитах — хороший профессиональный сигнал.
+
+В крупных open-source проектах (Linux kernel, Kubernetes, etc.) подпись обязательна для core-мейнтейнеров. В корпоративных командах через 1-2 года эта практика тоже распространяется.
+
+---
+
+## Попробуй сам
+
+1. Если у вас есть SSH-ключ (из предыдущего урока), настройте SSH signing:
+
+```bash
+git config --global gpg.format ssh
+git config --global user.signingkey ~/.ssh/id_ed25519.pub
+git config --global commit.gpgsign true
+
+mkdir -p ~/.config/git
+echo "$(git config user.email) $(cat ~/.ssh/id_ed25519.pub)" \
+  > ~/.config/git/allowed_signers
+git config --global gpg.ssh.allowedSignersFile ~/.config/git/allowed_signers
+```
+
+2. Добавьте `id_ed25519.pub` на GitHub как Signing Key.
+
+3. Сделайте тестовый коммит и проверьте:
+
+```bash
+cd ~/git-sandbox
+mkdir test-sign && cd test-sign
+git init
+echo "test" > f.txt
+git add . && git commit -m "Signed test"
+git log --show-signature
+```
+
+4. Если есть удалённый репо — запушьте и посмотрите Verified-значок на GitHub.
+
+---
+
+<KnowledgeCheck
+  question="В чём принципиальная разница между SSH-аутентификацией (push) и SSH signing (подпись коммитов)? Почему один и тот же ключ может выполнять обе функции?"
+  answer="SSH-аутентификация при push решает вопрос «может ли этот клиент писать в этот репозиторий» — она происходит на уровне SSH-протокола между вашей машиной и GitHub-сервером. Подпись коммита — это криптографическая метка В САМОМ коммит-объекте, которая остаётся с коммитом навсегда и доказывает, что коммит создан владельцем приватного ключа. Это два разных вопроса: «кто пушит» (transport security) vs «кто создал коммит» (content authenticity). Один и тот же SSH-ключ работает для обеих задач, потому что криптографическая операция одна — подпись challenge данных приватным ключом. Только в случае push мы подписываем challenge от сервера, а в случае signing — содержимое самого коммита. Git 2.34+ научился делать второе. Раньше для подписи использовался отдельный механизм GPG с отдельной парой ключей."
+/>

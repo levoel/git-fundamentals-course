@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "05-remotes/05-github-gitlab-bitbucket",
+  "moduleId": "05-remotes",
+  "_meta": { "idPrefix": "git-m05-05" },
+  "questions": [
+    {
+      "id": "git-m05-05-q1",
+      "type": "multiple-choice",
+      "question": "Чем 'Pull Request' (GitHub) отличается от 'Merge Request' (GitLab)?",
+      "options": [
+        { "id": "a", "text": "PR создаёт ветку, MR — тег" },
+        { "id": "b", "text": "Это синонимы — оба обозначают предложение влить ветку в другую через code review" },
+        { "id": "c", "text": "PR для open-source, MR для private repo" },
+        { "id": "d", "text": "У PR обязательны review, у MR — нет" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "PR (GitHub, Bitbucket) и MR (GitLab) — функционально идентичны: предложение слияния feature ветки в другую через UI, с возможностью code review, обсуждения, запуска CI, апрува. GitHub назвал PR ('pull request' — просишь принять твои изменения), GitLab выбрал MR ('merge request' — просишь смерджить). Workflow один и тот же: branch -> push -> open PR/MR -> review -> CI -> merge. Если ты освоил GitHub, переход на GitLab — пара часов на понимание UI.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m05-05-q2",
+      "type": "multiple-choice",
+      "question": "В какой ситуации компания скорее всего выберет self-hosted GitLab вместо GitHub Cloud?",
+      "options": [
+        { "id": "a", "text": "Стартап с фокусом на open-source и community" },
+        { "id": "b", "text": "Корпорация с строгими compliance требованиями (банки, телекомы, госкорп), где нужны 'код на наших серверах'" },
+        { "id": "c", "text": "Личный pet project" },
+        { "id": "d", "text": "Open-source библиотека для широкой аудитории" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Self-hosted GitLab (Community Edition или Enterprise) популярен в банках, телекомах, госкорпорациях из-за compliance: 'наш код на наших серверах', data residency, аудит. GitLab изначально создавался как self-hosted (cloud gitlab.com появился позже), и self-hosted остаётся его сильной стороной. После 2022 года в РФ массовый исход с GitHub в self-hosted GitLab из-за регуляторных ограничений. Для open-source наоборот предпочтителен GitHub — там community.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m05-05-q3",
+      "type": "true-false",
+      "question": "Branch protection rules (требовать PR, требовать ревью, запрет force-push в main) — это особенность только GitHub.",
+      "correctAnswer": "false",
+      "explanation": "Branch protection есть на всех платформах. GitHub называет это 'Branch Rulesets' (с 2023+) / 'Branch Protection Rules' (старая система), GitLab — 'Protected Branches', Bitbucket — 'Branch Permissions'. Концепция одна: правила для веток (обычно main/release), запрещающие прямой push, force-push, и требующие PR + review + CI checks. Это базовая практика для shared веток. Без branch protection один человек может уничтожить main через `git push --force`.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m05-05-q4",
+      "type": "multiple-choice",
+      "question": "Что такое Forgejo?",
+      "options": [
+        { "id": "a", "text": "Платформа от Google для DevOps" },
+        { "id": "b", "text": "Hard fork Gitea (2022), open-source self-hosted Git-хостинг, поддерживается Codeberg" },
+        { "id": "c", "text": "Закрытая enterprise версия GitHub" },
+        { "id": "d", "text": "Расширение GitLab для embedded DevOps" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Forgejo — hard fork Gitea в октябре 2022, после того как Gitea Ltd. стала коммерческой компанией. Поддерживается Codeberg e.V. (некоммерческая организация). Те же features как у Gitea (UI похож на GitHub, легковесный), но гарантированно open-source forever (Apache 2.0 + community governance). В 2025-2026 многие переходят с Gitea на Forgejo. Используется в стартапах с фокусом cost optimization, в академии, у individual developers. Forgejo Actions совместима с GitHub Actions syntax.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m05-05-q5",
+      "type": "multiple-choice",
+      "question": "Тебя приняли junior DE в банк. В первый день говорят: 'весь код в self-hosted GitLab по адресу git.bank.internal через VPN'. Что переносится 1:1 с твоего опыта GitHub, а что нужно адаптировать?",
+      "options": [
+        { "id": "a", "text": "Всё другое: команды Git, понятие веток, code review — заново учить" },
+        { "id": "b", "text": "Команды git (clone/push/pull/fetch), концепции веток и коммитов — идентичны; адаптировать нужно URL, VPN подключение, MR вместо PR, .gitlab-ci.yml вместо .github/workflows" },
+        { "id": "c", "text": "Только URL отличается, остальное идентично GitHub" },
+        { "id": "d", "text": "GitLab не поддерживает SSH, нужно только HTTPS+токен" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "90% переносится 1:1: команды git (clone, fetch, pull, push, branch, merge, rebase) — идентичны на любой Git-платформе. Концепции коммитов, веток, tracking, конфликтов — те же. Code review через MR работает как PR в GitHub. Branch protection правила — те же. Что нужно адаптировать: (1) URL остаются вида git.bank.internal вместо github.com, (2) доступ через VPN (новый шаг в workflow), (3) терминология MR vs PR, (4) CI через .gitlab-ci.yml вместо .github/workflows/*.yml, (5) UI отличается (есть Groups/Subgroups в GitLab), (6) authentication через корпоративную SSO или Personal/Project access tokens. Полный adjustment — 1-2 дня. Учиться заново не нужно — концепции универсальные.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

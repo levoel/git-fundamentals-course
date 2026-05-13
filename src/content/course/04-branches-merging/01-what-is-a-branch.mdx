@@ -1,0 +1,404 @@
+---
+title: "Что такое ветка — это всего 41 байт"
+description: "Ветка в Git — просто файл с одним SHA. Из этого следует сверхдешёвое создание веток. HEAD как указатель на ветку"
+order: 1
+difficulty: "beginner"
+estimatedTime: 16
+topics: ["Git", "Branches", "Refs", "HEAD"]
+---
+
+# Что такое ветка — это всего 41 байт
+
+В большинстве VCS до Git ветка — это «что-то большое и страшное». В SVN ветка — это копия директории в `/branches/`. В CVS — особое состояние файла с меткой. В Mercurial 1.x — поле в commit metadata, которое нельзя переименовать. В Git **ветка — это файл с одной строкой**. 41 байт. Всё.
+
+В этом уроке мы посмотрим, что физически представляет собой ветка, и почему из этой простоты вытекает вся «культура feature-веток», которая определяет современный workflow.
+
+---
+
+## Демонстрация: ветка как файл
+
+Создадим репозиторий и посмотрим, что происходит с ветками на уровне файлов:
+
+```bash
+mkdir -p ~/git-sandbox/lesson-04-branches
+cd ~/git-sandbox/lesson-04-branches
+git init
+
+echo "hello" > a.txt
+git add a.txt
+git commit -m "Initial commit"
+
+# Посмотрим на ветку main
+cat .git/refs/heads/main
+# a1b2c3d4e5f6...
+```
+
+Это и есть ветка main. **Один файл, одна строка с SHA коммита + newline = 41 байт.** Никакой магии.
+
+```bash
+wc -c .git/refs/heads/main
+#       41 .git/refs/heads/main
+```
+
+41 байт. 40 hex символов SHA-1 + один символ newline.
+
+<DiagramContainer title="Ветка как файл" color="indigo">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="refs/heads/main" variant="highlight" tooltip="Файл в .git/refs/heads/main. Содержит ОДИН SHA коммита (40 hex char + newline). 41 байт суммарно">.git/refs/heads/main</DataBox>
+      <Arrow direction="right" label="содержит" />
+      <DataBox label="a1b2c3d4...\\n" tooltip="SHA текущего HEAD-коммита ветки">40 hex + \n = 41 байт</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Создадим новую ветку:
+
+```bash
+git switch -c feature/login
+# Switched to a new branch 'feature/login'
+
+ls .git/refs/heads/
+# feature/login   main
+
+cat .git/refs/heads/feature/login
+# a1b2c3d4e5f6...   ← тот же SHA, что и main (пока никаких коммитов на feature/login)
+```
+
+Новая ветка — это просто новый файл с тем же SHA. Создание заняло наносекунды. Файл `refs/heads/feature/login` — по сути `refs/heads/feature/` это поддиректория, `login` — файл в ней (Git создаст поддиректории автоматически для веток с `/` в имени).
+
+<DiagramContainer title="Несколько веток — несколько файлов" color="emerald">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="main" tooltip="refs/heads/main -> a1b2c3...">main</DataBox>
+      <DataBox label="feature/login" tooltip="refs/heads/feature/login -> a1b2c3... (тот же SHA, пока ветка свежая)">feature/login</DataBox>
+      <DataBox label="feature/oauth" tooltip="refs/heads/feature/oauth -> a1b2c3... (если только что создана)">feature/oauth</DataBox>
+      <DataBox label="hotfix/bug-123" tooltip="refs/heads/hotfix/bug-123 -> может быть на старом коммите">hotfix/bug-123</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Все ветки" tooltip="Просто файлы в refs/heads/. Каждый 41 байт. Можно создавать сотни — не повлияет на storage" variant="highlight">Все = N × 41 байт</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+---
+
+## HEAD: указатель на ветку
+
+`.git/HEAD` — это **указатель на текущую ветку**. Файл с одной строкой:
+
+```bash
+cat .git/HEAD
+# ref: refs/heads/feature/login
+```
+
+Это говорит Git: «текущее место — ветка feature/login». Когда вы делаете коммит, Git:
+
+1. Создаёт новый commit-объект
+2. Обновляет файл `refs/heads/feature/login` на SHA нового коммита
+3. HEAD автоматически указывает на feature/login, поэтому «двигается» вместе с веткой
+
+<DiagramContainer title="HEAD -> ветка -> commit" color="purple">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label=".git/HEAD" variant="highlight" tooltip="Файл с указателем на ветку: 'ref: refs/heads/feature/login'">HEAD</DataBox>
+      <Arrow direction="right" label="указывает на" />
+      <DataBox label="refs/heads/feature/login" tooltip="Файл ветки. Содержит SHA коммита">feature/login</DataBox>
+      <Arrow direction="right" label="указывает на" />
+      <DataBox label="commit a1b2c3..." tooltip="Сам коммит-объект в .git/objects/">commit</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Когда вы переключаетесь на другую ветку (`git switch main`), Git меняет содержимое `.git/HEAD`:
+
+```bash
+git switch main
+cat .git/HEAD
+# ref: refs/heads/main
+```
+
+И обновляет working tree, чтобы файлы соответствовали состоянию ветки main.
+
+---
+
+## Что делает `git switch -c new-branch`
+
+Команда создаёт новую ветку и переключается на неё. На уровне файлов:
+
+1. Создаёт файл `refs/heads/new-branch` с SHA текущего HEAD
+2. Обновляет `HEAD` на `ref: refs/heads/new-branch`
+3. Working tree не меняется (новая ветка пока в той же точке)
+
+Эквивалент через plumbing:
+
+```bash
+# То же, что git switch -c new-branch:
+echo $(git rev-parse HEAD) > .git/refs/heads/new-branch
+echo "ref: refs/heads/new-branch" > .git/HEAD
+```
+
+Конечно, никто так не делает — `git switch -c` короче и безопаснее. Но это демонстрирует, насколько просто создание ветки.
+
+---
+
+## Просмотр веток
+
+### git branch — список локальных веток
+
+```bash
+git branch
+#   feature/login
+# * main           ← звёздочка показывает текущую ветку
+```
+
+Звёздочка указывает на текущую (HEAD).
+
+### git branch -a — со всеми удалёнными
+
+```bash
+git branch -a
+#   feature/login
+# * main
+#   remotes/origin/feature/login
+#   remotes/origin/main
+```
+
+`remotes/origin/...` — это **отслеживающие ветки**: локальный кеш состояния веток удалённого репозитория. Подробно — модуль 05.
+
+### git branch -v — с последним коммитом
+
+```bash
+git branch -v
+#   feature/login a1b2c3d Add login form
+# * main          e5f6g7h Initial commit
+```
+
+### git branch --merged / --no-merged
+
+```bash
+# Ветки, которые уже слиты в main
+git branch --merged main
+
+# Ветки, которые ЕЩЁ НЕ слиты в main
+git branch --no-merged main
+```
+
+Полезно при чистке: видишь, какие ветки безопасно удалять (already merged), а какие не стоит (содержат изменения, ещё не в main).
+
+---
+
+## Имена веток: что можно, что нельзя
+
+Имя ветки — это путь к файлу в `refs/heads/`. Из этого следуют правила:
+
+<DiagramContainer title="Правила именования веток" color="amber">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Можно" tooltip="latin, цифры, дефисы, подчёркивания, точки (но не подряд)">a-z 0-9 - _ .</DataBox>
+      <DataBox label="Можно" tooltip="Слэши! Они образуют 'поддиректории' в refs/heads/, помогают организовать ветки">/</DataBox>
+      <DataBox label="Часто" tooltip="feature/, hotfix/, bugfix/, release/, chore/ — типичные префиксы по соглашениям проекта" variant="highlight">feature/login</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Нельзя" tooltip="Пробелы (поломают команды), ASCII control chars" variant="warning">space \t</DataBox>
+      <DataBox label="Нельзя" tooltip="^ ~ : ? * [ \\ — зарезервированы Git для спецификации refs" variant="warning">^ ~ : ? * [</DataBox>
+      <DataBox label="Нельзя" tooltip="Имя, заканчивающееся на .lock — это файлы локов внутри Git" variant="warning">.lock</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Конвенции, принятые в командах:
+
+- `feature/<задача>` или `feat/<задача>` — для новых фич
+- `fix/<bug-описание>` или `bugfix/<id>` — для багфиксов
+- `hotfix/<id>` — для срочных исправлений в production
+- `release/<version>` — для подготовки релиза (например, `release/v1.2.0`)
+- `chore/<задача>` — для служебных задач (обновление зависимостей, рефакторинг без функциональных изменений)
+
+Многие команды связывают имя ветки с issue tracker: `feat/PROJ-1234` или `feat/1234-add-oauth`. Это удобно — по имени ветки понятно, какая задача.
+
+---
+
+## Что произойдёт при коммите на ветке
+
+```bash
+git switch -c feature/oauth
+echo "oauth code" > oauth.py
+git add oauth.py
+git commit -m "Add OAuth"
+```
+
+Что произошло:
+
+1. Создан blob с содержимым «oauth code\n»
+2. Создан tree с записью «oauth.py -> blob»
+3. Создан commit-объект с этим tree и parent = предыдущий commit
+4. Файл `refs/heads/feature/oauth` обновлён на SHA нового коммита
+5. HEAD по-прежнему указывает на `ref: refs/heads/feature/oauth`, который теперь указывает на новый коммит
+
+<DiagramContainer title="Что меняется при коммите на ветке" color="rose">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="До коммита" tooltip="feature/oauth -> a1b2c3 (тот же, что main)">feature/oauth -> a1b2c3</DataBox>
+      <Arrow direction="right" label="git commit" />
+      <DataBox label="После коммита" variant="highlight" tooltip="feature/oauth -> e5f6g7 (новый коммит). main по-прежнему -> a1b2c3 (не двигалась!)">feature/oauth -> e5f6g7</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="main" tooltip="Не изменилась! Остаётся на a1b2c3. feature/oauth ушла вперёд">main -> a1b2c3 (без изменений)</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Здесь ключевой момент: **ветка двигается только тогда, когда вы на ней делаете коммит**. main не двигалась, потому что вы на ней не коммитили. Это и есть **изоляция**: работа на feature/oauth не затрагивает main, пока вы не сделаете merge.
+
+---
+
+## Удаление ветки
+
+```bash
+# Безопасное удаление (только если merged в текущую)
+git branch -d feature/oauth
+
+# Принудительное удаление (даже если не merged — потеряете коммиты!)
+git branch -D feature/oauth
+```
+
+`-d` (lowercase) проверяет: «эта ветка уже слита в текущую? Если да — удалить можно». Защита от случайной потери работы.
+
+`-D` (uppercase) удаляет без вопросов. Иногда нужно (например, экспериментальная ветка, которую вы решили не мержить), но опасно.
+
+<Callout type="warning">
+Если вы удалили `-D` ветку, на которой были коммиты, не слитые в другие ветки, — коммиты становятся unreachable. До git gc (30 дней по умолчанию) они ещё в objects/, можно восстановить через reflog (модуль 09). После 30 дней — пропали навсегда.
+</Callout>
+
+После удаления:
+
+```bash
+git branch
+# * main
+# (feature/oauth удалён)
+
+ls .git/refs/heads/
+# main
+# (файл feature/oauth удалён)
+```
+
+---
+
+## Почему дешёвые ветки изменили культуру
+
+В SVN и старом Mercurial ветки были дорогими — создание занимало секунды, в репозитории появлялась новая директория, ветки были «видны» всем. Из-за этого:
+
+- Ветки создавались редко (на крупные релизы)
+- Часто работали прямо в trunk/master
+- Эксперименты делали в личных копиях или через diff-файлы
+
+В Git ветка — 41 байт, создание мгновенное, можно создать сотню и не задуматься о storage. Из этого выросла **feature-branch culture**:
+
+<DiagramContainer title="Feature-branch culture в современном Git" color="emerald">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Каждая задача — отдельная ветка" tooltip="Even small bug fix получает свою ветку. feature/PROJ-1234, fix/login-typo, chore/update-deps" variant="highlight">Задача -> ветка</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Эксперимент — ветка" tooltip="Хочу попробовать рефакторинг — создаю ветку. Не получилось — удаляю. Никаких следов" variant="highlight">Experiment -> ветка</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="WIP — ветка" tooltip="Работа в процессе — на личной ветке. Push для backup, никто не видит">WIP -> ветка</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Результат" tooltip="main всегда стабилен. Все эксперименты — в изолированных ветках. История разработки прозрачна и читаема">main стабилен</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Современный workflow Junior DE:
+
+1. Утро — `git switch main && git pull`
+2. Получил задачу — `git switch -c feature/PROJ-1234`
+3. Работаю, коммичу
+4. Дальше работаю, ещё коммичу
+5. Готово — `git push origin feature/PROJ-1234`
+6. Создаю Pull Request на GitHub
+7. Code review, исправления, ещё push
+8. Merge в main
+9. Удаляю ветку: `git branch -d feature/PROJ-1234`
+
+Это и есть **branching strategy** в современном Git, и она возможна именно потому, что ветки дешёвые.
+
+---
+
+## Попробуй сам
+
+1. Создайте репозиторий с одним коммитом:
+
+```bash
+mkdir -p ~/git-sandbox/lesson-04-what-is-branch
+cd ~/git-sandbox/lesson-04-what-is-branch
+git init
+echo "initial" > a.txt
+git add a.txt && git commit -m "Initial"
+```
+
+2. Посмотрите ветку main как файл:
+
+```bash
+cat .git/refs/heads/main
+ls -la .git/refs/heads/
+wc -c .git/refs/heads/main
+```
+
+3. Создайте несколько веток и посмотрите файлы:
+
+```bash
+git switch -c feature/a
+git switch -c feature/b
+git switch -c hotfix/critical
+
+ls -la .git/refs/heads/
+# main
+# feature/a    (поддиректория feature/, файл a)
+# feature/b
+# hotfix/critical
+```
+
+4. Сделайте коммит на одной из веток:
+
+```bash
+git switch feature/a
+echo "feature a" > a-feature.txt
+git add . && git commit -m "Feature A work"
+
+# Посмотрите, что изменилось в refs/heads/
+cat .git/refs/heads/feature/a       # новый SHA
+cat .git/refs/heads/main             # старый SHA
+cat .git/refs/heads/feature/b        # старый SHA
+```
+
+5. Посмотрите HEAD:
+
+```bash
+cat .git/HEAD
+# ref: refs/heads/feature/a
+
+git switch main
+cat .git/HEAD
+# ref: refs/heads/main
+```
+
+6. Удалите ветку:
+
+```bash
+git branch -D feature/b
+ls .git/refs/heads/
+# (feature/b исчез)
+```
+
+Прокатив всё это руками, вы получите глубокую интуицию: «ветка — это файл, ничего больше». Дальше любая работа с ветками будет понятна.
+
+---
+
+<KnowledgeCheck
+  question="Если ветка в Git — это просто файл с одним SHA, почему git push должен передать данные на сервер? Не достаточно ли просто скопировать файл refs/heads/main?"
+  answer="Файл ветки сам по себе бесполезен без объектов, на которые он указывает. SHA в refs/heads/main — это указатель на commit-объект в .git/objects/. Commit указывает на tree, tree — на blobs (содержимое файлов). Когда вы пушите ветку, Git должен убедиться, что у сервера есть ВСЕ объекты, на которые ветка ссылается прямо или транзитивно. git push под капотом: 1) Спрашивает сервер «какие коммиты у тебя уже есть?», 2) Считает разницу: какие commit/tree/blob объекты есть локально, но не у сервера, 3) Отправляет недостающие объекты (упакованные в packfile для эффективности), 4) Просит сервер обновить refs/heads/main на новый SHA. Если бы Git просто скопировал файл ветки — сервер получил бы указатель на коммиты, которых у него нет, и репозиторий стал бы битым (incomplete). Объекты + указатели — это пара, которая должна быть консистентной."
+/>

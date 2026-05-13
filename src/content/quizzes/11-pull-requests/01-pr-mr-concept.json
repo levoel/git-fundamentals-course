@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "11-pull-requests/01-pr-mr-concept",
+  "moduleId": "11-pull-requests",
+  "_meta": { "idPrefix": "git-m11-01" },
+  "questions": [
+    {
+      "id": "git-m11-01-q1",
+      "type": "multiple-choice",
+      "question": "Pull Request — это часть Git или feature платформы?",
+      "options": [
+        { "id": "a", "text": "Это core команда Git, есть `git pull-request`" },
+        { "id": "b", "text": "Это feature платформ (GitHub, GitLab, Bitbucket) — layer поверх Git. Чистый Git только умеет git push, git merge, git pull. PR/MR — это UI/UX обёртка с встроенным code review процессом, CI integration, обсуждениями. Под капотом GitHub при нажатии Merge button делает обычный git merge на своих серверах" },
+        { "id": "c", "text": "Это часть GitHub Actions" },
+        { "id": "d", "text": "Это deprecated команда" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "В git CLI нет команды pull-request. Только push, merge, pull. PR — это layer GitHub/GitLab/Bitbucket/Gitea: запись в БД платформы с метаданными (какая ветка -> в какую, кто автор, состояние, комментарии). Платформа предоставляет UI для review, CI integration, и кнопку Merge которая внутренне делает git merge. Это удобная абстракция, не part of core Git protocol.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m11-01-q2",
+      "type": "multiple-choice",
+      "question": "В чём разница между Pull Request (GitHub) и Merge Request (GitLab)?",
+      "options": [
+        { "id": "a", "text": "PR быстрее работает" },
+        { "id": "b", "text": "Только в названии — концептуально и функционально идентичны. Оба = 'просьба замержить мою ветку в твою'. GitLab выбрал 'Merge Request' как более точный термин ('я прошу замержить'). GitHub унаследовал 'Pull' из эры email-workflow Linux ('pull my branch into yours'). В индустрии PR/MR используются как синонимы" },
+        { "id": "c", "text": "PR работает только с публичными репо" },
+        { "id": "d", "text": "MR не поддерживает CI" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Чистая терминологическая разница. Bitbucket и Gitea используют 'Pull Request'. Azure DevOps — 'Pull Request'. GitLab — 'Merge Request'. Концепт один: запись о ветке которая просит merge, с review process. В DE-мире GitHub доминирует (Airflow, dbt, Spark, Kafka — все на GitHub), поэтому PR — более частый термин.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m11-01-q3",
+      "type": "multiple-choice",
+      "question": "Базовый workflow PR от feature до production?",
+      "options": [
+        { "id": "a", "text": "Сразу push в main" },
+        { "id": "b", "text": "(1) git switch -c feature/X main; (2) работа + commits; (3) git push -u origin feature/X; (4) gh pr create или UI; (5) CI запускается + reviewer назначен; (6) iteration на feedback; (7) Approve когда всё OK; (8) Merge button (squash/merge/rebase); (9) feature branch удаляется автоматически; (10) deployment триггерится на merge to main или на tag" },
+        { "id": "c", "text": "Push в main с force" },
+        { "id": "d", "text": "Только через email patches" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Standard branch -> PR -> merge workflow. Это основа современного DE разработки. Junior должен освоить: branch creation, multiple commits с good messages, push to remote, PR creation с good title/description, review feedback iteration, merge через GitHub button. Каждый шаг через CLI (gh) проще чем UI. Branch protection обеспечивает что main не получит изменений в обход этого процесса.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m11-01-q4",
+      "type": "multiple-choice",
+      "question": "Различие fork-based и branch-based PR workflow?",
+      "options": [
+        { "id": "a", "text": "Branch только для приватных репо" },
+        { "id": "b", "text": "Branch-based: все имеют push в один репо, создают feature ветки внутри (стандарт корпоративных команд). Fork-based: внешний contributor делает свою копию (fork) репо, пушит в fork, открывает PR fork->upstream (стандарт open-source). Junior в продуктовой команде почти всегда branch-based, fork только для contributions в внешние open-source" },
+        { "id": "c", "text": "Fork работает только локально" },
+        { "id": "d", "text": "Они идентичны" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Два модели collaboration. Branch-based: команда работает в одном origin, разные ветки. Fork-based: каждый контрибьютор имеет свой forked repo, открывает PR cross-repository (e.g., ivanov/airflow -> apache/airflow). Open-source маленьких людей не пускают в основной репо (нет push access), поэтому fork. Внутри компании trust есть, branch проще. Корпоративные DE-команды 99% времени работают branch-based.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m11-01-q5",
+      "type": "true-false",
+      "question": "Junior DE в нормальной команде регулярно пушит изменения напрямую в main ветку.",
+      "correctAnswer": false,
+      "explanation": "Нет, в нормальной команде main защищён branch protection rules: require PR before merging, require approvals, require status checks. Попытка git push origin main отвергается с 'GH006: Protected branch update failed'. Junior всегда работает через PR. Даже tech lead/senior идут через PR с минимум одним approval. Это disciplined practice, спасающая прод от случайных ошибок (forgotten print, commented out test). Если в команде junior пушит в main без PR — это red flag, обсудить с tech lead.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

@@ -1,0 +1,391 @@
+---
+title: "Git hooks: внутренности и lifecycle"
+description: ".git/hooks директория, какие hooks существуют, когда запускаются, проблема non-versioned hooks и почему этого недостаточно для team workflow"
+order: 1
+difficulty: "intermediate"
+estimatedTime: 20
+topics: ["Git", "hooks", "pre-commit", "automation"]
+---
+
+# Git hooks: внутренности и lifecycle
+
+Git hooks — это **скрипты, которые Git автоматически запускает в определённые моменты** жизненного цикла: перед commit-ом, перед push-ем, после merge, и т.д. Это базовая automation-инфраструктура Git, существующая с первой версии. Через hooks можно: запретить commit без passing тестов, автоматически форматировать код перед каждым commit, отправлять уведомления после merge, проверять commit message на формат.
+
+В этом уроке: какие hooks существуют, когда они вызываются, как они физически устроены в `.git/hooks/`, и почему этот built-in mechanism недостаточен для team workflow — что приводит к необходимости pre-commit framework (следующий урок).
+
+---
+
+## Где живут hooks
+
+В каждом Git репо есть директория `.git/hooks/`:
+
+```bash
+$ ls .git/hooks/
+applypatch-msg.sample
+commit-msg.sample
+fsmonitor-watchman.sample
+post-update.sample
+pre-applypatch.sample
+pre-commit.sample
+pre-merge-commit.sample
+pre-push.sample
+pre-rebase.sample
+pre-receive.sample
+prepare-commit-msg.sample
+push-to-checkout.sample
+update.sample
+```
+
+Это **примеры** (template-скрипты) от `git init`. Они с расширением `.sample` — не запускаются. Если переименуешь без `.sample` и сделаешь executable (`chmod +x`), Git начнёт их вызывать в соответствующие моменты.
+
+```bash
+# Активировать pre-commit hook
+$ cd .git/hooks/
+$ cp pre-commit.sample pre-commit
+$ chmod +x pre-commit
+
+# Теперь любой git commit запустит этот скрипт
+```
+
+Скрипт может быть на любом языке — Git просто `exec` его. Bash, Python, Ruby, Go-бинарь — всё работает.
+
+---
+
+## Lifecycle: когда какой hook запускается
+
+Hooks делятся на **client-side** (запускаются на твоей машине) и **server-side** (на Git-сервере при receive push). Junior DE обычно работает с client-side.
+
+<DiagramContainer title="Client-side hooks по lifecycle" color="blue">
+  <FlowColumn className="p-4 gap-3">
+    <Tooltip content="Перед formed commit message — для авто-наполнения шаблона">
+      <DataBox label="prepare-commit-msg" className="border-blue-500/30 w-96 mx-auto">
+        <div className="text-xs">git commit запущен, но editor ещё не открылся</div>
+      </DataBox>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="После редактирования commit message — валидация формата">
+      <DataBox label="commit-msg" className="border-blue-500/30 w-96 mx-auto">
+        <div className="text-xs">commit message написан, перед фактическим commit</div>
+      </DataBox>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="Самый частый — проверка контента: линт, тесты, форматирование">
+      <DataBox label="pre-commit" className="border-emerald-500/30 w-96 mx-auto">
+        <div className="text-xs">перед commit, если упадёт — commit отменяется</div>
+      </DataBox>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="После успешного commit — уведомления, метрики">
+      <DataBox label="post-commit" className="border-zinc-500/30 w-96 mx-auto">
+        <div className="text-xs">commit создан — для side effects</div>
+      </DataBox>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="Перед push — final проверка перед отправкой в remote">
+      <DataBox label="pre-push" className="border-amber-500/30 w-96 mx-auto">
+        <div className="text-xs">перед фактическим push на сервер</div>
+      </DataBox>
+    </Tooltip>
+  </FlowColumn>
+</DiagramContainer>
+
+### Самые полезные client-side hooks
+
+**`pre-commit`** — главный hook для DE. Запускается перед каждым `git commit`. Если скрипт возвращает non-zero exit code — commit отменяется. Сюда вешают:
+- линтеры (flake8, ruff, eslint)
+- форматтеры (black, ruff format, prettier)
+- type checkers (mypy, pyright)
+- проверка отсутствия секретов
+- очистка outputs из notebooks (nbstripout)
+
+**`commit-msg`** — проверка commit message. Получает путь к файлу с message, возвращает 0/non-zero. Сюда — валидация conventional commits format (`feat:`, `fix:`, etc).
+
+**`prepare-commit-msg`** — модифицировать заготовку commit message. Например, автоматически дописать номер тикета из имени ветки (`feature/JIRA-123-bug` -> message начинается с `[JIRA-123]`).
+
+**`pre-push`** — перед push. Можно блокировать push в `main`, проверять, что все тесты прошли локально, и т.д.
+
+**`post-merge`** — после `git pull` или `git merge`. Часто используется для автоматического `pip install -r requirements.txt` если requirements.txt изменился.
+
+**`post-checkout`** — после `git checkout`. Аналогично — реактивные действия на switching branch.
+
+### Server-side hooks (для информации)
+
+На Git-сервере есть свои hooks: `pre-receive`, `update`, `post-receive`. Они используются для:
+- блокировки push с force на protected branches
+- запуск CI после push
+- интеграция с issue trackers (закрытие тикетов по commit message)
+
+На GitHub/GitLab ты этих hooks не пишешь — вместо них есть branch protection rules, GitHub Actions, webhooks. Для self-hosted Gitea/GitLab — можно настраивать напрямую.
+
+---
+
+## Пример: простой pre-commit hook
+
+Скажем, мы хотим запрещать commit, если в стейджинге есть Python файл с `print(` (типичный debug residue).
+
+```bash
+$ cat .git/hooks/pre-commit
+#!/usr/bin/env bash
+# pre-commit hook: блокирует commit, если есть print( в staged Python файлах
+
+# Получить все staged Python файлы
+files=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$')
+
+if [ -z "$files" ]; then
+    exit 0   # нет Python файлов — пропускаем
+fi
+
+# Поиск print( в staged versions (не в working tree)
+for f in $files; do
+    if git diff --cached "$f" | grep -E '^\+.*print\(' > /dev/null; then
+        echo "Error: 'print(' found in staged $f"
+        echo "Remove debug prints before commit"
+        exit 1
+    fi
+done
+
+exit 0
+```
+
+После `chmod +x .git/hooks/pre-commit`:
+
+```bash
+$ echo "print('debug')" > test.py
+$ git add test.py
+$ git commit -m "test"
+Error: 'print(' found in staged test.py
+Remove debug prints before commit
+
+# Commit отменён, потому что exit code 1
+```
+
+Это работает локально. Удалил `print` — `git add` снова — `git commit` теперь успешен.
+
+---
+
+## Что hook видит и не видит
+
+Hook получает **те же** окружение и cwd, что у `git commit`. Точнее:
+- cwd = root репо
+- Environment vars включают `GIT_DIR`, `GIT_INDEX_FILE`, etc.
+- В pre-commit `git diff --cached` показывает staged changes
+- В pre-push на stdin — список refs которые push-ятся
+
+Важно: hooks работают с **staged** содержимым, не с working tree. То есть если у тебя есть unstaged changes — pre-commit их не видит. Это полезно: hook проверяет именно то, что попадёт в commit.
+
+Если hook хочет работать с staged как с настоящим working tree (например, запустить тесты), нужно `git stash push --keep-index` чтобы временно убрать unstaged. Это сложно делать вручную, поэтому в продакшне используют framework (см. следующий урок).
+
+---
+
+## Главная проблема: hooks не versioned
+
+`.git/hooks/` — это часть служебных файлов Git репо. **Никогда не commit-ится**. То есть:
+
+<DiagramContainer title="Главная проблема: hooks не shareable" color="rose">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="У тебя локально hook есть и работает">
+        <DataBox label="Твоя машина" className="border-emerald-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>.git/hooks/pre-commit (есть)</div>
+            <div>git commit -> проверки работают</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Коллега склонировал репо — у него .git/hooks/ пуст. Hook не работает">
+        <DataBox label="Коллега" className="border-rose-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>.git/hooks/ — пусто (только .sample)</div>
+            <div>git commit -> никаких проверок</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Когда коллега делает `git clone`, у него:
+- `.git/hooks/` создаётся пустым (только `.sample` файлы)
+- Никаких твоих hooks нет
+- Никаких проверок не происходит
+
+Это убивает 90% полезности — суть всех проверок в том, чтобы **все** в команде их использовали. Если только у тебя локально работает, и коллега коммитит без `pre-commit` — проблема в репо всё равно появится.
+
+<Callout type="warning">
+Эта проблема — главная причина существования pre-commit framework, husky, lefthook (следующие уроки). Все они решают одно: "как сделать hooks shared в репо".
+</Callout>
+
+---
+
+## Обходные пути для shared hooks (нативные)
+
+Прежде чем перейти к framework-ам, упомянем нативные обходные пути — они существуют и иногда используются.
+
+### Способ 1: hooks в подпапке репо + symlink/copy
+
+```bash
+# В репо создаём папку
+mkdir scripts/hooks/
+
+# Кладём туда hook (это уже versioned файл!)
+cat > scripts/hooks/pre-commit <<'EOF'
+#!/usr/bin/env bash
+echo "Running pre-commit checks..."
+ruff check .
+EOF
+chmod +x scripts/hooks/pre-commit
+
+git add scripts/hooks/
+git commit -m "add team hooks"
+
+# Каждый коллега после clone делает:
+ln -sf ../../scripts/hooks/pre-commit .git/hooks/pre-commit
+# или
+cp scripts/hooks/pre-commit .git/hooks/pre-commit
+```
+
+Проблема: коллега должен **не забыть** это сделать после clone. Подвешивание "помни сделать" не работает.
+
+### Способ 2: core.hooksPath
+
+Modern Git (>= 2.9) поддерживает настройку `core.hooksPath`:
+
+```bash
+# Все hooks теперь берутся из этой папки, не из .git/hooks/
+git config core.hooksPath scripts/hooks
+```
+
+Это нужно делать каждому, но команду можно автоматизировать через bootstrap-скрипт:
+
+```bash
+# scripts/setup.sh
+#!/usr/bin/env bash
+git config core.hooksPath scripts/hooks
+echo "Hooks configured!"
+
+# Onboarding: ./scripts/setup.sh после clone
+```
+
+Это лучше, чем symlink, но всё равно зависит от выполнения bootstrap-скрипта. Каждый новый коллега должен сделать `./scripts/setup.sh` после `git clone`.
+
+---
+
+## Почему этого недостаточно
+
+Нативные обходные пути имеют проблемы:
+
+1. **Bootstrap зависит от человека** — кто-то забыл `./setup.sh`, hooks не работают, problematic commit прошёл.
+2. **Нет dependency management** — каждый коллега должен иметь все нужные tools установленными (ruff, mypy, black). Версии могут расходиться -> у тебя проходит, у меня — нет.
+3. **Hooks не shareable между репо** — каждый репо пишет свои hook-скрипты. Дублирование.
+4. **Сложно поддерживать** — версии tools апдейтятся, security советы меняются, надо везде обновлять руками.
+5. **No каноничный community** — нет места взять "вот хороший pre-commit hook для проверки секретов".
+
+Эти проблемы решает **pre-commit framework** — Python tool, который ставится один раз, читает декларативный YAML (`.pre-commit-config.yaml`), скачивает указанные hooks из community repo, и автоматически устанавливает в `.git/hooks/`. Один из основополагающих элементов современного Python projects. Следующий урок — целиком про него.
+
+---
+
+## Hands-on: ручной pre-commit hook
+
+Перед тем как перейти к framework, потрогай ручной hook руками — это полезно для понимания механики.
+
+```bash
+# В тестовом репо
+mkdir hooks-demo && cd hooks-demo
+git init
+git add . && git commit -m "init" --allow-empty
+
+# Создаём pre-commit hook: запрещает commit, если есть TODO в staged Python
+cat > .git/hooks/pre-commit <<'EOF'
+#!/usr/bin/env bash
+
+# Найти staged Python файлы
+files=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$')
+
+if [ -z "$files" ]; then
+    exit 0
+fi
+
+# Поиск TODO в новых строках
+found=0
+for f in $files; do
+    if git diff --cached "$f" | grep -E '^\+.*TODO' > /dev/null; then
+        echo "Error: TODO found in $f"
+        found=1
+    fi
+done
+
+if [ $found -eq 1 ]; then
+    echo "Resolve TODOs or remove them before commit"
+    exit 1
+fi
+
+exit 0
+EOF
+
+chmod +x .git/hooks/pre-commit
+
+# Тест: commit с TODO — должен упасть
+echo "x = 1  # TODO: handle edge case" > main.py
+git add main.py
+git commit -m "test todo"
+# Error: TODO found in main.py
+# Resolve TODOs or remove them before commit
+
+# Тест: убрать TODO — commit проходит
+echo "x = 1" > main.py
+git add main.py
+git commit -m "clean"
+# [main abc123] clean
+```
+
+Это работает локально. Но если кто-то склонирует репо — у него этого hook не будет. Он сделает commit с TODO без проверки.
+
+```bash
+# Симулировать клон
+cd ..
+git clone hooks-demo hooks-clone
+cd hooks-clone
+ls .git/hooks/
+# Только *.sample файлы — твой pre-commit не shared!
+```
+
+Это та самая проблема, которая мотивирует переход на pre-commit framework.
+
+---
+
+## Bypass hooks
+
+Иногда нужно сделать commit, обходя проверки (например, экстренный фикс ночью). Все client-side hooks можно обойти через `--no-verify`:
+
+```bash
+# Игнорировать pre-commit и commit-msg
+$ git commit --no-verify -m "emergency fix"
+
+# Игнорировать pre-push
+$ git push --no-verify
+```
+
+Используй ответственно. Если ты делаешь `--no-verify`, ты сознательно обходишь проверки команды. Это иногда оправдано (broken hook, ночной production fix), но если ты делаешь это каждый день — что-то не так с твоими hooks (либо hooks слишком strict, либо ты делаешь плохой код).
+
+<Callout type="tip">
+Хорошие команды настраивают hooks так, чтобы --no-verify был exception, не правилом. Если люди постоянно его используют — hooks нужно пересматривать.
+</Callout>
+
+---
+
+## Cross-link: что дальше
+
+- **Урок 02 этого модуля** — pre-commit framework, решает проблему shared hooks
+- **Урок 03** — conventional commits и commit-msg валидация
+- **Урок 04** — альтернативные frameworks (husky для JS, lefthook polyglot)
+- **Модуль 14, урок 4** — `nbstripout` через pre-commit как реальный use case
+- **Модуль 17** — secret-scanning hooks (gitleaks через pre-commit)
+
+Git hooks — это **mechanism**. Frameworks — это **convention** поверх mechanism. Оба полезны: понимать механику, использовать convention.
+
+---
+
+<KnowledgeCheck
+  question="Ты написал отличный pre-commit hook, который проверяет, что в staged Python файлах нет `print(` и нет hardcoded паролей. Через неделю коллега запушил в main код с `print('debug')` и hardcoded password. Что произошло и как теперь делать правильно?"
+  answer="Проблема: твой hook был в `.git/hooks/pre-commit` — эта директория НЕ versioned, не попадает в clone. Коллега склонировал репо, у него `.git/hooks/` пуст (только .sample), никаких проверок не происходит, commit проходит без блокировки. Это главное ограничение нативных git hooks. Правильный путь: (1) Перейти на pre-commit framework (`pip install pre-commit`) — он хранит hooks declaratively в `.pre-commit-config.yaml` (versioned!), коллега делает `pre-commit install` после clone, hooks автоматически устанавливаются в .git/hooks/. (2) В .pre-commit-config.yaml использовать community hooks для проверки secrets (gitleaks, detect-secrets), для линта (ruff), для notebook outputs (nbstripout). (3) В onboarding doc/README указать: 'After clone: pip install pre-commit && pre-commit install'. (4) Дополнительный safety net — серверные branch protection rules на GitHub: required status checks, CI с теми же tools. Без CI/branch protection даже pre-commit можно обойти через --no-verify. Belt + suspenders: pre-commit для quick local feedback + CI для guaranteed enforcement в PRs."
+/>

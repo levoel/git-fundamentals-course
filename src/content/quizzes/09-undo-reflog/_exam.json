@@ -1,0 +1,89 @@
+{
+  "moduleId": "09-undo-reflog",
+  "title": "Module 09 Exam — Отмена изменений и reflog",
+  "passThreshold": 70,
+  "_meta": {
+    "idPrefix": "git-m09-exam",
+    "description": "6 вопросов покрывающих restore, reset modes, revert vs reset, reflog, git clean"
+  },
+  "questions": [
+    {
+      "id": "git-m09-exam-q1",
+      "type": "multiple-choice",
+      "question": "Полная цепочка для отмены последнего коммита, сохраняя изменения в working tree (хочешь пересоставить коммит)?",
+      "options": [
+        { "id": "a", "text": "git reset --hard HEAD~1" },
+        { "id": "b", "text": "git reset --mixed HEAD~1 (или без флага: git reset HEAD~1). HEAD движется на коммит назад, index перезаписывается состоянием нового HEAD, изменения коммита оказываются в working tree как unstaged. Можно git add по частям и закоммитить заново с правильным набором" },
+        { "id": "c", "text": "git revert HEAD" },
+        { "id": "d", "text": "git restore --staged ." }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Сценарий 'переиграть последний коммит'. --soft оставит изменения в index (можно сразу commit), --mixed оставит в working tree unstaged (можно add по частям, более гибко), --hard уничтожит. (c) revert создаст НОВЫЙ inverse-коммит, не отменит локальный. (d) restore --staged работает с файлами, не с коммитами. Стандартный workflow: --mixed + git add -p + git commit.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m09-exam-q2",
+      "type": "multiple-choice",
+      "question": "Production scenario: PR #117 замержен в main 5 минут назад, dbt-тесты на проде падают. Что делать junior-у?",
+      "options": [
+        { "id": "a", "text": "Cdelat git reset --hard на предыдущий коммит main и форс-пушнуть" },
+        { "id": "b", "text": "(1) Найти merge commit: git log --oneline --merges -5; (2) git revert -m 1 <merge-sha> (или кнопка Revert на GitHub PR); (3) git push origin main; (4) Объявить в Slack. Прод восстановлен за 2 минуты, история целая, никто не пострадал, можно потом исследовать причину и replay фичу через отдельный PR" },
+        { "id": "c", "text": "Удалить PR из истории GitHub" },
+        { "id": "d", "text": "Откатить deployment, не трогая git" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Standard production incident response. Revert merge-коммита через -m 1 (mainline parent — оставить main как было до merge). На GitHub UI есть кнопка Revert прямо на странице merged PR — она создаёт новый PR с обратным патчем, single click. (a) — катастрофа: force-push в защищённую main ломает 10 коллег с локальной main, branch protection rules обычно запрещают force-push. (d) — rollback deployment иногда нужен дополнительно, но git тоже надо откатить (иначе следующий deploy опять зальёт буг).",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m09-exam-q3",
+      "type": "multiple-choice",
+      "question": "Сценарий: я сделал git reset --hard HEAD~5, потеряв 3 часа работы. Что покажет git reflog и как восстановить?",
+      "options": [
+        { "id": "a", "text": "Reflog пуст после reset" },
+        { "id": "b", "text": "Reflog покажет: HEAD@{0}: reset moving to HEAD~5, HEAD@{1}: commit <последняя работа> ... HEAD@{5}: commit <5 коммитов назад>. Восстановление: git reset --hard HEAD@{1} вернёт ветку на коммит-кончик до reset. Или git reset --hard ORIG_HEAD — Git автоматически сохраняет pre-reset HEAD в этот reference" },
+        { "id": "c", "text": "Только git fsck поможет" },
+        { "id": "d", "text": "Сообщить серверу через git pull" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Reflog хранит каждое движение HEAD за ~90 дней. После reset --hard запись 'reset: moving to ...' появляется на HEAD@{0}, и предыдущее состояние оказывается на HEAD@{1}. Двойной способ восстановления: HEAD@{1} (по reflog) или ORIG_HEAD (auto-set перед опасной операцией). Скопировать хэш из reflog тоже работает: git reset --hard <hash>. Reflog локален — никакой server не нужен.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m09-exam-q4",
+      "type": "multiple-choice",
+      "question": "После реализации фичи в dbt репо working tree забит: target/ (compiled SQL), dbt_packages/, logs/, .pytest_cache/, __pycache__/, новый models/marts/new.sql (ещё незакоммитен). Хочешь очистить кэш и оставить новый models/marts/new.sql.",
+      "options": [
+        { "id": "a", "text": "git clean -fdx" },
+        { "id": "b", "text": "git clean -fdX. Большая X = только ignored файлы (target/, dbt_packages/, logs/, .pytest_cache/, __pycache__ всё в .gitignore стандартного dbt-проекта). Малая x в -fdx удалила бы и models/marts/new.sql (он untracked, не ignored). Большая X exclusive — только ignored, новый файл цел" },
+        { "id": "c", "text": "git reset --hard" },
+        { "id": "d", "text": "rm -rf target/ dbt_packages/ logs/" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Различие x vs X критично здесь. x: untracked + ignored = всё что не tracked. X: только ignored. Новый models/marts/new.sql — untracked но не ignored (он рабочий файл). После -fdx он удалится. После -fdX останется. Правильный паттерн перед коммитом в dbt: git clean -fdX чтобы убрать compiled artifacts (которые могут протекать в коммит), сохраняя новый код.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m09-exam-q5",
+      "type": "multiple-choice",
+      "question": "Decision matrix: что использовать для конкретной задачи?",
+      "options": [
+        { "id": "a", "text": "Все команды эквивалентны" },
+        { "id": "b", "text": "Откатить файл к HEAD -> git restore <file>; убрать из staged -> git restore --staged <file>; достать из коммита -> git restore --source=<ref> <file>; сжать N локальных коммитов -> git reset --soft HEAD~N; откатить публичный коммит -> git revert <commit>; удалить untracked -> git clean -fd (или -fdX для только ignored); восстановить потерянное -> git reflog + git reset --hard HEAD@{N}" },
+        { "id": "c", "text": "Reset для всего" },
+        { "id": "d", "text": "Restore для всего" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Cheat sheet полного модуля. Key insights: restore — для файлов (granular), reset — для HEAD/веток (commit-level), revert — для shared истории (создаёт коммит вместо переписывания), clean — для untracked, reflog — recovery после ошибок. Каждый инструмент решает свой класс задач. Anti-pattern: использовать reset --hard где надо revert (на shared веткой) — ломает команду. Использовать reset для отката файла (когда есть restore) — legacy, двусмысленно.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m09-exam-q6",
+      "type": "true-false",
+      "question": "Garbage collection (gc) удаляет unreachable коммиты немедленно после reset --hard.",
+      "correctAnswer": false,
+      "explanation": "Нет. GC работает по расписанию (auto-gc после N операций или manual git gc), и удаляет только объекты прошедшие grace period: reachable записи reflog 90 дней, unreachable объекты ~30 дней (gc.pruneExpire). После reset --hard коммиты становятся unreachable, но остаются в .git/objects ещё ~30 дней — за это время можно восстановить через reflog или fsck --lost-found. Если ты долго не работал с репо (или агрессивно вызвал git gc --prune=now), коммиты могут уже исчезнуть — поэтому критичную recovery делай сразу.",
+      "bloomLevel": "analytical"
+    }
+  ]
+}

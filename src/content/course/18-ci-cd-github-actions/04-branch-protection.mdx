@@ -1,0 +1,541 @@
+---
+title: "Branch protection и CODEOWNERS: блокируем плохие merges"
+description: "GitHub branch protection rules: require PR, require CI status checks, approvals (1-2), require up-to-date with main (tradeoffs), conversation resolution, dismiss stale reviews. CODEOWNERS — auto-request review от team owner. Junior DE first PR — поможет."
+order: 4
+difficulty: "intermediate"
+estimatedTime: 25
+topics: ["branch-protection", "codeowners", "required-checks", "approvals", "stale-reviews", "settings"]
+---
+
+# Branch protection и CODEOWNERS: блокируем плохие merges
+
+Branch protection — это набор правил, который запрещает определённые действия с веткой (обычно `main`). Без него junior может случайно сделать `git push origin main` со сломанным кодом — и production уйдёт в down. С ним такой push физически невозможен.
+
+В этом уроке разберём:
+
+1. Что такое branch protection и зачем.
+2. Конкретные rules: require PR, require status checks, approvals.
+3. Tradeoff "require up-to-date branch" (рискованно или полезно).
+4. CODEOWNERS — автоматическое назначение reviewer.
+5. Что **видит junior** при попытке нарушить правила.
+6. Как настроить через UI и через REST API.
+
+К концу урока — готовый recipe для нового DE-репо.
+
+---
+
+## Зачем branch protection
+
+В мире без branch protection возможны:
+
+- **Direct push в main**: разработчик пушит сразу, обходя PR review.
+- **Force push в main**: переписывание истории, потеря работы коллег.
+- **Merge без review**: код попадает в prod без второй пары глаз.
+- **Merge с red CI**: pytest падает, всё равно merge.
+- **Delete main**: случайно `git push origin --delete main` стирает ветку.
+- **Stale review**: код prim approved утром, после обеда добавил новый commit с уязвимостью — старый approval действителен.
+
+Branch protection — это **GitHub server-side enforcement** правил. Не локальный hook (можно обойти), а отказ на стороне remote.
+
+Доступно в **публичных** репозиториях бесплатно. В **приватных** на Free plan — ограниченно (нужен Pro / Team / Enterprise).
+
+---
+
+## Настройка через UI
+
+Settings -> Branches -> **Add rule**.
+
+**Branch name pattern**: `main` (или `master`, `release/*`, `production`, etc).
+
+Дальше — checkboxes. Разберём каждый.
+
+### 1. Require a pull request before merging
+
+```
+[x] Require a pull request before merging
+  [x] Require approvals: 1
+  [x] Dismiss stale pull request approvals when new commits are pushed
+  [x] Require review from Code Owners
+  [x] Require approval of the most recent reviewable push
+```
+
+**Effect**: нельзя сделать `git push origin main`. Только через PR.
+
+**Require approvals: N** — N reviewers должны approve PR перед merge. Типичные значения:
+
+- `1` для маленьких команд (junior + tech lead).
+- `2` для среднего DE-команда (cross-team review, e.g., data-team + platform-team).
+
+**Dismiss stale approvals** — критично для безопасности. Сценарий:
+
+```
+9:00  Junior пушит "Add etl_users.py" -> PR
+10:00 Tech lead approve
+14:00 Junior пушит "Add helper functions" -> код изменился после approval
+14:01 Junior пытается merge — раньше прошёл бы! С dismiss-stale — approval снят, нужен новый review
+```
+
+Без этой опции — junior может **добавить уязвимость после approval** и merge-ить.
+
+**Require approval of the most recent reviewable push** — даже сильнее: каждый push после approval требует **нового** approval.
+
+### 2. Require status checks to pass
+
+```
+[x] Require status checks to pass before merging
+  [x] Require branches to be up to date before merging
+  
+  Status checks that are required:
+  [x] all-checks-passed         (из CI workflow)
+  [x] dbt-ci                    (из dbt workflow)
+  [x] secret-scan               (gitleaks)
+```
+
+**Status checks** — это имена jobs в workflow. После того как PR open и CI один раз отработал — GitHub знает имена. Их можно добавить как required.
+
+<Callout type="tip">
+В моих workflow я делаю один meta-job `all-checks-passed` (он `needs: [lint, test, type-check]`) и в required ставлю **только его**. Это удобно: если добавляю новый check в CI, не нужно обновлять branch protection rule — `all-checks-passed` уже включает его транзитивно.
+</Callout>
+
+**Require branches to be up to date** — серьёзный tradeoff, разберём отдельно.
+
+### 3. Require conversation resolution
+
+```
+[x] Require conversation resolution before merging
+```
+
+Если reviewer оставил comment «not sure this is right» — нельзя merge, пока conversation не resolved (по кнопке `Resolve conversation`). Защита от того, что комментарий «затерялся».
+
+### 4. Require signed commits (advanced)
+
+```
+[x] Require signed commits
+```
+
+Все commits на ветке должны быть **PGP-signed** или **SSH-signed** (Git 2.34+). Это защита от impersonation: атакующий не сможет сделать `git commit --author="CEO <ceo@company.com>"` от чужого имени.
+
+В DE-team настраивается **редко** — высокий barrier для junior (надо сгенерировать GPG key, добавить в GitHub). Имеет смысл для финтех / security-критичных продуктов.
+
+### 5. Require linear history
+
+```
+[x] Require linear history
+```
+
+Запрещает merge commits в main. Доступны только **squash** и **rebase** merge strategies. Главная история — прямая линия.
+
+DE-команды часто включают: чище `git log`, проще revert (один commit = одна feature).
+
+### 6. Include administrators
+
+```
+[x] Include administrators
+```
+
+Без галки — admin (часто tech lead, CTO) **обходит** все правила. С галкой — даже admin не может direct push.
+
+**Включай** — иначе правила «декоративные», admin может сломать.
+
+### 7. Restrict who can push
+
+```
+[x] Restrict who can push to matching branches
+  Allowed: @data-engineering-team
+```
+
+Ограничивает push в main конкретными people/teams. Полезно для **release branches** (только release-manager пушит в `release/*`).
+
+### 8. Allow / Restrict force pushes
+
+```
+[ ] Allow force pushes
+[x] Restrict deletions
+```
+
+`Allow force pushes` — **никогда** не включать на main. Force push в main удалит работу коллег.
+
+`Restrict deletions` — нельзя удалить main даже с правильными правами. Защита от `git push origin --delete main` accident.
+
+---
+
+## Tradeoff: require up-to-date
+
+Самый дискутируемый rule. Что он делает:
+
+Допустим, junior открыл PR в 10:00. Main продвинулся вперёд в 11:00 (другой PR merge). В 12:00 junior хочет merge свой PR.
+
+| Без require up-to-date | С require up-to-date |
+|---|---|
+| Merge сразу, GitHub автоматически делает merge commit | Сначала **rebase / merge main -> твоя ветка**, потом push, новый CI запуск, merge только после зелёного |
+
+### Преимущества require up-to-date
+
+- **CI запускается на финальном коде**. Гарантия, что main + твои изменения работают вместе.
+- Защита от **semantic conflicts**: твой код использует функцию `foo()`, а в main её переименовали в `foo_new()`. Без rebase merge commit пройдёт компиляцию, **тесты упадут в prod**. С require up-to-date — junior сначала пересобирает с новой main, CI ловит.
+
+### Недостатки require up-to-date
+
+- **Race condition**: junior сделал rebase, CI работает. В это время второй PR merge -> main снова продвинулся -> junior должен rebase **снова**. Если несколько активных PR — это endless rebase loop.
+- **Долго**: rebase + push + CI = 10-20 минут на каждый шаг.
+- **Frustrating для junior**: «Я же только что прошёл CI!».
+
+### Решение: merge queue (GitHub feature, 2024+)
+
+GitHub представил **Merge Queue** — auto-rebase + auto-merge с CI.
+
+Workflow:
+
+1. Junior нажимает «Add to merge queue» (вместо direct merge).
+2. GitHub в очереди rebase-ит на текущий main, запускает CI.
+3. Если зелёный — auto merge. Если красный — queue не блокирует другие PR.
+4. Следующий PR в queue — повторяет.
+
+Это убирает frustration require up-to-date, но сохраняет safety.
+
+```
+[x] Require merge queue
+  Maximum group size: 5    (max PRs в одном CI run)
+  Minimum group size: 1
+  Wait time before merge: 5 min
+```
+
+Для DE-команд 5+ человек — strongly recommend.
+
+---
+
+## CODEOWNERS файл
+
+Файл `.github/CODEOWNERS` определяет, **кто** должен ревьюить какой код:
+
+```
+# .github/CODEOWNERS
+
+# Глобальный default — все PR требуют review от tech lead
+* @company/tech-leads
+
+# Airflow DAGs — DE-команда
+/dags/                @company/data-engineering
+/dags/marts/          @company/data-engineering @company/analytics-engineering
+
+# dbt models — отдельная команда analytics engineering
+/models/              @company/analytics-engineering
+/models/finance/      @company/analytics-engineering @finance-data-owner
+
+# Infrastructure — DevOps + DE
+/terraform/           @company/devops @company/data-engineering
+/.github/workflows/   @company/devops
+
+# Documentation — anyone can approve
+/docs/                @company/tech-leads
+README.md             @company/tech-leads
+
+# Security-sensitive — обязательный security team
+/dags/security/       @company/security-team
+**/auth.py            @company/security-team
+```
+
+### Как это работает
+
+PR изменяет `/dags/marts/customers.py`. GitHub проверяет CODEOWNERS:
+
+1. Глобальное правило `*` -> `@company/tech-leads`.
+2. `/dags/` -> `@company/data-engineering`.
+3. `/dags/marts/` -> `@company/data-engineering @company/analytics-engineering`.
+
+**Последний matching rule выигрывает**: для этого PR требуется review от `data-engineering` ИЛИ `analytics-engineering` (любой member team).
+
+GitHub **автоматически** добавит обе team в reviewer list. В UI:
+
+```
+Reviewers
+  @company/data-engineering         (requested, code owner)
+  @company/analytics-engineering    (requested, code owner)
+```
+
+### "Require review from Code Owners"
+
+В branch protection включи это. Тогда:
+- PR не может быть merge без approval от **code owner**, даже если кто-то другой approve-ил.
+- Approval от non-owner — не считается для CODEOWNERS rule.
+
+Это инвариант: «код в `/models/finance/` нельзя merge без approval от finance team».
+
+### Best practices для CODEOWNERS
+
+**1. Используй teams, не individuals**. `@company/data-engineering` — стабильно. `@junior-dev-1` — что будет, когда юзер уволится?
+
+**2. Не делай слишком specific**. `*.py` — bad (everyone). Лучше иерархическая структура.
+
+**3. Учитывай direction development**. Junior должен **видеть** CODEOWNERS — это карта владения.
+
+**4. Add as `.github/CODEOWNERS`**, не в корне. GitHub читает оба места, но стандарт — `.github/`.
+
+**5. Test syntax**: `gh codeowners` (GitHub CLI) проверит файл на syntax errors.
+
+---
+
+## Что видит junior DE при нарушениях
+
+Это полезно показать на screenshot-level. Когда junior пытается:
+
+### Direct push в main
+
+```bash
+$ git push origin main
+To github.com:org/repo.git
+ ! [remote rejected] main -> main (protected branch hook declined)
+error: failed to push some refs to 'github.com:org/repo.git'
+
+remote: error: GH006: Protected branch update failed for refs/heads/main.
+remote: error: 2 of 5 required status checks are expected.
+remote: error: Required status check "ci/lint" is expected.
+```
+
+GitHub отказывает. Junior понимает: нужно создать ветку и PR.
+
+### Merge без approval
+
+В UI кнопка «Merge pull request» серая:
+
+```
+Review required
+At least 1 approving review is required by reviewers with write access.
+
+Required status checks haven't passed yet
+  - ci/test (expected)
+  - all-checks-passed (expected)
+```
+
+Junior видит **точно что нужно**: approval + green CI.
+
+### Force push с changed history
+
+```bash
+$ git push --force origin main
+remote: error: GH006: Protected branch update failed for refs/heads/main.
+remote: error: Cannot force-push to a protected branch
+```
+
+Не дано даже admin (если "Include administrators" включено).
+
+### Code Owner check
+
+```
+[ ] At least 1 approving review is required by reviewers with write access.
+[x] Some required reviewers have not yet provided a review
+   - Awaiting review from: @company/analytics-engineering
+```
+
+Approval от random person — не помогает. Нужно — от code owner.
+
+<Callout type="tip">
+Если junior спрашивает «почему не могу merge?», скажи: «Прочитай error message внимательно. GitHub точно говорит, что нужно». Это привычка читать ошибки — главный skill DE.
+</Callout>
+
+---
+
+## Recommended setup для нового DE-репо
+
+Стандартный recipe — copy для нового проекта.
+
+### branch protection на main
+
+```
+Pattern: main
+
+[x] Require a pull request before merging
+  [x] Require approvals: 1
+  [x] Dismiss stale approvals on new commits
+  [x] Require review from Code Owners
+
+[x] Require status checks to pass
+  [x] Require branches to be up to date
+  Required: all-checks-passed
+
+[x] Require conversation resolution
+[x] Require linear history
+[x] Restrict deletions
+[x] Include administrators
+
+[ ] Allow force pushes
+```
+
+### CODEOWNERS (минимальный)
+
+```
+# .github/CODEOWNERS
+
+# Все PR — review от tech leads (default)
+* @company/tech-leads
+
+# DAGs — DE team
+/dags/                  @company/data-engineering
+
+# dbt — Analytics engineering
+/models/                @company/analytics-engineering
+/macros/                @company/analytics-engineering
+
+# Infrastructure
+/.github/workflows/     @company/devops @company/tech-leads
+/terraform/             @company/devops
+
+# Critical configs — extra approval
+/dbt_project.yml        @company/analytics-engineering @company/tech-leads
+/airflow.cfg            @company/data-engineering @company/devops
+```
+
+### CI integration
+
+В `ci.yml` workflow финальный job `all-checks-passed` — он required:
+
+```yaml
+all-checks-passed:
+  runs-on: ubuntu-latest
+  needs: [lint, type-check, test, secret-scan, dbt-compile]
+  if: always()
+  steps:
+    - run: |
+        if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
+          exit 1
+        fi
+```
+
+Один required check -> автоматом все нижние passing.
+
+---
+
+## Branch protection через REST API
+
+Для DevOps / IaC — настройка через API:
+
+```bash
+$ gh api -X PUT /repos/org/repo/branches/main/protection \
+  --input - << 'EOF'
+{
+  "required_status_checks": {
+    "strict": true,
+    "contexts": ["all-checks-passed"]
+  },
+  "enforce_admins": true,
+  "required_pull_request_reviews": {
+    "dismiss_stale_reviews": true,
+    "require_code_owner_reviews": true,
+    "required_approving_review_count": 1
+  },
+  "restrictions": null,
+  "required_linear_history": true,
+  "allow_force_pushes": false,
+  "allow_deletions": false,
+  "required_conversation_resolution": true
+}
+EOF
+```
+
+Или через Terraform:
+
+```hcl
+resource "github_branch_protection" "main" {
+  repository_id = github_repository.repo.node_id
+  pattern       = "main"
+
+  required_status_checks {
+    strict   = true
+    contexts = ["all-checks-passed"]
+  }
+
+  required_pull_request_reviews {
+    dismiss_stale_reviews           = true
+    require_code_owner_reviews      = true
+    required_approving_review_count = 1
+  }
+
+  enforce_admins              = true
+  required_linear_history     = true
+  allow_force_pushes          = false
+  allow_deletions             = false
+}
+```
+
+Это даёт **версионируемые** branch protection rules — изменения через PR в IaC repo.
+
+---
+
+## Rulesets (новая фича, 2024+)
+
+GitHub представил **Rulesets** — replacement для branch protection с большей гибкостью.
+
+Преимущества:
+
+- Один ruleset может покрывать **несколько** веток (regex pattern).
+- Лучше UI.
+- Поддержка **bypass roles** (например, "only @sre team can bypass on incidents").
+- Imported / exported as JSON.
+
+Для junior DE сейчас — branch protection ок, rulesets лучше для maintenance в большом org.
+
+Settings -> Rules -> New ruleset. Большинство опций — те же, что в branch protection.
+
+---
+
+## Попробуй сам
+
+Имитируй failed scenarios в твоём репо:
+
+```bash
+# 1. Создай PR
+$ git checkout -b test/branch-protection
+$ echo "test" >> README.md
+$ git commit -am "Test commit"
+$ git push -u origin test/branch-protection
+
+# Через UI открой PR в main
+
+# 2. Попробуй merge до approval
+# UI скажет: "Review required"
+
+# 3. Approval (другой аккаунт или request review)
+# Тогда merge доступен (если CI green)
+
+# 4. После merge — попробуй direct push в main
+$ git checkout main
+$ git pull
+$ echo "direct" >> README.md
+$ git commit -am "Direct push"
+$ git push origin main
+# Должна быть ошибка
+```
+
+---
+
+## DE-specific gotcha: CODEOWNERS + dbt models
+
+В большой dbt-проекте часто разные владельцы у разных domains:
+
+```
+/models/staging/        @company/data-engineering    # raw sources, ingest
+/models/intermediate/   @company/analytics-engineering
+/models/marts/finance/  @company/finance-analytics
+/models/marts/marketing/ @company/marketing-analytics
+/models/marts/product/  @company/product-analytics
+```
+
+Junior из data-engineering хочет сделать PR в `models/marts/finance/`. CODEOWNERS требует approval от finance-analytics team. Junior **не должен** делать merge без их review — это enforced.
+
+Это правильно: финансовые модели влияют на отчётность, владелец domain должен проверить.
+
+Tradeoff: cross-team work становится медленнее. Решение — **dual ownership**:
+
+```
+/models/marts/finance/   @company/analytics-engineering @company/finance-analytics
+```
+
+ИЛИ — finance team review approves быстро через async Slack ping.
+
+---
+
+## Killer takeaway
+
+Branch protection — server-side enforcement правил на main: (1) require PR с approval; (2) require CI status checks; (3) dismiss stale approvals на новый push; (4) include administrators (нельзя обходить); (5) restrict deletions + no force push. CODEOWNERS — auto-request review от team owner; используй teams, не individuals; "Require review from Code Owners" обязательно. Junior увидит точные error messages при попытке нарушить — это **обучающий механизм**. Setup через UI или REST API / Terraform для IaC. Для команд 5+ — Merge Queue убирает frustration require-up-to-date.
+
+<KnowledgeCheck quizSlug="18-ci-cd-github-actions/04-branch-protection" />

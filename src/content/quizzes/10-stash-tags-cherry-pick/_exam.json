@@ -1,0 +1,89 @@
+{
+  "moduleId": "10-stash-tags-cherry-pick",
+  "title": "Module 10 Exam — Stash, теги, cherry-pick",
+  "passThreshold": 70,
+  "_meta": {
+    "idPrefix": "git-m10-exam",
+    "description": "6 вопросов покрывающих stash workflow, lightweight vs annotated tags, cherry-pick backport, format-patch/am"
+  },
+  "questions": [
+    {
+      "id": "git-m10-exam-q1",
+      "type": "multiple-choice",
+      "question": "Сценарий: пишешь feature, 3 файла modified, есть untracked dags/new_dag.py. Tech lead просит срочный hotfix. Корректные шаги?",
+      "options": [
+        { "id": "a", "text": "git stash push, switch main, fix, switch обратно, stash pop" },
+        { "id": "b", "text": "(1) git stash push -u -m 'WIP feature' (флаг -u включает untracked, иначе new_dag.py перейдёт на main!); (2) git switch -c hotfix main; (3) fix + commit + push + PR; (4) git switch feature/...; (5) git stash pop. Полный context switch за 30 секунд, ничего не потеряется" },
+        { "id": "c", "text": "git commit -am 'WIP' и потом amend" },
+        { "id": "d", "text": "Закрыть IDE, переключиться, потом восстановить" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Главная ловушка: без -u untracked файлы остаются на диске и переходят на main при git switch (Git не считает untracked за 'изменения'). Это может привести к коммиту feature файла на main как part of hotfix — катастрофа. -u гарантирует что stash включает абсолютно всё: tracked modifications + untracked files. Полный паттерн safe context switch.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m10-exam-q2",
+      "type": "multiple-choice",
+      "question": "Производственный релиз dbt-репо v2.3.1. Команды для создания и публикации тега?",
+      "options": [
+        { "id": "a", "text": "git tag v2.3.1 && git push" },
+        { "id": "b", "text": "git tag -a v2.3.1 -m 'Hotfix: fix customer LTV calculation' (annotated с message); git push origin v2.3.1 (или git push --follow-tags). Annotated обязательно для production: метаданные tagger+date+message, можно GPG sign, GitHub Releases распознаёт. Push явный — по умолчанию tags не пушатся" },
+        { "id": "c", "text": "git tag v2.3.1 && git push --tags" },
+        { "id": "d", "text": "GitHub UI достаточно" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Production release правила: (1) annotated (-a) для метаданных; (2) message (-m) с описанием релиза; (3) явный push (--follow-tags или origin <tag>). Lightweight теги (просто git tag без -a) для production — anti-pattern: нет audit trail, GitHub Releases не подхватит автоматически, нельзя GPG sign. Best practice: git config push.followTags true чтобы annotated теги пушились с git push automatically.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m10-exam-q3",
+      "type": "multiple-choice",
+      "question": "Hotfix замержен в main (PR #234 для Airflow 2.10). Та же ошибка есть в release/airflow-2.5.x. Cherry-pick процедура?",
+      "options": [
+        { "id": "a", "text": "Скопировать diff вручную в release ветке" },
+        { "id": "b", "text": "(1) git switch release/airflow-2.5.x; (2) git cherry-pick -x <merge-commit-sha-of-PR-234> (для PR squash-merged это будет fix commit; для regular merge — обычно -m 1 нужен дополнительно); (3) разрешить конфликты если API DAG-а изменилось между версиями; (4) git push + создать PR на release/airflow-2.5.x. -x добавляет audit footer '(cherry picked from commit XXX)' — видно откуда backport" },
+        { "id": "c", "text": "git merge main в release/airflow-2.5.x" },
+        { "id": "d", "text": "git reset release branch на нужный коммит" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Стандартный backport pattern. cherry-pick точно для одного коммита, -x для audit. Альтернатива merge main -> release принесла бы все новые v2.10 фичи в release v2.5 (катастрофа: release должна быть stable). Cherry-pick = точечное применение. Конфликт возможен если код вокруг fix-а различается (например, API DAG-а изменилось в v2.10) — разрешить руками. Hotfix PR на release-ветку проходит обычный review.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m10-exam-q4",
+      "type": "multiple-choice",
+      "question": "Различие лёгкого и аннотированного тега для CI deployment-триггера?",
+      "options": [
+        { "id": "a", "text": "CI работает только с lightweight" },
+        { "id": "b", "text": "Многие CI/CD pipelines триггерятся на push tag и обрабатывают metadata: annotated tag даёт message (для changelog), tagger (для notifications), date (для deployment audit). Lightweight теги обычно работают для simple trigger, но без message -> пустой changelog, no audit info. Best practice: всегда annotated для CI" },
+        { "id": "c", "text": "Lightweight быстрее" },
+        { "id": "d", "text": "CI не различает их" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "CI-pipelines (GitHub Actions, GitLab CI, Jenkins) часто извлекают tag message для генерации changelog в release notes. Annotated даёт богатый контекст: tagger, date, message, signature. Lightweight — голый ref, бедная информация. Также annotated tags корректно обрабатываются GitHub Releases (auto-create draft release), git describe (находит ближайший annotated по дефолту), package managers (npm/pip с signed releases).",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m10-exam-q5",
+      "type": "multiple-choice",
+      "question": "Опасность cherry-pick для долгоживущих параллельных веток (main и release/v1.x)?",
+      "options": [
+        { "id": "a", "text": "Cherry-pick абсолютно безопасен" },
+        { "id": "b", "text": "Дубликаты коммитов с разными SHA на разных ветках. При попытке потом merge main -> release/v1.x: (1) если diff cherry-picked точно совпадает с original — Git может распознать no-op; (2) если был conflict resolution при cherry-pick — diff чуть другой, merge снова просит разрешить тот же patch. Merge-base не двигается. Долгосрочное использование cherry-pick для систематической синхронизации создаёт boilerplate manual work" },
+        { "id": "c", "text": "Cherry-pick переписывает SHA удалённо" },
+        { "id": "d", "text": "Cherry-pick запрещает дальнейший merge" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Cherry-pick — для точечных backports, не для систематической sync. Долгий параллельный development с регулярным cherry-pick порождает duplicate-pain: те же изменения в разных коммитах, merge-base в общем предке (далеко в прошлом), будущие merge — multi-conflict resolution. Альтернатива для систематической sync: merge с грамотной стратегией веток, или регулярные rebases. Cherry-pick — острый нож, не молоток.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m10-exam-q6",
+      "type": "true-false",
+      "question": "git format-patch + git am — основной workflow для всех современных DE команд.",
+      "correctAnswer": false,
+      "explanation": "Нет. Современный DE стандарт (Airflow, dbt, SaaS компании 2020+) — GitHub/GitLab Pull Requests с inline review, CI, branch protection. Patches остались в специфических областях: Linux kernel, некоторые Apache projects (хотя большинство мигрировали на PR), edge cases offline transfer. Junior DE 99% работы с PR. Знание format-patch/am полезно как edge tool — передать fix коллеге без shared remote, contributing в specific open-source с mailing list workflow.",
+      "bloomLevel": "conceptual"
+    }
+  ]
+}

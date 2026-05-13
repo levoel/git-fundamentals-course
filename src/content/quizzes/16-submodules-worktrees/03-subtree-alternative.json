@@ -1,0 +1,63 @@
+{
+  "lessonSlug": "16-submodules-worktrees/03-subtree-alternative",
+  "moduleId": "16-submodules-worktrees",
+  "_meta": {
+    "idPrefix": "git-m16-03",
+    "description": "Quiz for lesson 03 of module 16 — git subtree"
+  },
+  "questions": [
+    {
+      "id": "git-m16-03-q1",
+      "type": "multiple-choice",
+      "question": "Чем git subtree принципиально отличается от submodule?",
+      "options": [
+        { "id": "a", "text": "Subtree быстрее submodule, в остальном идентично" },
+        { "id": "b", "text": "Submodule: parent хранит ССЫЛКУ (gitlink с SHA) на чужой репо, файлы остаются в чужой истории. Subtree: содержимое чужого репо МЕРДЖИТСЯ в parent — реальные файлы в parent tree, история сливается. Для пользователей subtree выглядит как обычная директория без специальной механики (no gitlinks, no .gitmodules, no detached HEAD)" },
+        { "id": "c", "text": "Subtree — старая версия submodule" },
+        { "id": "d", "text": "Subtree только для маленьких репо" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Архитектурные различия: (1) Submodule — gitlink + .gitmodules. Parent в tree содержит ссылку (mode 160000) на commit чужого репо. Файлы фактически в .git/modules/<name>/, видны в working tree через checkout mechanism. История submodule — отдельная entity. После clone parent submodule пуст пока не сделаешь init/update. (2) Subtree — файлы напрямую в parent. После `git subtree add` чужие файлы коммитятся в parent как обычные blob-ы и trees. Тries parent содержит обычные blob/tree, не gitlinks. История чужого репо мерджится в parent. Никаких .gitmodules. С точки зрения нового клонера: обычная директория с обычными файлами, никаких extra шагов. Это zero onboarding cost. Главное преимущество subtree. (3) Workflow различия: submodule — strict SHA pinning, parent явно говорит 'я использую commit X шаred-utils'; subtree — содержимое в parent, обновления через `git subtree pull --squash`, push обратно через `git subtree push` (медленный). (4) Trade-offs: subtree проще для consumers (zero setup), submodule strict pinning лучше для critical reproducibility. Subtree раздувает parent с течением времени, submodule остаётся компактным.",
+      "studyHint": "Повторите урок 03 — раздел 'Mental model: subtree merges история'",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m16-03-q2",
+      "type": "multiple-choice",
+      "question": "Какие 3 базовые команды subtree workflow?",
+      "options": [
+        { "id": "a", "text": "subtree init, subtree commit, subtree merge" },
+        { "id": "b", "text": "(1) `git subtree add --prefix=<path> <URL> <branch> --squash` — однократно добавить чужой репо в parent; (2) `git subtree pull --prefix=<path> <URL> <branch> --squash` — обновить subtree до latest, мердж как обычный pull; (3) `git subtree push --prefix=<path> <URL> <branch>` — extract изменений в subtree из истории parent и push в upstream (медленно, через subtree split под капотом)" },
+        { "id": "c", "text": "Только subtree pull" },
+        { "id": "d", "text": "subtree clone и subtree push" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Полный subtree workflow: (1) ADD — однократное подключение: `git subtree add --prefix=shared-utils https://github.com/acme/shared-utils.git main --squash`. Параметры: --prefix указывает путь в parent (директория для subtree), URL и branch — что добавляется. --squash критично — сворачивает всю историю чужого репо в один commit-snapshot (без него вся история разворачивается в parent). После add: реальные файлы в parent/shared-utils/, обычные blob/tree в индексе, один squashed commit + merge commit в log. (2) PULL — обновление: `git subtree pull --prefix=shared-utils <URL> main --squash`. Fetches upstream, merge изменений с ограничением на prefix. Если есть locallых изменений в subtree — может быть merge conflict (resolve как обычный). С --squash каждый pull = один новый squashed commit + merge. (3) PUSH — отправка локальных изменений subtree обратно в upstream: `git subtree push --prefix=shared-utils <URL> main`. Под капотом: subtree split (создаёт virtual branch с историей только этого prefix) + push этого branch. МЕДЛЕННО на больших репо (split проходит всю историю). Используй редко, только для contribution upstream. Bonus команда: `git subtree split --prefix=<path> -b <new-branch>` — extract subtree history в отдельный branch (без push). Полезно для testing или manual workflows. Setup для удобства: `git remote add shared-utils-origin <URL>` чтобы не повторять полный URL каждый раз.",
+      "studyHint": "Повторите урок 03 — раздел 'Команды subtree'",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m16-03-q3",
+      "type": "multiple-choice",
+      "question": "В каком сценарии subtree лучше submodule?",
+      "options": [
+        { "id": "a", "text": "Всегда — submodule outdated" },
+        { "id": "b", "text": "Subtree лучше когда: (1) Read-mostly use case (потребляешь updates, occasionally contribute back); (2) Хочется zero onboarding cost — коллеги клонируют parent и всё работает immediately; (3) External репо небольшой; (4) OK с merge commits в log при обновлениях; (5) Команда уже знает submodule pain и хочет проще workflow. Submodule лучше когда: strict SHA pinning критичен, часто contribute back, big external repo" },
+        { "id": "c", "text": "Subtree только для open-source" },
+        { "id": "d", "text": "Только для маленьких файлов" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Decision tree subtree vs submodule: ВЫБИРАЙ SUBTREE когда: (1) Single consumer или small group — нет много projects требующих strict synchronization. (2) Read-mostly — pull updates с upstream, иногда fix locally. Contribution back редкое (subtree push медленный). (3) Хочется zero friction для consumers — нового члена команды clone-ит, всё работает без `git submodule update --init`. (4) External репо разумного размера (не GB). (5) Команда не освоила или не хочет осваивать submodule mechanics (detached HEAD, --recurse-submodules, push.recurseSubmodules). Реальные DE сценарии для subtree: vendoring open-source library не на PyPI, shared dbt-macros от другой команды, маленькая shared lib для одной DE-команды. ВЫБИРАЙ SUBMODULE когда: (1) Multiple projects (3+) shared library — strict SHA pinning важен для reproducibility deploys. (2) Большой external репо — не хочется blow up parent. (3) Frequent contribution back — submodule workflow проще для push (`cd submodule && git push`). (4) Separate ownership teams — platform team owns lib repo, DE teams consume. Реальные сценарии для submodule: airflow-plugin репо для 5 dag-projects, shared protobuf schemas для multiple services, big shared utilities. Третий путь: pip-package (если library distributable through standard packaging), monorepo (если tightly coupled).",
+      "studyHint": "Повторите урок 03 — раздел 'Когда subtree, когда submodule'",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m16-03-q4",
+      "type": "true-false",
+      "question": "Опция --squash при `git subtree add` и `git subtree pull` сворачивает всю историю external репо в один merge commit. Без --squash вся история upstream разворачивается в твою parent, что засоряет git log тысячами чужих commits.",
+      "correctAnswer": true,
+      "explanation": "Точно. Без --squash subtree merges всю историю external репо как обычный merge — все commits становятся частью parent's git log. Если subtree имеет 1000 коммитов в своей истории, после `git subtree add` твой `git log --all` показывает все эти 1000 + твои + 1 merge commit. С --squash: вся история external свернута в один 'Squashed shared-utils content from commit <SHA>' commit, плюс один merge commit, который связывает с parent's main. Итого +2 commits на каждое subtree add/pull, не +1000. Для повседневной работы --squash в 99% случаев предпочтителен: (1) Сохраняет parent's git log читаемым — не засоряется чужой историей. (2) Уменьшает size .git/ (хотя содержимое blob-ов одинаковое). (3) Понятнее для PR review — '+1 commit (squashed external update)' vs '+50 commits (mixed external history)'. Минус --squash: теряется detailed история external — если нужно посмотреть individual commits subtree, нужно идти в external репо (упомянутый в squashed commit message SHA). Для большинства DE use cases это OK — internal team может посмотреть в shared-utils репо напрямую. Без --squash используется только для специальных случаев — например, full migration legacy репо в новый (где хочется сохранить полную историю). Mnemonic: subtree add без --squash — это antipattern в production.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

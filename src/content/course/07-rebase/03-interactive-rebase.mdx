@@ -1,0 +1,435 @@
+---
+title: "Interactive rebase: переписать историю"
+description: "git rebase -i: pick, reword, edit, squash, fixup, drop; --autosquash и --fixup для чистого PR"
+order: 3
+difficulty: "intermediate"
+estimatedTime: 25
+topics: ["Git", "rebase", "interactive", "squash", "fixup"]
+---
+
+# Interactive rebase: переписать историю
+
+`git rebase -i` — наверное, самая мощная команда в Git. Она позволяет тебе **переписать свои коммиты**: объединить, разделить, переименовать, удалить, переставить местами. Это твой главный инструмент для подготовки чистого PR: вместо 12 wip-коммитов с опечатками показать 3 логичных feature commit.
+
+В этом уроке мы разбираем все команды interactive rebase, рассмотрим типичные сценарии (squash, fixup), и поговорим о паре `git commit --fixup` + `git rebase --autosquash` — самой быстрой формуле для чистой истории.
+
+---
+
+## Базовый запуск
+
+```bash
+git rebase -i HEAD~5
+```
+
+Это означает: "запусти interactive rebase для последних 5 коммитов". Git откроет редактор с примерно таким текстом:
+
+```
+pick 9876543 wip: trying spark job
+pick abc1234 fix typo
+pick def5678 add tests
+pick fff7777 fix tests
+pick eee8888 update docs
+
+# Rebase abc1234..eee8888 onto a1b2c3d (5 commands)
+#
+# Commands:
+# p, pick <commit> = use commit
+# r, reword <commit> = use commit, but edit the commit message
+# e, edit <commit> = use commit, but stop for amending
+# s, squash <commit> = use commit, but meld into previous commit
+# f, fixup <commit> = like "squash", but discard this commit's log message
+# x, exec <command> = run command using shell
+# b, break = stop here (continue rebase later with 'git rebase --continue')
+# d, drop <commit> = remove commit
+# l, label <label> = label current HEAD with a name
+# t, reset <label> = reset HEAD to a label
+# m, merge [-C <commit> | -c <commit>] <label> [# <oneline>]
+```
+
+Заметь **порядок** — коммиты идут от **старого к новому** (сверху вниз), в обратном порядке относительно `git log`. Это важно: ты редактируешь "сценарий" применения, а не итоговый log.
+
+Меняешь команды слева, сохраняешь, закрываешь редактор. Git выполнит твой сценарий.
+
+---
+
+## Команды rebase -i
+
+### `pick` (по дефолту)
+
+"Возьми этот коммит как есть". Это no-op — Git применит его без изменений.
+
+### `reword`
+
+"Возьми коммит, но дай мне переписать сообщение".
+
+```
+reword 9876543 wip: trying spark job
+pick abc1234 fix typo
+```
+
+После закрытия редактора Git остановится на коммите 9876543, откроет ещё один редактор для нового сообщения. Сохраняешь — он применяется с новым сообщением, и rebase продолжается.
+
+Полезно: подправить "wip" на "feat: add spark job for hourly aggregation".
+
+### `edit`
+
+"Возьми коммит, но остановись после него — я хочу что-то поправить в файлах".
+
+```
+edit 9876543 wip: trying spark job
+pick abc1234 fix typo
+```
+
+Git применит коммит и остановится. Ты в этом состоянии можешь:
+
+- Поправить файлы.
+- `git add` изменения.
+- `git commit --amend` — добавить изменения в этот коммит.
+- ИЛИ `git commit` — создать новый коммит после этого.
+- Завершить: `git rebase --continue`.
+
+Это для случая "я в коммите забыл закоммитить файл, или сделал опечатку в коде".
+
+### `squash`
+
+"Объедини этот коммит с предыдущим". То есть берёт diff текущего коммита, добавляет к предыдущему, объединяет сообщения.
+
+```
+pick 9876543 wip: spark job
+squash abc1234 fix typo
+```
+
+Результат: один коммит с изменениями обоих. Git откроет редактор для финального сообщения, показав оба original message — ты их объединяешь как хочешь.
+
+### `fixup`
+
+Как `squash`, но **игнорирует сообщение** текущего коммита. Полезно, когда коммит-фикс не несёт смысловой нагрузки (просто "fix typo" поверх предыдущего).
+
+```
+pick 9876543 add spark job
+fixup abc1234 fix typo
+```
+
+Результат: один коммит "add spark job" с включёнными изменениями обоих.
+
+### `drop`
+
+"Полностью удали этот коммит".
+
+```
+pick 9876543 add spark job
+drop abc1234 oops accidentally committed .env
+pick def5678 add tests
+```
+
+Удалит средний коммит из истории. Внимание: его изменения тоже исчезнут, как будто его не было.
+
+### `exec`
+
+"Выполни команду здесь". Полезно для запуска тестов между коммитами:
+
+```
+pick 9876543 add spark job
+exec pytest tests/
+pick abc1234 add tests
+exec pytest tests/
+```
+
+Если команда падает с non-zero exit code, rebase останавливается. Можешь поправить и `git rebase --continue`.
+
+Это редко в быту, но очень полезно при крупных rebase: "хочу убедиться, что после каждого коммита тесты зелёные".
+
+### `break`
+
+"Остановись здесь". Без действия — просто пауза. Полезно для ручной проверки на промежуточном шаге.
+
+### Перемещение коммитов
+
+Помимо команд можно **поменять порядок строк**:
+
+```
+pick def5678 add tests        ← был третьим, теперь первый
+pick 9876543 wip: spark job
+pick abc1234 fix typo
+```
+
+Git применит коммиты в новом порядке. Это работает, если коммиты не зависят друг от друга. Если зависят (например, тесты ссылаются на функции из предыдущего коммита) — будет конфликт.
+
+---
+
+## Сценарий 1: squash чёткой работы
+
+У тебя 5 коммитов на feature ветке:
+
+```bash
+$ git log --oneline
+fff8888 fix test imports
+eee7777 add unit tests
+ddd6666 fix typo in docstring
+ccc5555 add spark job implementation
+bbb4444 wip: scaffold spark job
+```
+
+Перед PR хочешь объединить в 2 логичных коммита:
+
+1. "feat: add spark job for hourly aggregation"
+2. "test: cover spark job edge cases"
+
+Запускаешь:
+
+```bash
+git rebase -i HEAD~5
+```
+
+Меняешь:
+
+```
+pick bbb4444 wip: scaffold spark job
+fixup ccc5555 add spark job implementation
+fixup ddd6666 fix typo in docstring
+pick eee7777 add unit tests
+fixup fff8888 fix test imports
+
+reword bbb4444 wip: scaffold spark job
+# Это reword bbb4444 — но я уже сказал fixup для ccc/ddd. Reword изменим первый.
+```
+
+Подожди, давай аккуратнее. Хочу первые три коммита объединить и переименовать первый — используй `reword` для первого, и `fixup` для двух следующих:
+
+```
+reword bbb4444 wip: scaffold spark job
+fixup ccc5555 add spark job implementation
+fixup ddd6666 fix typo in docstring
+reword eee7777 add unit tests
+fixup fff8888 fix test imports
+```
+
+После сохранения:
+
+1. Git применит bbb4444 и предложит переписать его сообщение — пишешь "feat: add spark job for hourly aggregation".
+2. Git применит ccc5555 как fixup — без вопросов.
+3. Git применит ddd6666 как fixup.
+4. Git предложит переписать eee7777 — пишешь "test: cover spark job edge cases".
+5. Git применит fff8888 как fixup.
+
+Результат:
+
+```bash
+$ git log --oneline
+zzz9999 test: cover spark job edge cases
+yyy8888 feat: add spark job for hourly aggregation
+```
+
+Чисто. Готово к PR.
+
+---
+
+## Сценарий 2: `--fixup` + `--autosquash`
+
+Это **самый частый и удобный** workflow для подготовки feature к PR.
+
+Допустим, у тебя есть основной коммит `add spark job`, и за следующие два дня ты добавил два маленьких фикса. Вместо того чтобы делать обычные коммиты, делай **fixup-commits**:
+
+```bash
+git commit --fixup=<sha-основного>
+```
+
+Это создаёт коммит со специальным сообщением `fixup! <message-основного>`. Когда потом сделаешь `rebase --autosquash`, Git автоматически распознает эти fixup-коммиты и поставит их рядом с основным как `fixup` команды.
+
+Полный пример:
+
+```bash
+# Основной коммит
+git commit -m "feat: add spark job"   # SHA: abc1234
+
+# ... работаю дальше, добавляю функциональность ...
+git commit -m "test: add spark tests"   # SHA: def5678
+
+# Замечаю баг в spark job
+git add src/spark.py
+git commit --fixup=abc1234
+# Создан коммит "fixup! feat: add spark job"
+
+# Замечаю ещё опечатку
+git add src/spark.py
+git commit --fixup=abc1234
+# Ещё один "fixup! feat: add spark job"
+
+# Замечаю баг в тестах
+git add tests/test_spark.py
+git commit --fixup=def5678
+
+# Теперь история:
+# pick abc1234 feat: add spark job
+# pick fixup! feat: add spark job
+# pick def5678 test: add spark tests
+# pick fixup! feat: add spark job
+# pick fixup! test: add spark tests
+
+# Перед PR — squash fixup'ы в их targets автоматически
+git rebase -i --autosquash HEAD~5
+```
+
+Git откроет редактор уже с **правильным сценарием**:
+
+```
+pick abc1234 feat: add spark job
+fixup ?????? fixup! feat: add spark job
+fixup ?????? fixup! feat: add spark job
+pick def5678 test: add spark tests
+fixup ?????? fixup! test: add spark tests
+```
+
+Просто сохраняешь — Git применяет. Получаешь чистые два коммита.
+
+<Callout type="tip">
+Включи `rebase.autoSquash = true` глобально, чтобы `git rebase -i` всегда включал `--autosquash`. Это `git config --global rebase.autoSquash true` — забудь и наслаждайся.
+</Callout>
+
+Дополнительно можно настроить `pull.rebase = interactive` — тогда `git pull` будет открывать `rebase -i` (полезно редко, но иногда нужно).
+
+---
+
+## Сценарий 3: разделить большой коммит
+
+Иногда ты сделал жирный коммит, в котором "и feature, и fix, и refactor". Хочешь разделить на 3.
+
+```bash
+git rebase -i HEAD~3
+```
+
+```
+pick abc1234 fix later issue
+edit def5678 BIG: add feature + refactor + fix bug
+pick fff7777 add docs
+```
+
+`edit` для большого коммита. Git применит его и остановится. Дальше:
+
+```bash
+# Откати все изменения в working tree, но оставь файлы как они изменились
+git reset HEAD~
+
+# Теперь все изменения unstaged
+git status
+
+# Сделай первый коммит — только refactor
+git add src/refactored.py
+git commit -m "refactor: extract helper functions"
+
+# Второй коммит — fix
+git add src/buggy.py
+git commit -m "fix: handle null values in parser"
+
+# Третий коммит — feature
+git add src/new_feature.py
+git commit -m "feat: add anomaly detection"
+
+# Завершить rebase
+git rebase --continue
+```
+
+Это мощный приём, но требует осторожности — легко потерять часть изменений. Перед `git reset HEAD~` рекомендуется сделать **backup ветку**: `git branch backup-before-split`.
+
+---
+
+## Конфликты в interactive rebase
+
+Те же правила, что и в базовом rebase:
+
+- Git останавливается, показывает конфликт.
+- Разрешаешь, `git add`, `git rebase --continue`.
+- Или `git rebase --abort` для отмены всего.
+
+В interactive дополнительно есть:
+
+- `git rebase --edit-todo` — открыть редактор со сценарием прямо в середине rebase (можно добавить/убрать команды).
+- `git rebase --skip` — пропустить текущий коммит (опасно, теряешь изменения).
+
+---
+
+## Что НЕ переписывать через rebase -i
+
+Главное правило (об этом подробно в следующем уроке): **не переписывай опубликованные коммиты**.
+
+Если ты уже сделал `git push feature/x` и кто-то склонировал/посмотрел эту ветку, не делай `rebase -i` без явного согласования. Их локальная история и твоя новая — это две разные истории. Force-push сломает им flow.
+
+Безопасные сценарии для `rebase -i`:
+
+- **На своей локальной ветке до первого push** — делай что угодно.
+- **На своей feature-ветке после push, но до открытия PR** — можно, но force-push с `--force-with-lease`.
+- **На своей feature-ветке после открытия PR, ДО того, как кто-то ревьюнул** — обычно OK.
+- **На своей feature-ветке после ревью** — спроси ревьюера, не сломает ли это ему. Часто ОК, но всегда уточняй.
+
+Никогда НЕ делай rebase на `main`, `develop`, `release/*`, или любой ветке, на которой работает несколько человек.
+
+---
+
+## Полезные настройки
+
+```bash
+# Автоматически распознавать fixup! и squash! при rebase -i
+git config --global rebase.autoSquash true
+
+# При rebase автоматически прятать локальные изменения (полезно если работаешь без stash)
+git config --global rebase.autoStash true
+
+# Чтобы при git pull использовался interactive rebase (редко нужно)
+# git config --global pull.rebase interactive
+```
+
+---
+
+## Попробуй сам
+
+```bash
+mkdir interactive-rebase-demo && cd interactive-rebase-demo
+git init
+
+# Создаём messy history
+echo "v1" > file.txt && git add . && git commit -m "wip: starting"
+echo "v2" >> file.txt && git commit -am "more wip"
+echo "v3" >> file.txt && git commit -am "fix typo"
+echo "v4" >> file.txt && git commit -am "actual implementation"
+echo "v5" >> file.txt && git commit -am "fix bug"
+
+git log --oneline
+
+# Запусти interactive rebase
+git rebase -i HEAD~5
+
+# В редакторе:
+# pick первый
+# squash остальные четыре
+
+# Сохрани, в следующем редакторе напиши финальное сообщение
+# Например: "feat: add file with v1..v5"
+
+git log --oneline
+# Один коммит с объединёнными изменениями!
+
+# Ещё пример: --fixup + --autosquash
+echo "x" > a.txt && git add . && git commit -m "feat: add module A"
+echo "y" > a.txt && git commit -am "feat: extend module A"
+
+# Делаем основной коммит — запоминаем SHA
+MAIN_SHA=$(git rev-parse HEAD~1)
+
+# Делаем fixup
+echo "z" > a.txt && git commit -am "wip"
+git commit --amend --fixup=$MAIN_SHA --no-edit
+
+# Видим fixup-коммит
+git log --oneline
+
+# Автоматический squash
+git rebase -i --autosquash HEAD~3
+# Git сразу предложит правильный план
+```
+
+---
+
+<KnowledgeCheck
+  question="У тебя на PR-ветке 8 коммитов, 4 из них типа 'wip', 'fix typo', 'oops forgot'. Ревьюер пишет в комментарии: 'причеши историю перед merge'. Опиши план действий с конкретными командами, и какие риски проверить."
+  answer="План: (1) **Создать backup на всякий случай**: `git branch backup-before-cleanup` — спасёт, если что-то пойдёт не так. (2) **Запустить interactive rebase**: `git rebase -i HEAD~8` (или `git rebase -i main`, если main — точка разделения). (3) **В редакторе reorder и mark**: оставить `pick` для смысловых коммитов (которые отражают логические единицы работы), пометить `fixup` (или `squash` если хочешь сохранить сообщение) для wip/typo/oops коммитов. Поставить их **сразу после** того основного коммита, к которому они относятся. Можно использовать `reword` для основных коммитов, чтобы переименовать в conventional commits style (feat/fix/refactor/test). (4) **Сохранить и закрыть** — Git выполнит план, остановится для редактирования сообщений (reword). Если возникнет конфликт между коммитами — разрешить, `git add`, `git rebase --continue`. (5) **Проверить результат**: `git log --oneline` — должна быть чистая последовательность, тесты должны проходить: `pytest`. (6) **Force-push**: `git push --force-with-lease` (НЕ просто `--force`!) — это безопасный способ обновить ветку. Риски проверить: (a) **Force-push сломает чужие локальные копии ветки** — если на ветке работает ещё кто-то, или ревьюер уже клонировал, согласовать. (b) **Linked CI builds потеряют связь со старыми SHA** — обычно не страшно, новые builds запустятся на новых SHA. (c) **Comments на review в GitHub привязаны к конкретным SHA строк** — после force-push могут 'осиротеть' (показываться как outdated). На GitHub есть feature 'Update outdated review threads' — обычно не критично, но предупреди ревьюера. (d) **Не делать rebase в main или другую shared branch** — только на своей feature-ветке."
+/>

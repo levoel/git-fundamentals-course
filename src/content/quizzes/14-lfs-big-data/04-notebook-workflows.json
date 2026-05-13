@@ -1,0 +1,70 @@
+{
+  "lessonSlug": "14-lfs-big-data/04-notebook-workflows",
+  "moduleId": "14-lfs-big-data",
+  "_meta": {
+    "idPrefix": "git-m14-04",
+    "description": "Quiz for lesson 04 of module 14 — Jupyter notebooks workflow"
+  },
+  "questions": [
+    {
+      "id": "git-m14-04-q1",
+      "type": "multiple-choice",
+      "question": "Почему .ipynb файлы — главный pain для Git у DE команд?",
+      "options": [
+        { "id": "a", "text": "Они слишком маленькие" },
+        { "id": "b", "text": "Три причины: (1) Outputs запекаются в файл — каждый запуск ячейки меняет тысячи строк JSON (картинки как base64, HTML tables); diff на PR показывает '+2000 -2000 строк' при изменении одной ячейки кода. (2) Формат — JSON со сложной структурой cells/metadata/outputs; Git three-way merge не понимает структуру, mергит как байты, JSON становится невалидным. (3) Code review невозможен — reviewer видит base64 картинки и шум, реальный код скрыт" },
+        { "id": "c", "text": "Jupyter не поддерживает Git" },
+        { "id": "d", "text": "Notebook нельзя commit-ить в Git" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Главные три проблемы .ipynb в обычном Git: (1) Outputs в файле — pandas DataFrame.head() рендерится в HTML table (5KB), df.plot() сохраняется как base64 PNG (50-100KB на график). Запустил ячейку — изменились тысячи строк JSON, даже если код тот же. (2) JSON структура — `{cells: [{...}, {...}], metadata: {...}}`. Git three-way merge пытается мержить как text, не понимая что это структурированный JSON. Merge с конфликтом вставляет `<<<<<<<` markers в JSON, файл становится невалидным, Jupyter не открывает. (3) Code review — на GitHub diff показывает JSON-простыню. Real code изменения теряются в шуме base64 и HTML. Reviewer не может судить о качестве. Решения (раскрытые в уроке): nbstripout (выкидывает outputs), jupytext (paired .py для merge), nbdime (специальный diff/merge tool с UI).",
+      "studyHint": "Повторите урок 04 — раздел 'Почему .ipynb боль'",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m14-04-q2",
+      "type": "multiple-choice",
+      "question": "Как работает nbstripout и какие у него ограничения?",
+      "options": [
+        { "id": "a", "text": "Удаляет .ipynb файлы из репо" },
+        { "id": "b", "text": "Работает через clean filter (как LFS, но локально). При git add/commit выкидывает outputs из .ipynb перед записью в blob — Git хранит только код. Локально на диске outputs остаются. Ограничения: (1) Outputs пропадают для documentation cases; (2) Не решает merge — JSON всё равно сложно мёржить если две ветки меняют один notebook; (3) Локальный нюанс — после очистки outputs Git может показывать 'modified' пока не commit-нёшь" },
+        { "id": "c", "text": "Конвертирует .ipynb в .py" },
+        { "id": "d", "text": "Отключает Jupyter" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Mechanics nbstripout: `nbstripout --install` регистрирует clean/smudge filter в .git/config + .gitattributes для *.ipynb. При git add clean filter вызывает `python -m nbstripout` который читает notebook через nbformat library, проходит по cells, обнуляет outputs[] и execution_count, выдаёт чистый JSON. Этот чистый вариант идёт в blob. Working tree остаётся с outputs. Ограничения: (1) Документация — если ноутбук как demo с output 'see expected results', эти outputs теряются. Workaround: отдельная папка `docs/notebooks/` с исключением через .gitattributes. (2) Merge — если двое ребят редактируют один notebook в разных ячейках, Git merge как текст всё равно может сломать JSON структуру (хотя без outputs шансы выше). Для shared notebooks лучше jupytext. (3) UX nuance — Jupyter показывает 'unsaved changes' если outputs появились (после рестарта kernel и пустого notebook их нет, после запуска ячеек — появились). nbstripout integrates with pre-commit (модуль 15) для автоматической активации всей команде.",
+      "studyHint": "Повторите урок 04 — раздел 'Решение 1: nbstripout'",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m14-04-q3",
+      "type": "multiple-choice",
+      "question": "В чём идея jupytext и почему это best practice для team production DE/ML?",
+      "options": [
+        { "id": "a", "text": "Конвертирует .ipynb в .py однократно — старый .ipynb удаляется" },
+        { "id": "b", "text": "Paired формат: рядом с .ipynb лежит .py с спец-маркерами # %% для ячеек. Оба файла синхронизированы (Jupyter с jupytext-extension обновляет оба при сохранении). В Git commit-ишь .py, .ipynb в .gitignore. Преимущества: merge как обычный Python (three-way работает), PR review нормальный (видно код), файлы в 10-50× меньше, можно `python file.py` запустить. VS Code и JetBrains понимают # %% markers нативно" },
+        { "id": "c", "text": "Хранит ноутбуки в облаке вместо Git" },
+        { "id": "d", "text": "Зашифровывает .ipynb" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Jupytext mechanics: `.py` файл с маркерами вида `# %%` для code cells и `# %% [markdown]` для markdown. Header содержит jupytext metadata: `# --- jupyter: jupytext: formats: py:percent,ipynb`. Этот .py читается как notebook в Jupyter (с jupytext-extension), VS Code Jupyter, JetBrains DataSpell — все поддерживают cell markers. Setup: `jupytext --set-formats ipynb,py:percent notebook.ipynb` — pair existing. После этого: открываешь любой формат в редакторе, сохраняешь — оба обновляются. В Git commit-ишь .py, .ipynb игнорируется. Преимущества для team: (1) Merge через обычный Python three-way — работает. (2) PR review — reviewer видит код, не JSON. (3) Размер в Git мал (без outputs и JSON шума). (4) Можно `python file.py` для запуска как обычного скрипта. (5) Хорошая diff в GitHub UI. Минусы: команда должна выучить workflow (5 минут onboarding), не все Jupyter metadata round-trip-ятся идеально. Major DE/ML проекты (dbt, airflow tutorials, kaggle starter kits) используют jupytext.",
+      "studyHint": "Повторите урок 04 — раздел 'Решение 2: jupytext'",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m14-04-q4",
+      "type": "multiple-choice",
+      "question": "Когда оптимально использовать nbdime, а не nbstripout или jupytext?",
+      "options": [
+        { "id": "a", "text": "Всегда — это лучший инструмент" },
+        { "id": "b", "text": "Когда outputs notebook-а ОБЯЗАТЕЛЬНО должны сохраняться (notebook-as-documentation, tutorials, demo с показом результатов). nbdime — специальный diff/merge driver через .gitattributes, который понимает JSON структуру .ipynb и показывает diff на уровне cells (а не байтов). Включает GUI `nbdime mergetool` для interactive resolve конфликтов. Минус: размер в Git не уменьшается" },
+        { "id": "c", "text": "Только на macOS" },
+        { "id": "d", "text": "Когда не хочется устанавливать Jupyter" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "nbdime — третий путь. Используется когда outputs ВАЖНЫ и должны commit-иться: tutorial notebooks (показывают expected results), demo-ноутбуки для презентаций, blog post notebooks с rendered output. nbdime — это специальный diff/merge driver: `nbdime config-git --enable --global` регистрирует git-nbdiffdriver и git-nbmergedriver для *.ipynb. Теперь `git diff notebook.ipynb` показывает читаемый cell-level diff: 'modified /cells/3: source: - df.groupby... + df.groupby({...})'. При конфликте `git merge` — `nbdime mergetool` запускает web UI с side-by-side ours/base/theirs, click-кликом выбираешь нужные cells. Преимущества: outputs сохраняются, читаемый diff/merge. Минусы: (1) Команда должна установить nbdime и config-git у себя; (2) Размер в Git не решён — большие notebooks остаются большими; (3) GitHub UI всё равно показывает JSON diff (в 2026 GitHub рендерит notebooks в PR view, но diff JSON). Recommended setup для production DE: nbstripout (через pre-commit) для регулярных notebooks + nbdime для documentation notebooks в отдельной папке + jupytext для shared collaborative work.",
+      "studyHint": "Повторите урок 04 — раздел 'Решение 3: nbdime'",
+      "bloomLevel": "analytical"
+    }
+  ]
+}

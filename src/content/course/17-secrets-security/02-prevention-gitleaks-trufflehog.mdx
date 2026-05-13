@@ -1,0 +1,471 @@
+---
+title: "Превентивные тулзы: gitleaks, TruffleHog, GitHub Secret Scanning"
+description: "Сканеры секретов до push — gitleaks (быстрый, regex+TOML config) и TruffleHog (entropy + verified detection). Pre-commit хук с gitleaks. GitHub Secret Scanning auto-enabled на public. Local detect и protect режимы."
+order: 2
+difficulty: "beginner"
+estimatedTime: 30
+topics: ["gitleaks", "trufflehog", "pre-commit", "github-secret-scanning", "prevention", "entropy", "regex"]
+---
+
+# Превентивные тулзы: gitleaks, TruffleHog, GitHub Secret Scanning
+
+В предыдущем уроке мы увидели, что секрет в Git — это катастрофа, которую **дешевле предотвратить, чем чинить**. В этом уроке — конкретные инструменты, которые **не дают** секрету попасть в commit. Это standard tooling в любой нормальной DE-команде в 2026 году.
+
+Три уровня защиты:
+
+1. **Local pre-commit hook** — `gitleaks protect` блокирует `git commit`, если в staged изменениях найден секрет. Срабатывает на твоей машине до того, как ты вообще что-то отправил.
+2. **CI scan** — `gitleaks detect` в GitHub Actions проверяет каждый PR. Если pre-commit обошли (или его не было) — CI поймает.
+3. **GitHub Secret Scanning** — серверный сканер GitHub сам ищет известные паттерны во всех push в public репо и уведомляет провайдера (AWS, Stripe). Это последняя линия обороны, не первая.
+
+Разберём каждый.
+
+---
+
+## Знакомство с gitleaks
+
+`gitleaks` — open-source сканер от Zachary Rice, написан на Go. Стандарт de-facto в 2026. Быстрый: сканирует репо в десятки тысяч коммитов за секунды.
+
+Установка:
+
+```bash
+# macOS
+$ brew install gitleaks
+
+# Linux (через GitHub Releases)
+$ curl -L https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks_linux_x64.tar.gz | tar xz
+$ sudo mv gitleaks /usr/local/bin/
+
+# Проверка
+$ gitleaks version
+v8.21.2  (актуальная для мая 2026)
+```
+
+### Два главных режима: detect и protect
+
+| Команда | Что делает | Когда использовать |
+|---|---|---|
+| `gitleaks detect` | Сканирует **всю историю** репо (все commits) | CI, audit существующего репо |
+| `gitleaks protect --staged` | Сканирует **только staged** изменения | Pre-commit hook, до commit |
+| `gitleaks detect --no-git` | Сканирует **рабочую директорию** (не Git) | Скан произвольных файлов |
+
+### Простой пример: detect на новом репо
+
+```bash
+$ mkdir leak-test && cd leak-test
+$ git init
+$ echo 'AWS_ACCESS_KEY_ID="AKIAIOSFODNN7EXAMPLE"' > config.py
+$ echo 'STRIPE_KEY="sk_live_FAKE_EXAMPLE_KEY_DO_NOT_USE"' >> config.py
+$ git add . && git commit -m "Add config"
+
+$ gitleaks detect --source . --verbose
+
+    Finding:     AWS_ACCESS_KEY_ID="AKIAIOSFODNN7EXAMPLE"
+    Secret:      AKIAIOSFODNN7EXAMPLE
+    RuleID:      aws-access-token
+    Entropy:     3.694
+    File:        config.py
+    Line:        1
+    Commit:      abc1234...
+    Author:      Dev
+    Email:       dev@example.com
+    Date:        2026-05-13T10:30:00Z
+    Fingerprint: abc1234...:config.py:aws-access-token:1
+
+    Finding:     STRIPE_KEY="sk_live_FAKE_EXAMPLE_KEY_DO_NOT_USE"
+    Secret:      sk_live_FAKE_EXAMPLE_KEY_DO_NOT_USE
+    RuleID:      stripe-access-token
+
+10:30AM INF 1 commits scanned.
+10:30AM INF scan completed in 124ms
+10:30AM WRN leaks found: 2
+```
+
+Exit code `1` если найдены секреты, `0` если чисто. Это критично для CI — non-zero = job failed.
+
+### protect: блокируем commit до того, как стало поздно
+
+```bash
+$ echo 'API_KEY="ghp_abcdef1234567890abcdef1234567890abcd"' >> config.py
+$ git add config.py
+$ gitleaks protect --staged --verbose
+
+    Finding:     API_KEY="ghp_abcdef..."
+    Secret:      ghp_abcdef1234567890abcdef1234567890abcd
+    RuleID:      github-pat
+
+10:31AM WRN leaks found: 1
+
+$ echo "Exit code: $?"
+Exit code: 1
+```
+
+Главное отличие: `protect --staged` **не сканирует историю**, только то, что в `git diff --cached`. Это быстро (миллисекунды) и подходит для pre-commit hook, который должен работать незаметно.
+
+<Callout type="tip">
+`gitleaks protect` без `--staged` сканирует working tree (unstaged изменения). Это полезно для CI feature-веток, но для локального hook — всегда `--staged`, чтобы проверять именно то, что попадёт в commit.
+</Callout>
+
+---
+
+## Pre-commit hook с gitleaks
+
+Цель — чтобы `git commit` падал, когда в staged есть секрет. Делается через `pre-commit` framework (см. модуль 15) — это самый удобный способ.
+
+`.pre-commit-config.yaml`:
+
+```yaml
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+```
+
+Активация:
+
+```bash
+$ pip install pre-commit
+$ pre-commit install
+pre-commit installed at .git/hooks/pre-commit
+```
+
+Теперь любой `git commit` будет запускать gitleaks:
+
+```bash
+$ echo "SECRET_TOKEN='ghp_real_looking_token_12345678901234567890'" > new_file.py
+$ git add new_file.py
+$ git commit -m "Add new feature"
+
+gitleaks........................................................Failed
+- hook id: gitleaks
+- exit code: 1
+
+    Finding:     SECRET_TOKEN='ghp_real_looking_token_...'
+    RuleID:      github-pat
+
+[bypass:] Если ты уверен что это false positive, можно `git commit --no-verify`,
+но НИКОГДА не делай это с реальными секретами!
+```
+
+Commit заблокирован. Junior DE видит ошибку, открывает `new_file.py`, удаляет реальный ключ, заменяет на placeholder или env-vars reference.
+
+<Callout type="warning">
+`git commit --no-verify` пропускает pre-commit hooks. Это escape hatch для случаев когда **уверен** в false positive. Но 99% случаев — если gitleaks сработал, это правда секрет. Не делай `--no-verify` reflex-ом, лучше debug-нуть.
+</Callout>
+
+---
+
+## Конфиг gitleaks: подавляем false positives
+
+Иногда gitleaks ловит то, что секретом не является. Примеры:
+
+- `EXAMPLE_KEY="AKIAEXAMPLE123456789"` в документации.
+- `password = "test"` в unit-тестах.
+- Сгенерированные тестовые токены в fixtures.
+
+Создай `.gitleaks.toml` в корне репо:
+
+```toml
+title = "DE team gitleaks config"
+
+# Расширяем дефолтные правила (не заменяем!)
+[extend]
+useDefault = true
+
+# Allowlist для подавления false positives
+[allowlist]
+description = "Allowlist для документации и тестов"
+
+# Игнорируем целые файлы
+paths = [
+    '''docs/.*\.md$''',
+    '''tests/fixtures/.*''',
+    '''.*_test\.py$''',
+]
+
+# Игнорируем по содержимому: всё что содержит EXAMPLE или DUMMY
+regexTarget = "match"
+regexes = [
+    '''EXAMPLE''',
+    '''DUMMY''',
+    '''<your-key-here>''',
+]
+
+# Игнорируем по строкам с commitами (если правда был leak в прошлом)
+commits = [
+    "abc1234567890",  # legacy commit с уже отозванным ключом
+]
+```
+
+Запуск:
+
+```bash
+$ gitleaks detect --config .gitleaks.toml
+```
+
+<Callout type="note">
+Кастомный allowlist опасен, если им злоупотреблять. Принцип — суппресим **узкие, явные паттерны** (документация, fixtures), а не «всё, что неудобно». Не игнорируй «secret» в `dags/` папке, например.
+</Callout>
+
+---
+
+## Что gitleaks умеет находить из коробки
+
+Дефолтная конфигурация gitleaks (https://github.com/gitleaks/gitleaks/blob/master/config/gitleaks.toml) содержит **~150 встроенных правил**:
+
+| Категория | Примеры |
+|---|---|
+| Cloud | AWS, GCP, Azure, Alibaba, DigitalOcean |
+| CI/CD | GitHub PAT, GitLab PAT, CircleCI, Travis |
+| Communication | Slack, Discord, Twilio, SendGrid |
+| Databases | PostgreSQL URI, MongoDB URI, MySQL DSN |
+| Payments | Stripe, Square, PayPal, Braintree |
+| AI | OpenAI, Anthropic, HuggingFace |
+| Generic | high-entropy strings, RSA private keys, SSH keys |
+
+Generic-rule на высокую энтропию — самая чувствительная и шумная. Она находит «строки слишком случайного вида», и часто там попадаются hex SHA, base64-encoded JSON, и подобное. Поэтому её часто настраивают с минимальной длиной 32 символа и порогом энтропии 4.5+.
+
+---
+
+## TruffleHog: entropy + verified secrets
+
+`TruffleHog` (от Truffle Security) — альтернатива gitleaks, написана на Go, фокус на двух фишках:
+
+1. **Entropy detection** — находит «подозрительно случайные» строки, даже если они не подходят под известный regex. Это помогает ловить **custom-секреты** компании (внутренние API tokens с нестандартным форматом).
+
+2. **Verified secrets** — TruffleHog не просто находит pattern, а **пытается использовать** ключ против реального API. Это означает: если AWS-ключ найден, TruffleHog делает `sts:GetCallerIdentity` — успех = это **точно валидный ключ**, не пример. Это снижает false positive до ~5%.
+
+Установка:
+
+```bash
+$ brew install trufflehog
+# или
+$ curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | sh -s -- -b /usr/local/bin
+```
+
+Скан репо:
+
+```bash
+$ trufflehog git file://. --only-verified
+
+2026-05-13T10:30:00 INFO  scanning 1 commits
+Found verified result
+  Detector Type: AWS
+  Decoder Type:  PLAIN
+  Raw result:    AKIAIOSFODNN7EXAMPLE
+  AccountID:     123456789012
+  ARN:           arn:aws:iam::123456789012:user/old-user
+  File:          config.py
+  Commit:        abc1234
+```
+
+Видишь — TruffleHog не только нашёл ключ, но и сделал звонок в AWS, получил ARN. Это значит: **ключ валиден прямо сейчас, его нужно отозвать срочно**.
+
+### Когда какой инструмент использовать
+
+| Сценарий | Инструмент | Почему |
+|---|---|---|
+| Pre-commit local hook | **gitleaks** | Быстрее, не делает network calls (приватность) |
+| CI scan на PR | **gitleaks** | Быстрый, простой exit code |
+| Audit существующего репо | **TruffleHog --only-verified** | Снижает false positive шум, точно говорит «вот это сейчас живо» |
+| Скан custom-секретов компании | **TruffleHog (entropy)** | Лучше работает без regex |
+| Скан non-Git source (S3, файловая система) | **TruffleHog** | Поддерживает s3, gcs, docker, etc |
+
+Многие команды используют **оба**: gitleaks в pre-commit/PR-CI, TruffleHog раз в неделю — глубокий audit с verified-флагом.
+
+---
+
+## GitHub Secret Scanning: третья линия обороны
+
+GitHub встроил собственный сканер прямо в свою инфраструктуру. Когда происходит push в public репо, GitHub:
+
+1. Сканирует diff на ~200 известных паттернов (AWS, GitHub, Stripe, Slack, OpenAI, Snowflake, и т.д.).
+2. Если find — **сразу уведомляет провайдера** через secure channel. AWS получает push-уведомление и автоматически revoke-ит leaked ключ в течение минут.
+3. Создаёт security alert в репо для владельца.
+
+<DiagramContainer title="Что происходит после push с AWS ключом в public репо">
+  <SequenceDiagram>
+    <Actor name="DE" />
+    <Actor name="GitHub" />
+    <Actor name="GitHub Secret Scanner" />
+    <Actor name="AWS Security" />
+    <Lifeline />
+    <Message from="DE" to="GitHub" label="git push (AKIA... в коде)" />
+    <Message from="GitHub" to="GitHub Secret Scanner" label="новый push event" />
+    <Message from="GitHub Secret Scanner" to="GitHub Secret Scanner" label="regex match: AKIA..." />
+    <Message from="GitHub Secret Scanner" to="AWS Security" label="POST secure channel: leaked key" />
+    <Message from="AWS Security" to="AWS Security" label="auto-quarantine ключ" />
+    <Message from="AWS Security" to="DE" label="Email: ключ заблокирован" />
+    <Message from="GitHub Secret Scanner" to="DE" label="Security alert в репо" />
+  </SequenceDiagram>
+</DiagramContainer>
+
+### Когда работает / когда не работает
+
+**Работает автоматически и бесплатно**:
+- Все public репозитории.
+- Public forks of private repos.
+
+**Доступно платно (GitHub Advanced Security, $$$)**:
+- Private репозитории.
+- Enterprise аккаунты.
+
+**НЕ работает**:
+- Custom-паттерны компании (если у компании внутренние API tokens — GitHub их не знает).
+- На GitLab/Bitbucket — у них свои аналоги.
+
+<Callout type="tip">
+Public репо? GitHub Secret Scanning уже работает, тебе ничего настраивать не нужно. Зайди в Settings -> Security -> Secret scanning, посмотри activity log. Если alerts есть — это уже утечки, реагировать срочно (см. урок 03).
+</Callout>
+
+### Push protection — самая мощная фича
+
+Кроме «найти после факта», GitHub предлагает **Push Protection**. Если включено, GitHub **отклонит push**, который содержит известный секрет, прямо на стороне сервера:
+
+```bash
+$ git push origin feat/s3-loader
+Enumerating objects: 5, done.
+...
+remote: error: GH013: Repository rule violations found for refs/heads/feat/s3-loader.
+remote: 
+remote: —— GITHUB PUSH PROTECTION ——
+remote:   Resolve the following violations before pushing again:
+remote:   
+remote:   — AWS Access Key ID detected in commit abc1234, file dag.py, line 42
+remote:   
+remote:   To resolve, remove the secret and rewrite history.
+remote:   To bypass (NOT RECOMMENDED for real secrets):
+remote:   https://github.com/org/repo/security/secret-scanning/unblock-secret/...
+remote: 
+To github.com:org/repo.git
+ ! [remote rejected] feat/s3-loader -> feat/s3-loader (push declined due to repository rule violations)
+```
+
+Push отклонён. Секрет **не попал в репо вообще**. Это работает даже если у тебя не было pre-commit hook. Включить в Settings -> Code security -> Push protection.
+
+**Push Protection бесплатен** для public репо начиная с 2024 года. Для private — часть Advanced Security.
+
+---
+
+## Конкретный setup для DE-команды
+
+Стандартный minimal-setup, который должен быть на каждом DE-проекте:
+
+**1. `.pre-commit-config.yaml`**:
+
+```yaml
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+        name: Detect hardcoded secrets
+        description: Detect secrets using regex and entropy
+```
+
+**2. `.gitleaks.toml`** (минимальный):
+
+```toml
+[extend]
+useDefault = true
+
+[allowlist]
+paths = ['''.*_test\.py$''', '''docs/.*''']
+regexes = ['''EXAMPLE''', '''DUMMY''']
+```
+
+**3. CI workflow `.github/workflows/secrets.yml`**:
+
+```yaml
+name: Secret Scan
+on: [pull_request]
+jobs:
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # нужна вся история для detect
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
+**4. GitHub Settings**:
+- Settings -> Code security -> Secret scanning: **enabled**.
+- Settings -> Code security -> Push protection: **enabled**.
+
+Этот стек ловит секреты на трёх уровнях: локально (pre-commit), на PR (CI), и на сервере (Push Protection). Junior DE может **физически не запушить** ключ.
+
+---
+
+## Попробуй сам
+
+Имитация полного workflow:
+
+```bash
+$ mkdir gitleaks-demo && cd gitleaks-demo
+$ git init
+
+# Включаем pre-commit hook вручную (без pre-commit framework, чтобы было прозрачно)
+$ cat > .git/hooks/pre-commit << 'EOF'
+#!/bin/bash
+gitleaks protect --staged --verbose --redact || {
+    echo ""
+    echo "[X] Gitleaks blocked the commit."
+    echo "Remove secrets before committing."
+    exit 1
+}
+EOF
+$ chmod +x .git/hooks/pre-commit
+
+# Пробуем закоммитить секрет
+$ echo 'AWS_KEY="AKIAIOSFODNN7EXAMPLE"' > config.py
+$ git add config.py
+$ git commit -m "Add config"
+# ← гитhook поймает и откажет
+
+# Исправляем
+$ echo 'AWS_KEY=os.environ.get("AWS_KEY")' > config.py
+$ git add config.py
+$ git commit -m "Add config"
+# ← теперь пройдёт
+```
+
+`--redact` маскирует найденный секрет в выводе, чтобы он не отображался в логах CI. Полезно когда CI пишет в shared output.
+
+---
+
+## DE-специфика: что добавить в gitleaks для DE-проектов
+
+В DE-проектах часто появляются паттерны, которых нет в дефолтном gitleaks. Добавь в `.gitleaks.toml`:
+
+```toml
+[[rules]]
+id = "snowflake-account"
+description = "Snowflake account URL with credentials"
+regex = '''(?i)account[\s_-]*=[\s_-]*['"][a-z0-9-]+\.snowflakecomputing\.com['"]'''
+tags = ["snowflake", "credentials"]
+
+[[rules]]
+id = "airflow-conn-string"
+description = "Airflow connection URI in code"
+regex = '''(?i)conn[\s_-]*=[\s_-]*['"](?:postgres|mysql|redshift|snowflake)://[^@]+@[^/]+'''
+tags = ["airflow", "connection"]
+
+[[rules]]
+id = "dbt-profile-key"
+description = "dbt profile.yml private key path"
+regex = '''private_key_path:\s*['"]?(\/[^\s'"]+\.p8)['"]?'''
+tags = ["dbt", "snowflake"]
+```
+
+Это ловит специфичные для DE паттерны. По мере того как команда растёт — список расширяется.
+
+---
+
+## Killer takeaway
+
+Три уровня обороны от секретов: (1) `gitleaks` в pre-commit hook — блокирует commit локально; (2) `gitleaks` в CI — блокирует PR; (3) **GitHub Push Protection** — блокирует push на стороне сервера. Все три — бесплатные для public. TruffleHog добавляет verified detection (звонит в API проверить, валиден ли ключ) — используй для audit. `.gitleaks.toml` настраивай аккуратно, особенно allowlist — лучше пропустить, чем заглушить. В DE-проекте обязательно добавь custom правила для Snowflake/Airflow/dbt — внутренние паттерны компании gitleaks из коробки не знает.
+
+<KnowledgeCheck quizSlug="17-secrets-security/02-prevention-gitleaks-trufflehog" />

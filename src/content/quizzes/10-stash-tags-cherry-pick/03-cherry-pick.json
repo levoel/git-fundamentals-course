@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "10-stash-tags-cherry-pick/03-cherry-pick",
+  "moduleId": "10-stash-tags-cherry-pick",
+  "_meta": { "idPrefix": "git-m10-03" },
+  "questions": [
+    {
+      "id": "git-m10-03-q1",
+      "type": "multiple-choice",
+      "question": "Что точно происходит при `git cherry-pick abc1234`?",
+      "options": [
+        { "id": "a", "text": "Коммит abc1234 переезжает с исходной ветки на текущую" },
+        { "id": "b", "text": "Git берёт diff коммита abc1234 (от его parent), применяет на текущий HEAD, создаёт НОВЫЙ коммит с тем же содержимым/message, но ДРУГИМ SHA (другой parent -> другая хэш-сумма). Original abc1234 остаётся на своей ветке. Получаем дубликат коммита на двух ветках" },
+        { "id": "c", "text": "Создаётся merge-коммит" },
+        { "id": "d", "text": "Коммит копируется с тем же SHA" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Cherry-pick = «возьми diff + примени». Новый коммит имеет другой SHA потому что parent другой (SHA включает parent в свой хэш). Original остаётся не тронутым. Это создаёт дубликат: два коммита с идентичными изменениями и message, разными SHA. Один на исходной ветке, другой на target. Важное следствие: при будущем merge между этими ветками, Git может (или не может) распознать что patch уже применён.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m10-03-q2",
+      "type": "multiple-choice",
+      "question": "Зачем флаг -x в `git cherry-pick -x abc1234`?",
+      "options": [
+        { "id": "a", "text": "Extreme режим, форсирует применение" },
+        { "id": "b", "text": "Добавляет footer '(cherry picked from commit abc1234)' к commit message. Полезно для audit: видно что этот коммит — backport из main, можно проверить original. Best practice для public репо и backports на release-ветки" },
+        { "id": "c", "text": "Применяет только tracked файлы" },
+        { "id": "d", "text": "eXtended diff" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "-x добавляет audit-footer в message нового коммита. Без него теряется связь с original: в git log виден только сам fix, не понятно откуда. С -x: `(cherry picked from commit abc1234)`. Полезно для tracking which fixes backported on which release branches. Без -x cherry-pick «теряет след» — нет automatic indicator.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m10-03-q3",
+      "type": "multiple-choice",
+      "question": "Типичный сценарий cherry-pick в DE команде?",
+      "options": [
+        { "id": "a", "text": "Регулярно мержить feature ветки в main" },
+        { "id": "b", "text": "Backport hotfix: fix-коммит замержен в main (Airflow 2.10), нужно перенести на release/airflow-2.5.x (legacy support). Cherry-pick точно нужного коммита, оставив остальные main-изменения (новые DAGs для 2.10) на main. Без cherry-pick: либо merge всю main в release-ветку (плохо), либо ручное копирование (error-prone)" },
+        { "id": "c", "text": "Замена rebase" },
+        { "id": "d", "text": "Альтернатива git pull" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Cherry-pick — точечный инструмент для backport, hotfix portage, выборочного применения. Сценарий: команда поддерживает несколько версий продукта (main + release branches), critical fix нужен везде, но фичи новых версий нельзя нести в старые. Cherry-pick — единственный практичный путь. Альтернативы (merge main в release или manual copy) хуже по разным причинам.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m10-03-q4",
+      "type": "multiple-choice",
+      "question": "Опасность cherry-pick которую junior часто упускает?",
+      "options": [
+        { "id": "a", "text": "Не работает с monorepo" },
+        { "id": "b", "text": "Дубликаты коммитов в будущих merge-ах. После cherry-pick из feature в main, при последующем merge feature -> main Git может попросить разрешить ту же изменения снова (если diff чуть разошёлся из-за конфликт-resolution). Также cherry-pick не двигает merge-base — следующий merge увидит коммит как 'новый' хотя его patch уже применён" },
+        { "id": "c", "text": "Утечка SHA в логи" },
+        { "id": "d", "text": "Замедляет push" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Cherry-pick создаёт коммиты с другими SHA, Git считает их разными объектами. Merge-base двух веток остаётся в общем предке, не двигается. Следующий merge видит «новые коммиты с обеих сторон, надо смержить». Если cherry-picked коммит точно тот же diff — merge выявит no-op. Если был конфликт-resolution при cherry-pick — diff чуть другой, merge снова просит разрешить. Best practice: используй cherry-pick для разовых backports, не для систематической синхронизации.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m10-03-q5",
+      "type": "true-false",
+      "question": "Cherry-pick диапазона A..B включает оба коммита A и B.",
+      "correctAnswer": false,
+      "explanation": "Нет. Range syntax A..B в Git стандартно НЕ включает A, ВКЛЮЧАЕТ B (exclusive..inclusive). Те же правила что для git log A..B. Если хочешь включить A: используй A^..B (A^ = parent of A). Пример: cherry-pick abc1234..def5678 применит все коммиты после abc1234 до def5678 включительно, кроме abc1234. Чтобы взять и abc1234: cherry-pick abc1234^..def5678 (parent abc1234 -> def5678).",
+      "bloomLevel": "applied"
+    }
+  ]
+}

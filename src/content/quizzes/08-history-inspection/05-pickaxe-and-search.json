@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "08-history-inspection/05-pickaxe-and-search",
+  "moduleId": "08-history-inspection",
+  "_meta": { "idPrefix": "git-m08-05" },
+  "questions": [
+    {
+      "id": "git-m08-05-q1",
+      "type": "multiple-choice",
+      "question": "Какая команда найдёт все коммиты, в которых появилась/исчезла точная строка `SELECT * FROM orders`?",
+      "options": [
+        { "id": "a", "text": "git grep 'SELECT * FROM orders'" },
+        { "id": "b", "text": "git log -S 'SELECT * FROM orders' --oneline" },
+        { "id": "c", "text": "git log --message 'SELECT * FROM orders'" },
+        { "id": "d", "text": "git find 'SELECT * FROM orders'" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`git log -S` (pickaxe) ищет коммиты, в которых **изменилось количество вхождений** заданной строки. Если строка появилась — найдёт. Если исчезла — найдёт. Если осталось то же количество — пропустит (это могло быть просто переформатирование вокруг). `git grep` ищет в **текущем** состоянии, не в истории. `--grep` ищет в commit messages, не в содержимом diff. Для regex используй `-G`: `git log -G 'SELECT.*FROM\\s+orders' -p`. Добавь `-p` чтобы увидеть полный diff каждого найденного коммита.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m08-05-q2",
+      "type": "multiple-choice",
+      "question": "Чем `git grep` отличается от `git log -S`?",
+      "options": [
+        { "id": "a", "text": "Никакой разницы" },
+        { "id": "b", "text": "git grep ищет в **текущем** состоянии working tree (или указанной revision). git log -S — в **истории**, находит коммиты с появлением/удалением строки. Часто используют комбинацией: grep найти где сейчас, log -S узнать когда появилось" },
+        { "id": "c", "text": "grep быстрее" },
+        { "id": "d", "text": "grep для bin, log -S для text" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Разные инструменты: (1) **`git grep 'pattern'`** — поиск в **текущем** working tree. Как обычный grep, но быстрее (использует Git index). Можно искать в любой revision: `git grep 'pattern' v1.0`. (2) **`git log -S 'string'`** — поиск в **истории**: коммиты, где это появилось/исчезло. Workflow: `git grep` найти, где сейчас есть код -> `git log -S` узнать, когда это появилось -> `git show <sha>` для контекста коммита. Это типичная цепочка расследования.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m08-05-q3",
+      "type": "true-false",
+      "question": "Флаг `--all` в `git log -S` ищет в всех ветках, не только текущей.",
+      "correctAnswer": "true",
+      "explanation": "`git log --all` включает в поиск все локальные ветки + remote-tracking branches. Полезно когда не знаешь, в какой ветке могла появиться строка (например, в feature branch, ещё не мерджнутой). Дополнительно `--source` показывает у каждого найденного коммита имя ref'а: `git log -S 'magic' --all --source --oneline`. Покажет: `abc1234 refs/heads/feature/x feat: add magic`. Видишь, в какой ветке коммит. Альтернатива для конкретных рефов: `git log -S 'x' main feature/y`. Замечание: на больших репо `--all` может быть медленным.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m08-05-q4",
+      "type": "multiple-choice",
+      "question": "Чтобы ускорить pickaxe на большом репо, какие флаги полезны?",
+      "options": [
+        { "id": "a", "text": "Всегда добавлять --all" },
+        { "id": "b", "text": "Ограничить по path (-- src/), по дате (--since=), по количеству (--max-count=), использовать -S вместо -G когда возможно, --no-renames для отключения rename detection" },
+        { "id": "c", "text": "Использовать sudo" },
+        { "id": "d", "text": "Запустить git gc" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Оптимизации pickaxe на больших репо: (1) **Path filter**: `git log -S 'x' -- src/etl.py` (только этот файл) или `-- src/` (директория) — намного быстрее, чем по всему репо. (2) **Date filter**: `--since='6 months ago'` режет диапазон. (3) **Max count**: `--max-count=20` остановиться после N. (4) **`-S` вместо `-G`** где возможно — regex дороже. (5) **`--no-renames`** — отключает detection переименований, ускоряет. Пример комбинированной команды: `git log -S 'magic' --since='3 months ago' --no-renames --max-count=20 --oneline -- src/`. Получишь результат за секунды вместо минут.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m08-05-q5",
+      "type": "multiple-choice",
+      "question": "DE-сценарий: нужно проследить ВСЕ изменения параметра `parquet.compression` в десятке Spark jobs за год. Какой подход самый эффективный?",
+      "options": [
+        { "id": "a", "text": "Прочитать каждый файл вручную" },
+        { "id": "b", "text": "git log -G 'parquet\\.compression\\s*=' --oneline -p -- 'jobs/' --since='1 year ago' --pretty=format:'%h %ad %an : %s' --date=short" },
+        { "id": "c", "text": "git diff между двумя версиями" },
+        { "id": "d", "text": "Использовать только GUI" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Эффективный pickaxe-запрос для регрессии параметра: (1) **`-G`** с regex — ловит любое изменение строки `parquet.compression = ...` независимо от значения ('snappy' или 'gzip' или что-то ещё). (2) **`-p`** — показать полный diff каждого коммита, увидишь конкретные значения. (3) **`-- 'jobs/'`** — ограничить директорией Spark jobs. (4) **`--since='1 year ago'`** — временное окно. (5) **`--pretty=format`** — сразу красивый формат с датой, автором, subject. Дополнительно можно `--name-only` для списка файлов, или `git show <sha>` для конкретного коммита. После — для контекста проверить commit messages на ссылки на тикеты ('JIRA-1234' или '#5678').",
+      "bloomLevel": "applied"
+    }
+  ]
+}

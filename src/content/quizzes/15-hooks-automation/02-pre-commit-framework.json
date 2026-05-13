@@ -1,0 +1,70 @@
+{
+  "lessonSlug": "15-hooks-automation/02-pre-commit-framework",
+  "moduleId": "15-hooks-automation",
+  "_meta": {
+    "idPrefix": "git-m15-02",
+    "description": "Quiz for lesson 02 of module 15 — pre-commit framework"
+  },
+  "questions": [
+    {
+      "id": "git-m15-02-q1",
+      "type": "multiple-choice",
+      "question": "Как именно pre-commit framework решает проблему shared hooks в команде?",
+      "options": [
+        { "id": "a", "text": "Заменяет Git встроенными hooks" },
+        { "id": "b", "text": "(1) Конфигурация в .pre-commit-config.yaml в корне репо — versioned, commit-ится; (2) Каждый коллега после clone делает `pre-commit install` — framework читает YAML и устанавливает в .git/hooks/pre-commit скрипт, который вызывает pre-commit; (3) Hooks из community репозиториев клонируются в локальный cache (~/.cache/pre-commit/), создаются изолированные venv-ы; (4) При commit framework запускает все hooks из YAML против staged файлов" },
+        { "id": "c", "text": "Хранит hooks в облаке" },
+        { "id": "d", "text": "Использует только встроенные функции Git" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Архитектура pre-commit: (1) Single source of truth — `.pre-commit-config.yaml` в репо. Это файл, который каждый коллега получает при clone. (2) `pre-commit install` — bootstrap команда: framework пишет в .git/hooks/pre-commit shim-скрипт (примерно: `#!/usr/bin/env bash; exec pre-commit hook ...`). Этот файл живёт только локально (не versioned), но создаётся одной командой. (3) При первом запуске hook-а framework клонирует hook-репозитории из community (например, `https://github.com/astral-sh/ruff-pre-commit`) в `~/.cache/pre-commit/`. (4) Создаёт изолированные venv-ы для каждого hook (Python, Node, Ruby — поддерживается всё). Это значит у каждого коллеги стоят те же версии ruff/mypy/gitleaks, независимо от глобальных версий. (5) При git commit shim вызывает pre-commit, который проходит по hooks из YAML, запускает каждый против staged файлов. Если хоть один returns non-zero — commit aborted. Onboarding: `pip install pre-commit && pre-commit install` — две команды, дальше всё автоматически.",
+      "studyHint": "Повторите урок 02 — раздел 'Как работает: high-level'",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m15-02-q2",
+      "type": "multiple-choice",
+      "question": "Какие 5-7 hooks обязательны в pre-commit config для production Python DE проекта в 2026?",
+      "options": [
+        { "id": "a", "text": "Только trailing-whitespace" },
+        { "id": "b", "text": "(1) pre-commit-hooks base: trailing-whitespace, end-of-file-fixer, check-yaml, check-added-large-files (1MB), check-merge-conflict, detect-private-key. (2) ruff (lint + format) — заменяет black+isort+flake8. (3) mypy для type checking с additional_dependencies для pandas-stubs. (4) nbstripout для notebooks. (5) gitleaks для secrets scanning. (6) Опционально sqlfluff для dbt SQL, yamllint для Airflow DAG configs" },
+        { "id": "c", "text": "Только ruff" },
+        { "id": "d", "text": "Нет рекомендуемых hooks — каждый проект уникален" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Каноничный setup 2026 для Python DE: (1) Base hooks из pre-commit-hooks repo — это базовая гигиена: trailing whitespace, EOF newline, валидный YAML/JSON, отказ от commits > 1MB, обнаружение merge conflict markers, обнаружение SSH-ключей. Лёгкие, быстрые, обязательные. (2) Ruff (Rust-based, заменяет black/isort/flake8/pyupgrade) — один tool вместо четырёх, в 10-100× быстрее. Linting (`ruff check --fix`) + formatting (`ruff-format`). (3) Mypy — static type checking, ловит type errors до runtime. additional_dependencies критично — мypy запускается в своём venv и не видит твой pandas без pandas-stubs. (4) Nbstripout — выкидывает outputs из .ipynb, делает PR review возможным (модуль 14.04). (5) Gitleaks — поиск secrets (паролей, AWS keys, GitHub tokens) в diff. Защита от accidental commit секретов (модуль 17). (6) Sqlfluff — для dbt-проектов, lint+format SQL с правильным dialect-ом (postgres/snowflake/bigquery). (7) Yamllint — для Airflow DAG configs, проверка синтаксиса. Этот стэк — стандарт в Airflow contributors, dbt-labs репо, и большинстве production Python DE проектов.",
+      "studyHint": "Повторите урок 02 — раздел 'Реальный config для Python DE проекта'",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m15-02-q3",
+      "type": "multiple-choice",
+      "question": "Зачем pinning versions через `rev: vX.Y.Z` в .pre-commit-config.yaml обязательно?",
+      "options": [
+        { "id": "a", "text": "Это просто рекомендация" },
+        { "id": "b", "text": "Reproducibility. Без pinning (rev: HEAD или master) hooks автоматически обновляются — у тебя ruff 0.5.0, у коллеги 0.6.0 (с другими правилами), результаты расходятся. PR проходит у тебя, fails у коллеги. С rev: v0.5.0 все используют тот же конкретный hash hooks. Обновление через `pre-commit autoupdate` — controlled, в отдельном PR" },
+        { "id": "c", "text": "Pinning замедляет hooks" },
+        { "id": "d", "text": "Pinning обязателен только для Python projects" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Pinning — золотое правило reproducibility. Сценарий без pinning: вчера ты добавил `rev: master` в config. Сегодня ruff team merged изменения, default formatting rules стали строжe. У тебя локально hooks из cache (старая версия) — все Passed. Коллега клонирует репо, pre-commit pulls master ruff — там новые rules — все его файлы fail. Внезапно. С pinning: `rev: v0.5.0` — конкретный SHA tag. Все на одной версии всегда. Обновление: `pre-commit autoupdate` команда — framework сам идёт в каждый hook repo, проверяет latest stable tag, обновляет .pre-commit-config.yaml. Этот update делается в отдельном PR с прохождением CI: 'chore: bump pre-commit hook versions'. Так ты видишь, что сломалось при апгрейде, и можешь reactively обновить код или зафиксировать exclude-патерны. Аналогично для всех системах: docker images (pin tags, не latest), pip (pin в requirements.txt или poetry.lock), npm (package-lock.json), terraform (provider versions). Reproducibility — фундамент production.",
+      "studyHint": "Повторите урок 02 — раздел 'Pinning versions (важно)'",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m15-02-q4",
+      "type": "multiple-choice",
+      "question": "В команде есть pre-commit, но кто-то умеет обходить через --no-verify. Как обеспечить guaranteed enforcement?",
+      "options": [
+        { "id": "a", "text": "Отключить --no-verify (это невозможно)" },
+        { "id": "b", "text": "Belt + suspenders: pre-commit для quick local feedback + CI workflow на GitHub Actions, который запускает те же hooks (`pre-commit/action@v3.0.1`). Затем branch protection rule 'require status checks to pass' блокирует merge PR с failing CI. Даже если кто-то делает --no-verify локально, в PR-е CI его поймает и блокирует merge до исправления" },
+        { "id": "c", "text": "Удалить .git/hooks/" },
+        { "id": "d", "text": "Только code review" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Локальный pre-commit обходится через `--no-verify` — это часть Git design (иногда нужно для эмердженси). Single point of failure. Решение — двухслойная защита: (1) ЛОКАЛЬНО — pre-commit для быстрого feedback (developer видит ошибку до push, не ждёт CI 10 минут). (2) В CI — те же checks. GitHub Actions workflow: `pre-commit/action@v3.0.1` запускает `pre-commit run --all-files`. Если local hooks обошли — CI поймает. (3) BRANCH PROTECTION — на GitHub в Settings -> Branches -> add rule for main: 'Require status checks to pass before merging' + выбрать конкретные status checks (pre-commit job). PR не может быть merged пока CI не зелёный. Это guaranteed enforcement независимо от local behavior. Дополнительно: 'Require pull request reviews' (нужно approval), 'Require conversation resolution' (все comments resolved), 'Require linear history' (no merge commits). Stack: pre-commit local + CI + branch protection. Каждый слой компенсирует bypass предыдущего. Это canonical setup для team production projects.",
+      "studyHint": "Повторите урок 02 — раздел 'CI integration: belt + suspenders'",
+      "bloomLevel": "analytical"
+    }
+  ]
+}

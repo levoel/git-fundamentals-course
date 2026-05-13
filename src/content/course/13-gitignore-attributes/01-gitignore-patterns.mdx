@@ -1,0 +1,501 @@
+---
+title: "Синтаксис .gitignore: glob, отрицание, иерархия"
+description: "Полный синтаксис .gitignore — паттерны, ** для рекурсии, ! для отрицания, trailing и leading slash. Иерархия global -> repo -> per-subdir и debugging через git check-ignore"
+order: 1
+difficulty: "beginner"
+estimatedTime: 22
+topics: ["Git", "gitignore", "glob", "конфигурация"]
+---
+
+# Синтаксис .gitignore: glob, отрицание, иерархия
+
+`.gitignore` — самый часто используемый и при этом самый часто непонятый файл в Git. Junior DE открывает его, видит десяток строк типа `*.pyc` и `.venv/`, что-то добавляет, что-то комментирует — и не понимает, почему `.env` всё равно попадает в коммит, а `data/raw/` — нет.
+
+В этом уроке мы разберём весь синтаксис .gitignore с нуля до уровня "пишу свой шаблон под Python ETL и понимаю каждый символ". Покажем три ключевые тонкости, на которых ломаются все: trailing `/` для директорий, leading `/` для root-only, и `!` для отрицания. Закроем уроком про иерархию из трёх уровней (global -> repo -> per-subdir) и debugging-команду `git check-ignore -v`.
+
+---
+
+## Зачем .gitignore вообще
+
+Git по умолчанию следит **за всеми файлами** в working tree. Это правильное поведение — Git не должен решать за тебя, что важно, а что нет. Но на практике в любом проекте есть файлы, которые **не должны** оказаться в репозитории:
+
+<DiagramContainer title="Что НЕ должно попадать в Git: четыре категории" color="amber">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Виртуальные окружения, node_modules, build артефакты — генерятся из исходников, тяжёлые, отличаются между машинами">
+        <DataBox label="Сгенерированное" className="border-amber-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>.venv/, node_modules/</div>
+            <div>__pycache__/, *.pyc</div>
+            <div>dist/, build/</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Секреты — пароли, токены, ключи. Утечка в публичный репо может стоить компании денег">
+        <DataBox label="Секреты" className="border-red-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>.env, .env.local</div>
+            <div>secrets.yaml</div>
+            <div>credentials.json</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="OS-метаданные — Mac .DS_Store, Windows Thumbs.db. Не имеют смысла на других машинах">
+        <DataBox label="OS-мусор" className="border-zinc-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>.DS_Store</div>
+            <div>Thumbs.db</div>
+            <div>desktop.ini</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Большие данные — raw CSV, parquet, dumps. Git не приспособлен для бинарей >10MB">
+        <DataBox label="Данные" className="border-blue-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>data/raw/</div>
+            <div>{'*.parquet'}</div>
+            <div>{'*.csv (большие)'}</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Каждая категория — это отдельная боль. Сгенерированное замусоривает diff (каждый запуск Python создаёт новые `__pycache__`). Секреты — это утечки в публичный репо (см. модуль 17). OS-мусор раздражает коллег с другой ОС. А большие данные раздувают репо до гигабайт (это тема модуля 14 про LFS).
+
+`.gitignore` — это white-list исключений: "Git, не следи за этим, даже если я случайно сделаю `git add .`".
+
+---
+
+## Базовый синтаксис: pattern -> match
+
+Файл `.gitignore` — это список паттернов, по одному на строку. Пустые строки и строки, начинающиеся с `#` — комментарии.
+
+```gitignore
+# Это комментарий — Git его игнорирует
+
+# Просто имя файла — игнорировать ВЕЗДЕ в дереве
+config.local.py
+
+# Расширение — игнорировать все .pyc
+*.pyc
+
+# Имя директории с trailing slash — игнорировать директорию
+node_modules/
+```
+
+Под капотом это **glob-паттерны** (как в shell, но с нюансами). Главные мета-символы:
+
+| Символ | Значение |
+| --- | --- |
+| `*` | любое количество символов, кроме `/` |
+| `?` | один любой символ, кроме `/` |
+| `[abc]` | один символ из набора |
+| `**` | любое количество директорий (рекурсия) |
+| `!` | отрицание паттерна |
+| `/` | разделитель пути; имеет смысл в начале и конце |
+| `#` | комментарий |
+
+Звучит сухо. Давайте на примерах посмотрим, как именно это работает, потому что **каждое из этих правил имеет хитрость**, на которой ломаются джуны.
+
+---
+
+## Хитрость 1: trailing slash — это директория
+
+```gitignore
+# Без слеша — игнорировать ЛЮБОЙ file или directory с именем "logs"
+logs
+
+# Со слешем — игнорировать ТОЛЬКО directory с именем "logs"
+logs/
+```
+
+Разница важна. В Python-проекте у тебя может быть и файл `logs.py`, и директория `logs/`. Если ты напишешь просто `logs`, Git будет игнорировать оба. Если напишешь `logs/` — только директорию.
+
+<Callout type="tip">
+Привычка: для директорий **всегда** ставь trailing slash. Это явное намерение и защищает от случайного матчинга файлов.
+</Callout>
+
+---
+
+## Хитрость 2: leading slash — это якорь к корню
+
+```gitignore
+# Без leading slash — игнорировать "config.py" ВЕЗДЕ
+config.py
+
+# С leading slash — только в корне репо
+/config.py
+```
+
+Это критично для проектов с подобными именами в разных местах. Например:
+
+```
+project/
+├── config.py           ← хотим игнорировать (root config с секретами)
+├── data/
+│   └── config.py       ← НЕ хотим игнорировать (data layer config)
+└── api/
+    └── config.py       ← НЕ хотим игнорировать (api config)
+```
+
+Если ты напишешь `config.py` — Git проигнорирует все три. Если напишешь `/config.py` — только корневой.
+
+<DiagramContainer title="Trailing vs leading slash — два разных смысла" color="emerald">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-6 justify-center flex-wrap">
+      <Tooltip content="logs/ — игнорировать директорию с именем logs ВЕЗДЕ в дереве">
+        <DataBox label="logs/" className="border-emerald-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>/logs/ — match</div>
+            <div>/api/logs/ — match</div>
+            <div>/logs.py — НЕ match</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="/config.py — игнорировать ТОЛЬКО /config.py в корне репо">
+        <DataBox label="/config.py" className="border-purple-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>/config.py — match</div>
+            <div>/api/config.py — НЕ match</div>
+            <div>/data/config.py — НЕ match</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+---
+
+## Хитрость 3: `**` для глубокой рекурсии
+
+`*` в Git **не пересекает границы директорий**. То есть `*.log` найдёт `app.log` в корне и в любой поддиректории, но не `nested/deep/app.log` через многоуровневую структуру в специфических случаях. Для явной рекурсии используется `**`.
+
+```gitignore
+# Любые .log файлы где угодно (на самом деле работает по дефолту)
+*.log
+
+# Все файлы в logs/ независимо от глубины
+logs/**
+
+# Все .py файлы в любой subdirectory под src/
+src/**/*.py
+
+# Все __pycache__ на любом уровне
+**/__pycache__/
+```
+
+В реальности конкретно `*.pyc` будет матчиться рекурсивно и без `**` — потому что паттерн без `/` означает "имя файла где угодно". Но если паттерн содержит `/`, Git становится строже:
+
+```gitignore
+# Только prod_data на самом верху data/
+data/prod_data/
+
+# prod_data на любой глубине под data/
+data/**/prod_data/
+```
+
+<Callout type="note">
+Простое правило: если у тебя в паттерне есть `/` где-то кроме начала и конца — Git трактует его как путь относительно `.gitignore`. Без `**` он не уйдёт глубже одной директории. Когда сомневаешься — поставь `**` явно.
+</Callout>
+
+---
+
+## Хитрость 4: `!` для отрицания
+
+`!` отменяет предыдущий ignore. Это позволяет делать "игнорировать всё, кроме одного":
+
+```gitignore
+# Игнорировать все .env файлы
+.env*
+
+# Но НЕ .env.example (он должен быть в репо как шаблон)
+!.env.example
+```
+
+Порядок имеет значение. Git идёт по паттернам сверху вниз, и каждый следующий может переопределить решение предыдущего. Если поменять местами:
+
+```gitignore
+!.env.example
+.env*           ← теперь это перекроет !.env.example, .env.example БУДЕТ игнорироваться
+```
+
+Самый частый use case — "игнорируй всё в директории, кроме одного файла":
+
+```gitignore
+# Игнорировать всю data/
+data/*
+
+# Но не data/README.md (объясняет структуру)
+!data/README.md
+```
+
+<Callout type="warning">
+Ограничение: если родительская директория уже игнорируется, файлы внутри **нельзя** "де-игнорировать" обратно. Например, `data/` (с trailing slash) игнорирует всю директорию, и `!data/README.md` уже не сработает. Чтобы было можно отменить — игнорируй содержимое, а не саму директорию: `data/*` + `!data/README.md`.
+</Callout>
+
+---
+
+## Иерархия .gitignore: три уровня
+
+В одном проекте может быть несколько `.gitignore`, и они работают вместе. Git ищет правила в трёх местах:
+
+<DiagramContainer title="Иерархия .gitignore от частного к общему" color="indigo">
+  <FlowColumn className="p-4 gap-3">
+    <Tooltip content="Самый специфичный — игнор для конкретной поддиректории">
+      <DataBox label="per-subdir .gitignore" className="border-indigo-500/30 w-96 mx-auto">
+        <div className="text-xs">project/data/.gitignore — действует только в data/</div>
+      </DataBox>
+    </Tooltip>
+    <Arrow direction="down" label="overrides" />
+    <Tooltip content="Главный .gitignore проекта — версионируется, commit-ится">
+      <DataBox label="repo .gitignore" className="border-blue-500/30 w-96 mx-auto">
+        <div className="text-xs">project/.gitignore — общий для всего репо, в Git</div>
+      </DataBox>
+    </Tooltip>
+    <Arrow direction="down" label="overrides" />
+    <Tooltip content="Глобальный — для твоей машины, не версионируется, личное">
+      <DataBox label="global .gitignore" className="border-purple-500/30 w-96 mx-auto">
+        <div className="text-xs">~/.config/git/ignore — для всех твоих проектов</div>
+      </DataBox>
+    </Tooltip>
+  </FlowColumn>
+</DiagramContainer>
+
+**1. Global .gitignore** — твоя машина, личные привычки. Здесь должно быть только то, что специфично для **твоего окружения**, а не для проекта.
+
+```bash
+# Настроить глобальный .gitignore (Git подхватит автоматически)
+git config --global core.excludesfile ~/.gitignore_global
+
+# Положить туда то, что специфично для тебя
+echo ".DS_Store" >> ~/.gitignore_global
+echo ".idea/" >> ~/.gitignore_global
+echo "*.swp" >> ~/.gitignore_global
+```
+
+Что сюда: OS-мусор (`.DS_Store` на macOS), IDE-конфиги (`.idea/`, `.vscode/`), редактор swap-файлы. То, что зависит от твоей машины, а не от проекта.
+
+**2. Repo .gitignore** — главный файл, который видят коллеги. Сюда — всё, что специфично для **проекта**: язык, фреймворк, build-артефакты.
+
+**3. Per-subdir .gitignore** — для специфики поддиректории. Например, `data/.gitignore` может игнорировать все CSV, но позволять `README.md`. Это удобнее, чем громоздить `data/**/*.csv` в корневом.
+
+<Callout type="tip">
+Правило: что должно быть у **всех** в команде — в repo .gitignore. Что должно быть у **тебя** — в global .gitignore. Не клади `.idea/` в repo .gitignore коллективного проекта (это твой выбор IDE, не их). Не клади `.env` в global .gitignore (это правило проекта, а не твоё личное).
+</Callout>
+
+---
+
+## Debugging: почему файл игнорируется?
+
+Самая частая ситуация: добавил файл в `.gitignore`, всё равно попадает в коммит. Или наоборот: думал, что игнорируется, а Git его не видит.
+
+Команда `git check-ignore -v <file>` показывает, **какое именно правило** матчит файл:
+
+```bash
+$ git check-ignore -v .env
+.gitignore:5:.env*    .env
+
+$ git check-ignore -v data/raw/dataset.csv
+.gitignore:12:data/raw/    data/raw/dataset.csv
+
+$ git check-ignore -v src/main.py
+# Тишина — значит файл НЕ игнорируется
+```
+
+Расшифровка: `file:line:pattern    matched`. То есть для `.env` совпадение нашлось в `.gitignore` строка 5 — паттерн `.env*`.
+
+Без `-v` команда просто скажет, игнорируется или нет (по exit code). С `-v` — покажет, почему.
+
+<Callout type="danger">
+Главный gotcha: если файл уже **зафиксирован** в Git (был добавлен через `git add` до того, как попал в `.gitignore`), `.gitignore` его не уберёт. Нужно явно `git rm --cached <file>` — удаляет из индекса, оставляет в filesystem. После этого `.gitignore` начнёт работать.
+</Callout>
+
+Пример:
+
+```bash
+# Случайно закоммитил .env
+$ git add .env && git commit -m "oops"
+
+# Добавил в .gitignore — но Git всё равно его видит
+$ echo ".env" >> .gitignore
+$ git status
+# .gitignore изменён, но .env не "ignored"
+
+# Удалить из индекса
+$ git rm --cached .env
+$ git commit -m "remove .env from tracking"
+
+# Теперь .gitignore работает
+```
+
+---
+
+## Hands-on: .gitignore для Python ETL проекта
+
+Соберём .gitignore для типичного DE-репо — Python ETL c Jupyter notebooks и raw data:
+
+```gitignore
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Виртуальные окружения
+.venv/
+venv/
+env/
+.python-version
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Coverage и тесты
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# === Jupyter ===
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# === Секреты ===
+.env
+.env.local
+.env.*.local
+!.env.example
+secrets.yaml
+credentials.json
+*.pem
+
+# === Данные ===
+# Все raw данные — никогда в Git
+data/raw/
+data/interim/
+data/processed/
+
+# Но эти файлы — README — оставить
+!data/raw/README.md
+!data/interim/README.md
+!data/processed/README.md
+
+# Локальные дампы и большие файлы
+*.parquet
+*.csv
+!data/samples/*.csv
+*.duckdb
+*.sqlite
+
+# === Airflow ===
+logs/
+plugins/__pycache__/
+airflow.db
+airflow.cfg
+
+# === DBT ===
+target/
+dbt_packages/
+logs/
+
+# === IDE (если команда договорилась) ===
+.vscode/settings.json
+.idea/
+
+# === OS ===
+.DS_Store
+Thumbs.db
+desktop.ini
+```
+
+Разберём логику секций:
+
+- **Python** — `__pycache__/`, `.venv/`, pyc-файлы. Стандарт.
+- **Jupyter** — `.ipynb_checkpoints/` создаётся jupyter автоматически каждые N минут. В Git не нужен.
+- **Секреты** — `.env*` всё, кроме `.env.example`. Это критично, мы вернёмся к этому в модуле 17.
+- **Данные** — `data/raw/` целиком исключается, но README в каждой поддиректории остаётся. Альтернатива — `data/**/*.csv` + `!data/samples/*.csv` (sample-данные для тестов оставить).
+- **Airflow/DBT** — логи и кэши специфичных инструментов.
+
+<Callout type="tip">
+Для secret-файлов всегда держи `.env.example` в репо с пустыми значениями — это документация того, какие переменные ожидаются. Реальный `.env` — игнорируется.
+</Callout>
+
+---
+
+## Попробуй сам
+
+Запусти этот сценарий — он показывает все ключевые точки за 3 минуты:
+
+```bash
+# Создай тестовый репо
+mkdir gitignore-demo && cd gitignore-demo
+git init
+
+# Создай файлы и директории
+mkdir -p data/raw data/samples logs src
+touch .env .env.example
+touch data/raw/big.csv data/samples/test.csv
+touch logs/app.log src/main.py src/main.pyc
+touch .DS_Store
+
+# Посмотри — что Git видит
+git status -s
+# ?? .DS_Store
+# ?? .env
+# ?? .env.example
+# ?? data/
+# ?? logs/
+# ?? src/
+
+# Создай .gitignore
+cat > .gitignore <<'EOF'
+.DS_Store
+.env
+!.env.example
+*.pyc
+logs/
+data/raw/
+EOF
+
+# Теперь Git видит только то, что нужно
+git status -s
+# ?? .env.example
+# ?? .gitignore
+# ?? data/samples/
+# ?? src/main.py
+
+# Проверь — почему .env игнорируется?
+git check-ignore -v .env
+# .gitignore:2:.env    .env
+
+# Почему data/raw/ игнорируется?
+git check-ignore -v data/raw/big.csv
+# .gitignore:6:data/raw/    data/raw/big.csv
+
+# А почему data/samples/test.csv НЕ игнорируется?
+git check-ignore -v data/samples/test.csv
+# (тишина — не игнорируется)
+```
+
+Это базовая mental модель. В следующем уроке посмотрим на готовые шаблоны от GitHub, которые покрывают 90% случаев.
+
+---
+
+<KnowledgeCheck
+  question="У тебя в репо есть `data/config.yaml` (нужный), `config.yaml` в корне (с секретами, должен быть скрыт) и `api/config.yaml` (тоже нужный). Какой паттерн в .gitignore корректно скроет только корневой?"
+  answer="`/config.yaml` — leading slash якорит паттерн к корню репозитория. Если написать просто `config.yaml`, Git проигнорирует все три файла (паттерн без слешей матчится по имени везде в дереве). Альтернатива — указать полный путь `config.yaml` в корне и явно отменить остальные через `!data/config.yaml` `!api/config.yaml`, но это хрупкое решение: появится новая директория с config.yaml — снова игнорируется. Якорь `/config.yaml` — самое чистое и безопасное решение. Дополнительная проверка: `git check-ignore -v data/config.yaml` должен молчать, `git check-ignore -v config.yaml` — показать матч."
+/>

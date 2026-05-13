@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "12-workflows/04-which-to-choose",
+  "moduleId": "12-workflows",
+  "_meta": { "idPrefix": "git-m12-04" },
+  "questions": [
+    {
+      "id": "git-m12-04-q1",
+      "type": "multiple-choice",
+      "question": "Какой workflow для команды 10 DE в SaaS с continuous deployment?",
+      "options": [
+        { "id": "a", "text": "GitFlow для stability" },
+        { "id": "b", "text": "GitHub Flow. SaaS + continuous deployment + средняя команда — classic DE setup, ~90% таких команд работают по GitHub Flow. main всегда production, feature branches 1-3 дня, auto-deploy on merge. Простота позволяет быстро итерировать без overhead release process" },
+        { "id": "c", "text": "Trunk-Based" },
+        { "id": "d", "text": "Direct push без branches" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Decision matrix factors: размер команды (10 = medium), deploy freq (continuous = частый), тип продукта (SaaS), CI/CD зрелость (assumed normal). Match — GitHub Flow. Trunk-Based для очень mature high-velocity (FAANG-level). GitFlow для versioned products. Direct push — solo only. 10 DE SaaS — sweet spot для GitHub Flow.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m12-04-q2",
+      "type": "multiple-choice",
+      "question": "Какой workflow для open-source DE library (например, custom Airflow provider) с semver releases каждые 2 недели?",
+      "options": [
+        { "id": "a", "text": "Direct push to main" },
+        { "id": "b", "text": "GitFlow или hybrid (GitHub Flow + release branches). Versioned product с semver — main use case GitFlow. Stable releases на main с tags v1.0.0, v1.1.0. develop для активной разработки. release branches для preparation. hotfix branch для urgent patches. Audit trail каждой version explicit" },
+        { "id": "c", "text": "TBD без flags" },
+        { "id": "d", "text": "Чистый GitHub Flow" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Versioned product с bi-weekly releases = match для GitFlow. Release planning, prep, patches — все имеют чёткие места в workflow. Audit: какой commit в какой версии — explicit через main tags. Customers могут pin specific version и получать patches через release branches. Modern alternatives: hybrid (GitHub Flow + release branches без develop) — упрощённый GitFlow.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m12-04-q3",
+      "type": "multiple-choice",
+      "question": "Как junior должен узнать workflow в новой команде?",
+      "options": [
+        { "id": "a", "text": "Использовать GitFlow по умолчанию" },
+        { "id": "b", "text": "(1) Спросить tech lead прямо 'какой у нас workflow?'; (2) Прочитать CONTRIBUTING.md или onboarding docs в репо; (3) Посмотреть git log --graph --oneline -50 — паттерн (merge commits vs squash vs linear); (4) Открыть 5-10 recent merged PRs — из/в какие ветки, merge type; (5) Спросить peer 'я открыл первый PR — посмотри правильно?'. Не предполагать — узнавать" },
+        { "id": "c", "text": "Использовать что нравится" },
+        { "id": "d", "text": "Скопировать с GitHub trending" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Junior на onboarding должен active inquiry. Ask + read + observe + peer review. Каждая команда имеет свои conventions (CODEOWNERS, branch naming, PR template, merge strategy). Не предполагать — sign of professional maturity. CONTRIBUTING.md или docs обычно документируют процесс. Git history reveals patterns (если main log линейный — squash или rebase merge; если merge commits — merge commit strategy). 5 первых PR от tech lead — best learning.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m12-04-q4",
+      "type": "multiple-choice",
+      "question": "Anti-pattern 'cargo cult GitFlow' — это что?",
+      "options": [
+        { "id": "a", "text": "Использование GitFlow в open-source" },
+        { "id": "b", "text": "Junior читает Driessen 2010 туториал, копирует GitFlow в DE-репо где нет versioned releases. Создаёт develop, release branches которые никто не использует, hotfix flow для regular bugs. Через 3 месяца: forgotten merges, dead release branches, overhead, скорость упала 3x. Cargo cult — копирование без понимания зачем. Fix: спросить 'зачем GitFlow здесь?', если нет конкретной причины — не использовать" },
+        { "id": "c", "text": "Использование любого workflow" },
+        { "id": "d", "text": "Старый GitFlow подход" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Cargo cult — копирование процесса без понимания цели. Driessen 2010 был для специфического case (versioned releases), но стал популярным = junior копируют везде. В SaaS DE без versioned releases GitFlow — anti-pattern: overhead убивает скорость, dead branches накапливаются. Always ask 'зачем' прежде copy. Если answer — 'не знаю, так у всех' — это red flag.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m12-04-q5",
+      "type": "true-false",
+      "question": "В реальном мире команды часто используют hybrid workflows (например, GitHub Flow + release branches), а не чистые GitHub Flow / GitFlow / TBD.",
+      "correctAnswer": true,
+      "explanation": "Да, hybrid distinct и normal. Apache Airflow community использует GitHub Flow с release branches для supported versions (v2.5.x, v2.6.x). Многие SaaS используют GitHub Flow + tagged releases (без release branches, просто markers). TBD-ориентированные команды могут иметь emergency hotfix flow вне normal trunk. Реальный workflow — это **comb of practices** match specific team needs, не pure template. Pure workflow редко match real world — flexibility важна. Junior должен understand принципы, чтобы adapt к team's specific hybrid.",
+      "bloomLevel": "conceptual"
+    }
+  ]
+}

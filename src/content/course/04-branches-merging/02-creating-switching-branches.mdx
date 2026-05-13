@@ -1,0 +1,443 @@
+---
+title: "git branch, git switch — создание и переключение веток"
+description: "Современная замена git checkout: git switch / git restore. Создание, переименование, удаление веток. git switch - для toggling"
+order: 2
+difficulty: "beginner"
+estimatedTime: 18
+topics: ["Git", "Branches", "git switch", "git checkout", "git restore"]
+---
+
+# git branch, git switch — создание и переключение веток
+
+В современном Git (2.23+, июль 2019) появились две новые команды: **`git switch`** и **`git restore`**. Они разделили перегруженный `git checkout`, который раньше делал десять разных вещей в зависимости от аргументов. В 2026 году `git switch` и `git restore` — это рекомендуемый способ, а `git checkout` — legacy.
+
+В этом уроке разберём, как создавать, переключать, переименовывать и удалять ветки в современном Git. С практикой и типичными ошибками.
+
+---
+
+## Почему git switch вместо git checkout
+
+`git checkout` исторически делал две очень разные вещи:
+
+- Переключаться между ветками (`git checkout main`)
+- Восстанавливать файлы из коммитов (`git checkout file.py`)
+
+Это вызывало путаницу: одна команда с похожим синтаксисом делала радикально разное. Если случайно набрать `git checkout main` в репозитории, где есть файл с именем `main` — Git попытается восстановить файл и сломает что-то.
+
+В Git 2.23 (август 2019) это разделили:
+
+<DiagramContainer title="git checkout -> git switch + git restore" color="indigo">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Старое: git checkout" variant="warning" tooltip="Перегруженная команда. Делала и переключение веток, и восстановление файлов, и detached HEAD, и многое другое">checkout</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="git switch" variant="highlight" tooltip="Только переключение между ветками и создание новых. Простое назначение, безопасное">switch (branches)</DataBox>
+      <DataBox label="git restore" variant="highlight" tooltip="Только восстановление файлов: из HEAD, из index, отмена staged. Не трогает ветки">restore (files)</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+На май 2026 `git switch` и `git restore` — стабильные, проверенные команды (5+ лет в production). `git checkout` всё ещё работает, но в новом коде лучше использовать новые команды.
+
+---
+
+## Создание новых веток
+
+### Способ 1: `git switch -c <name>`
+
+Создать и сразу переключиться:
+
+```bash
+git switch -c feature/oauth
+# Switched to a new branch 'feature/oauth'
+```
+
+`-c` (или `--create`) говорит: «создать новую ветку». Без `-c` команда попыталась бы переключиться на существующую ветку и упала с ошибкой.
+
+### Способ 2: `git branch <name>` без переключения
+
+Создать ветку, но не переключаться:
+
+```bash
+git branch feature/cache
+# (ветка создана, но вы остались на текущей)
+
+git branch
+#   feature/cache
+# * feature/oauth   ← всё ещё здесь
+#   main
+```
+
+### Способ 3: создать от конкретного коммита
+
+```bash
+git switch -c hotfix/bug-123 abc1234
+# Создаёт ветку на коммите abc1234 и переключается
+```
+
+Полезно для hotfix-веток от старого релиза, или для ветки на конкретной точке истории.
+
+### Способ 4: создать от другой ветки
+
+```bash
+git switch -c feature/admin develop
+# Создаёт feature/admin на основе ветки develop (а не текущей)
+```
+
+---
+
+## Переключение между ветками
+
+### Просто переключиться
+
+```bash
+git switch main
+# Switched to branch 'main'
+```
+
+При переключении Git:
+
+1. Обновляет `.git/HEAD` на новую ветку
+2. Обновляет working tree, чтобы файлы соответствовали состоянию новой ветки
+3. Обновляет index
+
+### Что если есть незакоммиченные изменения
+
+Git попытается перенести их на новую ветку:
+
+```bash
+# Создаём изменения
+echo "WIP code" > work.py
+
+git switch main
+# error: Your local changes to the following files would be overwritten by checkout:
+# 	work.py
+# Please commit your changes or stash them before you switch branches.
+```
+
+Git отказывается, чтобы не потерять вашу работу. Варианты:
+
+- **Закоммитить** на текущей ветке: `git add . && git commit -m "WIP"`
+- **Stash**: `git stash` (отложить временно, потом `git stash pop` — модуль 10)
+- **Если изменения не нужны**: `git restore .` (отменить)
+- **Принудительно переключиться** (потерять изменения): `git switch --discard-changes main` (опасно!)
+
+Чаще всего — `git stash`. Удобно: отложили работу, переключились, сделали что-то, вернулись, восстановили `git stash pop`.
+
+### Toggling: `git switch -`
+
+Полезный shortcut — переключиться на **предыдущую** ветку:
+
+```bash
+git switch -
+# Switched to branch 'feature/oauth'
+git switch -
+# Switched to branch 'main'
+```
+
+Минус как имя — это «предыдущая ветка». Аналог `cd -` в shell. Полезно, когда часто прыгаете между двумя ветками.
+
+---
+
+## Старый синтаксис: git checkout
+
+Те же операции через legacy `git checkout`:
+
+```bash
+# Создать и переключиться
+git checkout -b feature/oauth
+# Эквивалент: git switch -c feature/oauth
+
+# Переключиться на существующую
+git checkout main
+# Эквивалент: git switch main
+
+# Переключиться на предыдущую
+git checkout -
+# Эквивалент: git switch -
+
+# Восстановить файл из последнего коммита
+git checkout -- file.py
+# Эквивалент: git restore file.py
+
+# Восстановить файл из конкретного коммита
+git checkout abc1234 -- file.py
+# Эквивалент: git restore --source=abc1234 file.py
+```
+
+`git checkout` будет работать в Git ещё долго (никуда не денется в обозримом будущем), но в новых проектах используйте `git switch` / `git restore`.
+
+---
+
+## Переименование ветки
+
+### Переименовать текущую ветку
+
+```bash
+git branch -m new-name
+# Текущая ветка переименована в new-name
+```
+
+### Переименовать конкретную ветку
+
+```bash
+git branch -m old-name new-name
+```
+
+### Если ветка уже запушена
+
+```bash
+# 1. Локально переименуйте
+git branch -m old-name new-name
+
+# 2. Удалите старую на remote
+git push origin --delete old-name
+
+# 3. Запушьте новую и установите upstream
+git push origin -u new-name
+```
+
+Подробнее про remotes и upstream — модуль 05.
+
+---
+
+## Удаление веток
+
+```bash
+# Безопасное удаление (только если merged в текущую)
+git branch -d feature/old
+
+# Принудительное (с возможной потерей коммитов)
+git branch -D feature/dead-end
+
+# Удалить локальную ветку (откатиться, если на ней)
+git switch main
+git branch -d feature/done
+```
+
+`-d` (lowercase): безопасное удаление. Git откажет, если ветка содержит коммиты, не слитые в текущую (или upstream):
+
+```bash
+git branch -d feature/uncommitted-work
+# error: The branch 'feature/uncommitted-work' is not fully merged.
+# If you are sure you want to delete it, run 'git branch -D feature/uncommitted-work'.
+```
+
+`-D` (uppercase): принудительное удаление. Используйте, если уверены, что ветка не нужна (или если она нужна, но вы знаете, что есть копия где-то ещё — например, на remote).
+
+### Удалить удалённую ветку
+
+```bash
+git push origin --delete feature/old
+# или сокращённо:
+git push origin :feature/old
+```
+
+Это удалит ветку на сервере. Локальные клоны других людей всё ещё могут иметь её как `remotes/origin/feature/old` (зомби), пока они не сделают `git fetch --prune`.
+
+---
+
+## Tracking branches (отслеживающие ветки)
+
+Когда вы клонируете репозиторий, локальная ветка обычно «отслеживает» одноимённую ветку на сервере:
+
+```bash
+git clone git@github.com:user/repo.git
+cd repo
+git branch -vv
+# * main 1234567 [origin/main] Initial commit
+```
+
+`[origin/main]` — это **upstream branch**: «моя ветка main отслеживает origin/main». Из этого:
+
+- `git push` без аргументов пушит в upstream
+- `git pull` без аргументов тянет из upstream
+- `git status` показывает «ahead/behind»: «локально на 3 коммита впереди, на 2 отстаёт»
+
+Установить upstream:
+
+```bash
+git switch feature/x
+git push -u origin feature/x
+# -u (или --set-upstream) одновременно пушит и устанавливает upstream
+```
+
+После этого `git push` и `git pull` будут работать без аргументов на этой ветке.
+
+<DiagramContainer title="Локальная ветка + tracking branch" color="emerald">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Local main" tooltip="Ваша локальная ветка в .git/refs/heads/main">main</DataBox>
+      <Arrow direction="right" label="tracks" />
+      <DataBox label="origin/main" tooltip="Отслеживающая ветка в .git/refs/remotes/origin/main. Кеш состояния на сервере" variant="highlight">origin/main</DataBox>
+      <Arrow direction="right" label="ссылка на" />
+      <DataBox label="Server: main" tooltip="Ветка main на сервере (GitHub)">remote: main</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="git push" tooltip="Local main -> Server main, обновляет origin/main">push</DataBox>
+      <DataBox label="git fetch" tooltip="Server main -> origin/main. Локальный main не трогает">fetch</DataBox>
+      <DataBox label="git pull" tooltip="git fetch + git merge origin/main в local main">pull = fetch + merge</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+---
+
+## Полезные опции git branch
+
+```bash
+# Текущая ветка (просто имя)
+git branch --show-current
+# main
+
+# Локальные ветки с подробностями
+git branch -v
+#   feature/x abc1234 Add OAuth
+# * main      def5678 Merge feature/x
+
+# Все ветки (локальные + удалённые)
+git branch -a
+
+# Только удалённые
+git branch -r
+
+# Удалённые + сравнение с upstream
+git branch -vv
+
+# Ветки, слитые в текущую (безопасно удалять)
+git branch --merged
+
+# Ветки, ещё не слитые
+git branch --no-merged
+
+# Поиск по имени (с wildcards)
+git branch --list 'feature/*'
+```
+
+---
+
+## Типичные ошибки
+
+### «Случайно работал в main»
+
+Симптом: переключились на main, не заметили, нашлёпали коммитов. Хотели в feature-ветку.
+
+Восстановление:
+
+```bash
+# Создаём новую ветку на текущем HEAD
+git switch -c feature/proper-branch
+
+# Возвращаем main к origin/main (или к нужной точке)
+git switch main
+git reset --hard origin/main
+
+# Теперь коммиты в feature/proper-branch, main чист
+```
+
+### «Я сделал git push, и моя ветка origin/main потерялась»
+
+Симптом: `git branch -a` не показывает `remotes/origin/feature/x` после push.
+
+Часто это: вы запушили без `-u`, локальная ветка не «связана» с remote-веткой:
+
+```bash
+git branch -vv
+# * feature/x abc1234 Add OAuth         ← нет [origin/feature/x]
+#   main      def5678 [origin/main]
+
+# Установить upstream:
+git push -u origin feature/x
+```
+
+### «error: branch 'X' not found»
+
+```bash
+git switch feature/oauth
+# error: pathspec 'feature/oauth' did not match any file(s) known to git
+```
+
+Часто: ветка существует только на remote, локально её нет. Создайте локальную:
+
+```bash
+git switch -c feature/oauth origin/feature/oauth
+# Или с Git 2.23+:
+git switch feature/oauth  # автоматически создаст локальную, если есть в origin/
+```
+
+---
+
+## Best practices
+
+1. **Один task = одна ветка.** Не работайте по нескольким задачам в одной ветке.
+2. **Префиксы по типу задачи**: `feature/`, `fix/`, `hotfix/`, `chore/`, `release/`.
+3. **Связь с issue tracker**: `feat/PROJ-1234-add-oauth` — по имени ветки сразу понятно, что за задача.
+4. **Удаляйте ветки после merge** — `git branch -d` локально, `git push origin --delete` на сервере. На GitHub можно настроить автоматическое удаление после merge PR.
+5. **Не работайте на main напрямую** — даже соло-разработчику полезно: разделяет «черновики» (feature-branches) и «опубликованную» работу (main).
+
+---
+
+## Попробуй сам
+
+1. Создайте репозиторий и поиграйтесь с ветками:
+
+```bash
+mkdir -p ~/git-sandbox/lesson-04-creating
+cd ~/git-sandbox/lesson-04-creating
+git init
+echo "initial" > a.txt
+git add . && git commit -m "Initial"
+
+# Создаём ветки
+git switch -c feature/login
+git switch -c feature/oauth
+git switch main
+git switch -c hotfix/bug-123
+
+git branch
+```
+
+2. Toggling между ветками:
+
+```bash
+git switch main
+git switch -        # вернулись на hotfix/bug-123
+git switch -        # снова на main
+```
+
+3. Коммит на feature-ветке:
+
+```bash
+git switch feature/oauth
+echo "oauth" > oauth.py
+git add . && git commit -m "Add OAuth stub"
+
+# Сравните: feature/oauth ушла вперёд, main не двигалась
+git branch -v
+git log --oneline --all --graph
+```
+
+4. Удаление ветки:
+
+```bash
+git switch main
+git branch -d feature/login   # должно работать (ничего не было)
+git branch -d feature/oauth   # потребует -D, потому что коммиты не слиты
+git branch -D feature/oauth
+```
+
+5. Переименование:
+
+```bash
+git switch hotfix/bug-123
+git branch -m hotfix/auth-bug-fix
+git branch
+```
+
+---
+
+<KnowledgeCheck
+  question="В чём практическая разница между `git switch -c feature/x` и `git checkout -b feature/x`? Можно ли использовать checkout навсегда?"
+  answer="Технически они эквивалентны: обе команды создают новую ветку и переключаются на неё. Разница: 1) Семантика — switch явно говорит «переключаюсь между ветками», checkout перегружен и может означать многое. 2) Безопасность — checkout с теми же аргументами может неожиданно сделать другое (например, если есть файл с именем ветки). switch не имеет такой неоднозначности. 3) Modernity — switch — это рекомендуемая команда с Git 2.23 (2019). В новых обучающих материалах, документации, code review-комментариях ожидается switch. checkout всё ещё работает, никуда не денется, но в коде junior выглядит дёшево. Можно использовать checkout — мир не рухнет. Но лучше привыкнуть к switch/restore сразу. Через 2-3 года checkout-only синтаксис будет восприниматься как «старая школа». Аналогично: можно писать на Python 2 в 2026, но лучше не надо."
+/>

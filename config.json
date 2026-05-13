@@ -1,0 +1,60 @@
+{
+  "id": "git-fundamentals",
+  "title": "Git для Junior Data Engineer",
+  "description": "Полный практический курс по Git для будущего Junior Data Engineer. От первого `git init` до восстановления потерянных коммитов через reflog, от настройки SSH-ключей до настройки CI на GitHub Actions. Без зазубривания команд — с пониманием, что хранится в .git/, как работает three-way merge, почему rebase публичных веток — катастрофа, и как не запушить .env с боевыми паролями. Целевая версия — Git 2.54+ (стабильная на 2026 год).",
+  "author": "Lev Neganov",
+  "difficulty": "beginner",
+  "language": "ru",
+  "version": "1.0.0",
+  "modules": [
+    { "id": "00-course-intro", "title": "Введение в курс" },
+    { "id": "01-what-is-git", "title": "Что такое Git и системы контроля версий" },
+    { "id": "02-install-config", "title": "Установка и настройка" },
+    { "id": "03-three-trees", "title": "Три области: working tree, index, repository" },
+    { "id": "04-branches-merging", "title": "Ветки и слияния" },
+    { "id": "05-remotes", "title": "Удалённые репозитории" },
+    { "id": "06-conflicts", "title": "Конфликты слияния" },
+    { "id": "07-rebase", "title": "Rebase и переписывание истории" },
+    { "id": "08-history-inspection", "title": "История и инспекция (log, diff, blame, bisect)" },
+    { "id": "09-undo-reflog", "title": "Отмена изменений и reflog" },
+    { "id": "10-stash-tags-cherry-pick", "title": "Stash, теги, cherry-pick" },
+    { "id": "11-pull-requests", "title": "Pull Requests и code review" },
+    { "id": "12-workflows", "title": "Git workflows: GitHub Flow, GitFlow, trunk-based" },
+    { "id": "13-gitignore-attributes", "title": ".gitignore и .gitattributes" },
+    { "id": "14-lfs-big-data", "title": "Git LFS и большие данные" },
+    { "id": "15-hooks-automation", "title": "Хуки и pre-commit автоматизация" },
+    { "id": "16-submodules-worktrees", "title": "Submodules, subtrees, worktrees" },
+    { "id": "17-secrets-security", "title": "Секреты и безопасность" },
+    { "id": "18-ci-cd-github-actions", "title": "CI/CD basics с GitHub Actions" },
+    { "id": "19-recovery", "title": "Восстановление сломанного репозитория" },
+    { "id": "20-capstone", "title": "Capstone: реальный DE-workflow от clone до merge" }
+  ],
+  "tags": [
+    "git",
+    "version-control",
+    "data-engineering",
+    "junior",
+    "github",
+    "gitlab",
+    "pull-request",
+    "code-review",
+    "ci-cd",
+    "github-actions",
+    "git-lfs",
+    "pre-commit",
+    "rebase",
+    "merge"
+  ],
+  "prerequisites": {
+    "courses": [],
+    "external": [
+      "Базовое знакомство с терминалом: cd, ls, mkdir, запуск команды по пути (macOS Terminal, Linux shell, или Windows WSL)",
+      "Любой текстовый редактор — VS Code, JetBrains, vim, nano",
+      "Аккаунт на GitHub (бесплатный) — создадим в модуле 02"
+    ]
+  },
+  "estimatedHours": 55,
+  "pricing": {
+    "type": "free"
+  }
+}

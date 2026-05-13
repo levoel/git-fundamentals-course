@@ -1,0 +1,384 @@
+---
+title: "Золотое правило rebase и безопасный force-push"
+description: "Don't rebase published branches — почему; force-with-lease vs force; что значит shared history"
+order: 4
+difficulty: "intermediate"
+estimatedTime: 18
+topics: ["Git", "rebase", "force-push", "shared-history"]
+---
+
+# Золотое правило rebase и безопасный force-push
+
+В Git есть **одно главное правило о rebase**, которое существует со времён Linus Torvalds и не меняется: **никогда не переписывай опубликованную историю**. Нарушение этого правила — самый частый способ создать катастрофу в команде.
+
+В этом уроке мы разбираемся, почему правило именно такое, что такое "shared history", когда rebase ОК и когда — нет, и как пользоваться `--force-with-lease` вместо опасного `--force`.
+
+---
+
+## Что значит "опубликованная история"
+
+Опубликованная история — это коммиты, которые **могли видеть другие люди**:
+
+- Коммиты, которые ты запушил в shared ветку (`main`, `develop`, `release/*`).
+- Коммиты в feature-ветке, на которую открыт PR и ревьюер уже что-то писал.
+- Коммиты в feature-ветке, которую другой разработчик мог клонировать локально.
+- Коммиты, на которые ссылаются external systems — Jira tickets, Slack ссылки, CI logs.
+
+**Не опубликованная** история — то, что есть **только у тебя локально**, не было запушено никуда:
+
+- Коммиты в локальной ветке до первого `git push`.
+- Коммиты, которые ты только что сделал, и они существуют только у тебя.
+
+<DiagramContainer title="Опубликованная vs локальная история" color="purple">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center items-center flex-wrap">
+      <Tooltip content="Локально: только у тебя — можно делать что угодно">
+        <DataBox label="LOCAL ONLY" className="border-green-500/30 w-56">
+          <div className="text-xs">Rebase OK</div>
+          <div className="text-xs text-zinc-500">До первого push</div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="После push: видят коллеги и CI — рискованно">
+        <DataBox label="SHARED" className="border-orange-500/30 w-56">
+          <div className="text-xs">Rebase ОПАСНО</div>
+          <div className="text-xs text-zinc-500">Только с согласованием</div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="main/master/release: НИКОГДА не переписывать">
+        <DataBox label="SHARED + PROTECTED" className="border-red-500/30 w-56">
+          <div className="text-xs">Rebase ЗАПРЕЩЕН</div>
+          <div className="text-xs text-zinc-500">main, release, develop</div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+---
+
+## Почему правило — fundamental
+
+Помнишь, rebase переписывает SHA коммитов. Это значит: **после rebase old commits и new commits — это разные объекты** в Git.
+
+Сценарий катастрофы:
+
+1. Ты сделал коммиты F1, F2, F3 (SHA `abc`, `def`, `ghi`) на `feature/x`.
+2. Запушил в `origin/feature/x`.
+3. Коллега Alice склонировала ветку и тоже её локально работает: у неё `feature/x` указывает на `ghi`.
+4. Ты сделал `git rebase main`, получил F1', F2', F3' (SHA `xxx`, `yyy`, `zzz`).
+5. Ты сделал `git push --force` — на сервере `feature/x` теперь `zzz`.
+
+Что у Alice?
+
+- Локально её `feature/x` всё ещё на `ghi`.
+- Когда она сделает `git pull`, Git встретится с проблемой: история разошлась.
+- В лучшем случае Alice получит конфликт. В худшем — попытается решить через `merge` и получит **дубликаты коммитов** (F1, F2, F3 + F1', F2', F3') в финальной ветке.
+
+<DiagramContainer title="Катастрофа force-push без согласования" color="red">
+  <FlowColumn className="p-4 gap-3">
+    <Tooltip content="Изначально: ты и Alice на одном и том же коммите ghi">
+      <DataBox label="до твоего rebase" className="border-zinc-500/30 w-96 mx-auto">
+        <div className="text-xs font-mono space-y-1">
+          <div>your local: ...-> abc -> def -> ghi</div>
+          <div>Alice local: ...-> abc -> def -> ghi</div>
+          <div>origin: ...-> abc -> def -> ghi</div>
+        </div>
+      </DataBox>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="Ты сделал rebase + force-push">
+      <DataBox label="после твоего force-push" className="border-red-500/30 w-96 mx-auto">
+        <div className="text-xs font-mono space-y-1">
+          <div>your local: ...-> M3 -> xxx -> yyy -> zzz</div>
+          <div>Alice local: ...-> abc -> def -> ghi (старая!)</div>
+          <div>origin: ...-> M3 -> xxx -> yyy -> zzz</div>
+        </div>
+      </DataBox>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="Alice делает git pull — её рабочее состояние смешивает обе истории">
+      <FlowNode variant="output">Alice: catastrophic merge или потеря коммитов</FlowNode>
+    </Tooltip>
+  </FlowColumn>
+</DiagramContainer>
+
+Это **подрывает доверие к командной работе** и стоит часов на разбор.
+
+---
+
+## Когда rebase ОК
+
+| Сценарий | Безопасность |
+|----------|--------------|
+| Своя local feature ветка, ещё не push | Полностью безопасно — делай что угодно |
+| Своя feature ветка после push, **никто другой её не трогал** | OK с `--force-with-lease` |
+| Своя feature ветка с PR, **ревьюер просил почистить** | OK с `--force-with-lease`, предупреди ревьюера |
+| Своя feature ветка, на которой работает Alice | НЕТ — спросить Alice, согласовать |
+| `develop`, `main`, `release/*` | НИКОГДА |
+| Любая ветка с branch protection | Git/платформа не позволит, и это правильно |
+
+---
+
+## `--force-with-lease`: безопасный force
+
+Когда ты сделал rebase и нужно запушить, обычный push отвергнут:
+
+```bash
+$ git push
+To github.com:acme/repo.git
+ ! [rejected]        feature/x -> feature/x (non-fast-forward)
+```
+
+Git не дурак: твои новые коммиты `xxx, yyy, zzz` не являются продолжением `abc, def, ghi` на сервере. Чтобы их запушить, нужен force.
+
+Есть два варианта:
+
+### `--force` (опасно)
+
+```bash
+git push --force
+```
+
+Слепо перезаписывает удалённую ветку твоей версией. Не проверяет, что было на сервере. Если за время между твоим последним `fetch` и push кто-то напушил коммит — он будет потерян, и ты этого не узнаешь.
+
+### `--force-with-lease` (безопасно)
+
+```bash
+git push --force-with-lease
+```
+
+Перезаписывает, но **только если remote версия совпадает с тем, что ты последний раз видел** через `fetch`. Если кто-то напушил в это время — push отвергнут с ошибкой:
+
+```bash
+$ git push --force-with-lease
+To github.com:acme/repo.git
+ ! [rejected]        feature/x -> feature/x (stale info)
+error: failed to push some refs to 'github.com:acme/repo.git'
+```
+
+Это значит: "ты пытаешься перезаписать ветку, но на сервере чтото поменялось с момента твоего fetch — проверь сначала". Сделай `git fetch`, посмотри, что появилось, и решай дальше.
+
+<Callout type="tip">
+**Правило: используй `--force-with-lease`, никогда просто `--force`**. Можно создать алиас, чтобы не печатать длинное:
+
+```bash
+git config --global alias.pushf 'push --force-with-lease'
+```
+
+Теперь `git pushf` — короткий и безопасный.
+</Callout>
+
+### Git 2.30+: `--force-if-includes`
+
+Дополнительная защита: `--force-if-includes` (Git 2.30, 2020) проверяет ещё одно условие: что у тебя локально учтены **все коммиты**, которые были в твоём reflog для этой ветки. Это спасает от ситуации, когда ты на одном компе сделал rebase, на другом тоже работал, и забыл синхронизироваться.
+
+```bash
+git push --force-with-lease --force-if-includes
+```
+
+Эту комбинацию можно включить дефолтом для force-with-lease:
+
+```bash
+git config --global push.useForceIfIncludes true
+```
+
+После этого `git push --force-with-lease` автоматически проверяет и includes.
+
+---
+
+## Что делать, если уже сломал
+
+Сценарий: ты сделал `git push --force` на shared ветке, коллеги в панике. Не отчаивайся, восстановление возможно.
+
+### Шаг 1: найди старый top
+
+В твоём (или коллегиных) локальных reflog ещё есть старая верхушка ветки:
+
+```bash
+$ git reflog origin/main
+abc1234 origin/main@{0}: fetch origin: forced-update
+def5678 origin/main@{1}: fetch origin: fast-forward
+9876543 origin/main@{2}: fetch origin: fast-forward
+```
+
+Запись `forced-update` — это твой force-push. Перед ней — старая верхушка. В нашем примере это `def5678`.
+
+### Шаг 2: восстановить ветку
+
+```bash
+git push origin def5678:main --force-with-lease
+```
+
+Это перезаписывает `main` на сервере к коммиту `def5678` (старому top, который ты случайно затёр).
+
+### Шаг 3: восстановить свои изменения
+
+Твои изменения теперь в виде "осиротевших коммитов" — они существуют в `.git/objects/`, но на них не указывает никто. Можно сделать ветку:
+
+```bash
+git branch recovery-branch <твой-новый-top>
+```
+
+И уже спокойно разобраться: создать PR из этой ветки, нормально смерджить с reviewers.
+
+### Лучший подход — branch protection
+
+Чтобы такие катастрофы не повторялись, в GitHub/GitLab включают branch protection на `main`:
+
+- Запрет force-push.
+- Required PR + reviews.
+- Required CI checks.
+
+Тогда сама платформа отвергнет force-push, и ты физически не сможешь сломать `main`.
+
+---
+
+## "Shared history" в команде из 1 человека
+
+Может показаться: "я работаю один, нет shared history, могу всё переписывать". Это **частично** верно.
+
+Когда работаешь один:
+
+- На локальных feature-ветках до push — да, переписывай свободно.
+- В public репо (open-source) — есть **зрители**. Кто-то мог уже сделать fork или клон. Force-push в `main` поломает им workflow.
+- Даже у тебя самого — CI builds на GitHub Actions привязаны к SHA коммитов. Force-push сделает их историю странной (failed builds, broken links).
+
+Личные репо для собственных pet projects обычно безопаснее переписывать, но даже там лучше быть консистентным.
+
+---
+
+## Pull после force-push: что делать получателю
+
+Допустим, ты в команде, и партнёр запушил force-push в `feature/shared` (ты заранее согласовал). Что делать тебе локально?
+
+### Вариант 1: `git fetch + git reset --hard`
+
+Если у тебя нет своих локальных коммитов на этой ветке:
+
+```bash
+git fetch origin
+git reset --hard origin/feature/shared
+```
+
+Это просто принимает новую версию, отбрасывая старую.
+
+### Вариант 2: `git pull --rebase`
+
+Если у тебя есть local коммиты, которые надо сохранить:
+
+```bash
+git fetch origin
+git rebase origin/feature/shared
+```
+
+Это перенесёт твои local коммиты на новый top. Может потребовать разрешения конфликтов.
+
+### Вариант 3: спасти свою работу
+
+Если конфликты сложные, можно сначала спасти свои коммиты в отдельную ветку:
+
+```bash
+git branch backup-my-work
+git reset --hard origin/feature/shared
+# Теперь cherry-pick свою работу
+git cherry-pick <твои-коммиты-из-backup-my-work>
+```
+
+---
+
+## Branch protection: что обычно настраивают
+
+В корпоративных репо `main`/`master` обычно защищён следующим:
+
+- **Require pull request before merging** — нельзя прямо push.
+- **Require approvals** — нужно 1-2 апрува от коллег.
+- **Require status checks to pass** — CI должен быть зелёным.
+- **Restrict force pushes** — никаких `--force` в защищённую ветку.
+- **Restrict deletions** — нельзя удалить ветку.
+
+Если в твоей компании этого нет — предложи ввести. Это базовая гигиена.
+
+<Callout type="warning">
+Если ты увидел "успех" `git push --force origin main` без сопротивления — это сигнал, что branch protection не настроен. Не радуйся, это bug. Сообщи DevOps/тимлиду, чтобы включили. Без этого один человек может уничтожить main.
+</Callout>
+
+---
+
+## Cheat sheet: безопасный rebase workflow
+
+```bash
+# 1. На своей local feature ветке делаешь rebase
+git fetch origin
+git rebase origin/main
+# (разрешить конфликты если есть)
+
+# 2. После rebase нужен force-push
+git push --force-with-lease
+
+# 3. Если за это время кто-то напушил (например, ты сам на другом компе)
+$ git push --force-with-lease
+[rejected] (stale info)
+
+# Тогда:
+git fetch origin
+# Посмотри что появилось
+git log HEAD..origin/feature/x
+# Если эти коммиты тебе нужны:
+git rebase origin/feature/x
+git push --force-with-lease
+# Если не нужны (например, неудачный commit с другого компа):
+git push --force-with-lease=feature/x:<known-sha>
+```
+
+---
+
+## Попробуй сам
+
+```bash
+mkdir golden-rule-demo && cd golden-rule-demo
+git init -b main
+echo "init" > f.txt && git add . && git commit -m "init"
+
+# Симулируем 3 коммита
+echo "v1" >> f.txt && git commit -am "v1"
+echo "v2" >> f.txt && git commit -am "v2"
+echo "v3" >> f.txt && git commit -am "v3"
+
+# Создаём "fake remote" локально
+cd ..
+git clone --bare golden-rule-demo fake-remote.git
+cd golden-rule-demo
+git remote add origin ../fake-remote.git
+git push -u origin main
+
+# Теперь делаем "shared" симуляцию
+cd ..
+git clone fake-remote.git alice-clone
+cd alice-clone
+git log --oneline   # видит твои коммиты
+
+# Возвращаемся в твою репо и переписываем history
+cd ../golden-rule-demo
+git rebase -i HEAD~3
+# В редакторе: squash последние два в первый
+# Сохрани
+
+git log --oneline    # один коммит вместо трёх
+git push    # отвергнут: non-fast-forward
+
+git push --force-with-lease
+# Прошло
+
+# Возвращаемся в alice-clone — там беда
+cd ../alice-clone
+git fetch
+git status   # увидишь diverged
+# Если Alice не знала про rebase — она в шоке
+```
+
+---
+
+<KnowledgeCheck
+  question="Тимлид настроил `pull.rebase = true` для команды и сказал: 'после rebase всегда делайте `git push --force-with-lease`, никогда `--force`'. Объясни джуну, в чём конкретно разница, и почему `--force-with-lease` не панацея (когда даже он может что-то сломать)."
+  answer="Разница в момент проверки серверного состояния. **`git push --force`** слепо отправляет твою версию на сервер, перезаписывая что бы там ни было. Если за последние секунды между твоим `git fetch` и `git push` кто-то напушил коммит — он будет уничтожен без предупреждения. **`git push --force-with-lease`** перед перезаписью проверяет: 'совпадает ли текущий SHA remote ветки с тем, что я последний раз скачал через fetch?'. Если совпадает — push идёт. Если нет (кто-то напушил) — push отвергнут с 'stale info', и ты должен сначала разобраться. Когда `--force-with-lease` НЕ панацея: (1) **Двойной push с одного компа в short interval**: если ты делаешь push, кто-то его не успевает заметить, ты делаешь второй push (тоже с lease) — оба пройдут, и ты потеряешь свои же промежуточные изменения. (2) **`git fetch` обновил твой lease**: если ты сделал rebase, потом машинально `git fetch` (вдруг что появилось), и сразу `push --force-with-lease` — твой lease обновился на новейшую remote версию, и push пройдёт, даже если кто-то напушил между fetch и push. (3) **Несколько компов одного человека**: если ты с ноутбука сделал push --force-with-lease, потом на десктопе делаешь fetch, потом push --force-with-lease — твой второй push успешен, но он перетирает первый. Защита от этого — `--force-if-includes` (Git 2.30+): дополнительно проверяет, что у тебя локально есть все коммиты из reflog для этой ветки. Включи: `git config --global push.useForceIfIncludes true`. Финальное правило: даже с lease force-push в shared branch (main, develop) — bad practice. Используй branch protection на стороне платформы (GitHub/GitLab), чтобы запретить force-push в main физически."
+/>

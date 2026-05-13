@@ -1,0 +1,389 @@
+---
+title: "Настройка Git: user, editor, default branch"
+description: "git config global vs local vs system, user.name/email, core.editor, init.defaultBranch=main, pull.ff=only. Где хранится .gitconfig"
+order: 2
+difficulty: "beginner"
+estimatedTime: 16
+topics: ["Git", "Конфигурация", "git config", ".gitconfig"]
+---
+
+# Настройка Git: user, editor, default branch
+
+Git без настройки не позволит сделать ни одного коммита. Минимум нужен ваш user.name и user.email — без них первый же `git commit` остановится с ошибкой «please tell me who you are». Кроме обязательного — есть полезные настройки, которые экономят часы за карьеру. В этом уроке настроим всё, что нужно для нормальной работы.
+
+После урока у вас будет правильно настроенный Git: правильное имя автора, нормальный default branch (`main`), безопасный pull-режим (`ff-only`), и понимание, где хранятся настройки и как их менять.
+
+---
+
+## Уровни конфигурации: system, global, local
+
+Git хранит конфигурацию на трёх уровнях:
+
+<DiagramContainer title="Три уровня конфигурации Git" color="indigo">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="System" tooltip="Применяется ко всем пользователям компьютера. /etc/gitconfig (Linux/macOS) или C:\Program Files\Git\etc\gitconfig (Windows). Редактируется через sudo. Junior почти не использует">--system</DataBox>
+      <DataBox label="Global" variant="highlight" tooltip="Применяется к вашему пользователю. ~/.gitconfig (Unix) или C:\Users\Name\.gitconfig (Windows). Это уровень, который вы будете настраивать чаще всего">--global</DataBox>
+      <DataBox label="Local" tooltip="Применяется только к одному репозиторию. .git/config внутри репо. Используется, когда нужно для конкретного проекта переопределить настройку">--local</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Приоритет" tooltip="Local перебивает global, global перебивает system. То есть конкретная настройка в одном репо может отличаться от глобальной">Local ≫ Global ≫ System</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+На практике 90% настроек — `--global`. На уровне `--local` обычно держат то, что специфично для проекта: другой email (если работаете в нескольких компаниях), специфический gpg-ключ, особые алиасы.
+
+```bash
+# Установить глобально
+git config --global user.name "Ivan Petrov"
+
+# Установить локально (только для текущего репо)
+git config --local user.email "ivan@work-company.com"
+```
+
+---
+
+## Обязательные настройки
+
+### 1. Имя автора
+
+```bash
+git config --global user.name "Иван Петров"
+```
+
+Это имя попадёт во все ваши коммиты как `Author`. Будет видно в `git log`, на GitHub, в blame. Пишите так, как хотите, чтобы вас идентифицировали — обычно реальное имя или ник. Кириллица работает (Git хранит в UTF-8), но многие команды используют латиницу для совместимости с международными командами и tooling.
+
+### 2. Email автора
+
+```bash
+git config --global user.email "ivan.petrov@example.com"
+```
+
+Используется для:
+
+- Идентификации в `git log`
+- Связки с аккаунтом на GitHub/GitLab (чтобы коммиты светились в вашем профиле)
+- Email-уведомлений в проектах, где они настроены
+
+<Callout type="warning">
+Если вы коммитите личный email в публичные репозитории — он становится публичным навсегда. Боты собирают email из commit-истории. Решение: используйте GitHub-noreply email вида `12345+username@users.noreply.github.com` (найдёте в настройках GitHub — Email -> Keep my email private). Подробно про privacy — в модуле 17.
+</Callout>
+
+Для рабочих и личных репозиториев имеет смысл иметь два email: рабочий — на корпоративный gmail, личный — на GitHub no-reply. Переключаемся через `--local` в рабочих репозиториях.
+
+### 3. Default branch name
+
+```bash
+git config --global init.defaultBranch main
+```
+
+С 2020 года индустриальный стандарт — называть основную ветку `main`, а не `master`. Без этой настройки `git init` создаст ветку с именем по умолчанию (которое в Git 2.28+ ещё `master`, если не настроено иначе). GitHub, GitLab, Bitbucket — все используют `main` по умолчанию для новых репозиториев.
+
+<DiagramContainer title="main vs master — почему переход" color="purple">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="До 2020" tooltip="Исторически Git называл ветку master с 2005 года (наследие от BitKeeper). Имя ассоциировалось с master-slave parlance, что в 2020 признано неприемлемым в коммьюнити">master</DataBox>
+      <Arrow direction="right" label="2020" />
+      <DataBox label="С 2020" variant="highlight" tooltip="GitHub переименовал default на main для новых репо в октябре 2020. GitLab — в августе 2020. Git 2.28 добавил настройку init.defaultBranch. Сейчас main — индустриальный стандарт">main</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Просто примите как факт: новые проекты — `main`. Старые legacy-проекты могут остаться на `master`, и это нормально (переименовать можно, но не критично).
+
+### 4. Editor для commit messages
+
+Когда вы делаете `git commit` без `-m "сообщение"`, Git открывает редактор. По умолчанию это `vim` или `vi` — что бесит junior, не знающих vim. Поставьте редактор, который вы знаете:
+
+```bash
+# VS Code (если установлен и в PATH):
+git config --global core.editor "code --wait"
+
+# Sublime Text:
+git config --global core.editor "subl -n -w"
+
+# Nano (есть везде в Linux):
+git config --global core.editor "nano"
+
+# Vim (если знаете):
+git config --global core.editor "vim"
+```
+
+Опция `--wait` для VS Code говорит «не возвращай управление, пока окно не закроется». Без неё Git подумает, что вы сразу закрыли редактор, и не сохранит сообщение.
+
+<Callout type="tip">
+Если случайно открыли vim и не знаете, как выйти: нажмите Escape, потом наберите `:q!` (двоеточие, q, восклицательный знак), нажмите Enter. Это «выйти без сохранения». Самая важная команда vim для тех, кто vim не знает.
+</Callout>
+
+---
+
+## Рекомендуемые настройки
+
+### Pull rebase или merge
+
+Самая спорная настройка Git: что делать, когда `git pull` тянет изменения с сервера, а у вас есть локальные коммиты, ещё не пушенные?
+
+Варианта три:
+
+<DiagramContainer title="Стратегии git pull при расходящейся истории" color="amber">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="pull.ff=only" variant="highlight" tooltip="Безопасный default для junior. Если pull может сделать fast-forward — делает. Иначе ошибка, и вы решаете руками. Никаких сюрпризов">ff-only</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="pull.rebase=true" tooltip="Делает rebase локальных коммитов поверх удалённых. Линейная история. Опытные команды любят. Для junior сложнее: при конфликтах rebase нетривиален">rebase</DataBox>
+      <DataBox label="pull.rebase=false (default)" variant="warning" tooltip="Создаёт merge commit при расхождении. Засоряет историю мусорными merge commits. Не рекомендуется как глобальная настройка">merge</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Для junior рекомендую:
+
+```bash
+git config --global pull.ff only
+```
+
+Это означает: `git pull` будет работать только в случае, когда возможен fast-forward (линейное движение HEAD). При расхождении истории — Git попросит вас решить руками: либо `git pull --rebase`, либо `git pull --no-ff` (merge), либо разобрать ситуацию иначе.
+
+Эта настройка спасает от случайных merge commits — самой частой ошибки junior.
+
+### Push default
+
+```bash
+git config --global push.default simple
+```
+
+С Git 2.0 это default, поэтому установка не обязательна. Означает: `git push` без аргументов пушит **только текущую ветку в одноимённую remote-ветку**. Безопасно.
+
+### Auto color
+
+```bash
+git config --global color.ui auto
+```
+
+В Git 1.8+ это уже default, но не помешает поставить явно. Цветной output `git status`, `git diff`, `git log` — удобнее читать.
+
+### Default rename detection
+
+```bash
+git config --global diff.renames copies
+```
+
+Заставляет Git распознавать не только переименования, но и копирования файлов в diff-выводе. Полезно при рефакторинге.
+
+### Аутокоррекция
+
+```bash
+git config --global help.autocorrect 1
+```
+
+Если опечатались (например, `git statsu`), Git предложит правильный вариант и даже выполнит через секунду. Полезно для junior. Опытные часто отключают, чтобы не делать неожиданные операции.
+
+---
+
+## Полный пример настройки
+
+Минимальный набор для свежей машины:
+
+```bash
+# Идентификация
+git config --global user.name "Иван Петров"
+git config --global user.email "ivan@example.com"
+
+# Дефолты
+git config --global init.defaultBranch main
+git config --global pull.ff only
+git config --global core.editor "code --wait"
+
+# Удобства
+git config --global color.ui auto
+git config --global diff.renames copies
+git config --global help.autocorrect 1
+```
+
+Запустите эти команды один раз — и Git готов к работе.
+
+---
+
+## Просмотр текущей конфигурации
+
+Посмотреть все настройки:
+
+```bash
+git config --list
+# user.name=Ivan Petrov
+# user.email=ivan@example.com
+# init.defaultbranch=main
+# pull.ff=only
+# core.editor=code --wait
+# ...
+```
+
+С указанием, откуда взялась настройка:
+
+```bash
+git config --list --show-origin
+# file:/Users/ivan/.gitconfig    user.name=Ivan Petrov
+# file:/Users/ivan/.gitconfig    user.email=ivan@example.com
+# file:.git/config               user.email=ivan@work-company.com
+# (local перебил global для этого репозитория)
+```
+
+Получить одну настройку:
+
+```bash
+git config user.email
+# ivan@example.com
+
+git config --global user.email
+# ivan@example.com (только из global)
+```
+
+Удалить настройку:
+
+```bash
+git config --global --unset help.autocorrect
+```
+
+---
+
+## Где это всё хранится
+
+Поскольку `git config` — это просто удобный CLI поверх текстового файла, можно открыть `.gitconfig` прямо в редакторе.
+
+<DiagramContainer title="Где хранятся файлы конфигурации" color="emerald">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="System" tooltip="/etc/gitconfig на Linux/macOS. C:\Program Files\Git\etc\gitconfig на Windows. Меняется через sudo">/etc/gitconfig</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Global" variant="highlight" tooltip="~/.gitconfig на Linux/macOS (это $HOME/.gitconfig). C:\Users\Name\.gitconfig на Windows. Обычный текстовый файл в INI-формате">~/.gitconfig</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Local" tooltip="<repo>/.git/config — внутри директории каждого репозитория">.git/config</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Откройте `~/.gitconfig` в редакторе:
+
+```bash
+cat ~/.gitconfig
+```
+
+Увидите примерно:
+
+```ini
+[user]
+    name = Ivan Petrov
+    email = ivan@example.com
+[init]
+    defaultBranch = main
+[pull]
+    ff = only
+[core]
+    editor = code --wait
+```
+
+Можете править этот файл руками — то же самое, что через `git config --global`. INI-формат: секции в `[квадратных скобках]`, ключи `name = value`.
+
+---
+
+## Алиасы — экономия пальцев
+
+Можно создавать сокращения для длинных команд:
+
+```bash
+git config --global alias.st status
+git config --global alias.co checkout
+git config --global alias.br branch
+git config --global alias.lg "log --oneline --graph --decorate --all"
+```
+
+Теперь:
+
+```bash
+git st          # = git status
+git lg          # = git log --oneline --graph --decorate --all
+```
+
+Алиасы — личное дело. Кому-то нравится `git ci` вместо `commit`, кому-то — `git unstage` для `git reset HEAD`. Поэкспериментируйте, найдите, что нравится. Главное — не злоупотреблять, иначе на чужой машине теряетесь.
+
+Популярный alias для красивого лога:
+
+```bash
+git config --global alias.tree \
+  "log --graph --pretty=format:'%C(yellow)%h%Creset -%C(red)%d%Creset %s %C(green)(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit"
+
+# Использование:
+git tree
+```
+
+Покажет цветной граф истории с ветками. Очень красиво для презентаций и приятно ежедневно.
+
+---
+
+## Conditional includes — отдельные конфиги для проектов
+
+Продвинутая фишка: Git 2.13+ позволяет включать дополнительные конфиги по условию. Например, рабочие проекты в `~/work/` используют рабочий email, личные в `~/projects/` — личный:
+
+```ini
+# ~/.gitconfig
+[user]
+    name = Ivan Petrov
+    email = personal@gmail.com
+
+[includeIf "gitdir:~/work/"]
+    path = ~/.gitconfig-work
+```
+
+```ini
+# ~/.gitconfig-work
+[user]
+    email = ivan.petrov@bigcorp.com
+[user]
+    signingkey = ABC123...
+```
+
+Когда вы в любом репо внутри `~/work/`, Git подтянет рабочий конфиг автоматически. Удобно для людей с несколькими работами / контрактами / open-source-активностями.
+
+---
+
+## Попробуй сам
+
+1. Настройте Git минимально:
+
+```bash
+git config --global user.name "Ваше Имя"
+git config --global user.email "your.email@example.com"
+git config --global init.defaultBranch main
+git config --global pull.ff only
+```
+
+2. Проверьте конфиг:
+
+```bash
+git config --list --show-origin
+```
+
+3. Откройте `~/.gitconfig` в редакторе и посмотрите INI-формат:
+
+```bash
+cat ~/.gitconfig
+```
+
+4. Создайте тестовый алиас:
+
+```bash
+git config --global alias.lg "log --oneline --graph --all"
+```
+
+В следующих модулях у нас уже будет, в каком репозитории его проверить.
+
+---
+
+<KnowledgeCheck
+  question="Почему для junior рекомендуется `pull.ff = only` вместо стандартного `pull.rebase = false`?"
+  answer="Стандартный `pull.rebase = false` (merge режим) при расходящейся истории создаёт merge commit БЕЗ предупреждения. Junior часто не понимает, что произошло, и в истории появляются мусорные merge commits вида «Merge branch main into main». При большой команде такая история становится нечитаемой. `pull.ff = only` ведёт себя предсказуемо: если возможен fast-forward — делает, если нет — выдаёт ошибку и просит решить руками. Junior получает осознанный выбор: либо `git pull --rebase` (если уверен), либо `git pull --no-ff` (если действительно нужен merge), либо сначала разобраться, что произошло. Это «безопасная» настройка, которая обучает осознанной работе с историей. Когда junior дорастает до Middle и разбирается в rebase, можно переключиться на `pull.rebase = true`."
+/>

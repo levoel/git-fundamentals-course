@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "05-remotes/03-tracking-branches",
+  "moduleId": "05-remotes",
+  "_meta": { "idPrefix": "git-m05-03" },
+  "questions": [
+    {
+      "id": "git-m05-03-q1",
+      "type": "multiple-choice",
+      "question": "Что показывает `git branch -vv`?",
+      "options": [
+        { "id": "a", "text": "Все теги репозитория" },
+        { "id": "b", "text": "Локальные ветки + их upstream + статус ahead/behind" },
+        { "id": "c", "text": "Только текущую ветку" },
+        { "id": "d", "text": "Все ветки на сервере" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`git branch -vv` (verbose+verbose) показывает все локальные ветки с информацией: SHA верхнего коммита, имя upstream в квадратных скобках (если есть) и состояние ahead/behind. Например: `feature/x abc1234 [origin/feature/x: ahead 2] commit msg`. Это лучшая команда диагностики tracking. Если ветка без upstream — скобок не будет.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m05-03-q2",
+      "type": "true-false",
+      "question": "Когда ты делаешь `git switch develop`, и на сервере уже есть ветка `develop`, Git автоматически создаёт локальную ветку с tracking на `origin/develop`.",
+      "correctAnswer": "true",
+      "explanation": "Это поведение управляется настройкой `branch.autoSetupMerge = true` (дефолт). Git ищет на remote ветку с таким именем, создаёт локальную из `origin/develop`, и настраивает её как трекающую `origin/develop`. После этого `git push`/`git pull` без аргументов работают. Без этой настройки локальная ветка не была бы связана с remote, и Git требовал бы `--set-upstream` при push.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m05-03-q3",
+      "type": "multiple-choice",
+      "question": "У ветки feature нет upstream. Какая команда настроит tracking на origin/feature?",
+      "options": [
+        { "id": "a", "text": "git branch -u origin/feature" },
+        { "id": "b", "text": "git remote add upstream origin/feature" },
+        { "id": "c", "text": "git tracking enable origin/feature" },
+        { "id": "d", "text": "git config branch.feature.tracking origin/feature" }
+      ],
+      "correctAnswer": "a",
+      "explanation": "`git branch -u origin/feature` (короткая форма `--set-upstream-to`) настраивает текущую ветку для tracking. Альтернативы: (a) `git branch --set-upstream-to=origin/feature feature` — явный синтаксис, (b) `git push -u origin feature` — настраивает upstream при пуше, (c) в .git/config руками. После настройки `git pull/push` без аргументов работают, и `git status` показывает ahead/behind.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m05-03-q4",
+      "type": "multiple-choice",
+      "question": "Что значит `push.default = simple`?",
+      "options": [
+        { "id": "a", "text": "Пушит все локальные ветки на сервер автоматически" },
+        { "id": "b", "text": "git push без аргументов отправляет текущую ветку в её upstream с тем же именем; если имена разные — ошибка" },
+        { "id": "c", "text": "Только force-push разрешён" },
+        { "id": "d", "text": "Пушит только в main, остальные ветки игнорирует" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`push.default = simple` (дефолт в Git 2.0+): `git push` пушит текущую ветку в upstream **только если имена совпадают**. Это безопасно и предсказуемо. Старый дефолт был `matching` — пушил все ветки с совпадающими именами одновременно, что иногда приводило к неожиданностям ('я случайно запушил три ветки'). Не используй `matching` в современном Git. Альтернатива — `current`, которая пушит в одноимённую ветку без проверки upstream.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m05-03-q5",
+      "type": "multiple-choice",
+      "question": "`git status` сообщает: 'have diverged, and have 3 and 5 different commits each'. Что это значит?",
+      "options": [
+        { "id": "a", "text": "У ветки 8 коммитов всего" },
+        { "id": "b", "text": "У тебя 3 уникальных коммита, в upstream — 5 уникальных, fast-forward невозможен" },
+        { "id": "c", "text": "Конфликт коммитов, нельзя ничего сделать" },
+        { "id": "d", "text": "8 коммитов нужно удалить" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "'Diverged' = ahead И behind одновременно. У твоей ветки 3 коммита, которых нет в upstream (ahead 3), у upstream — 5 коммитов, которых нет у тебя (behind 5). Это значит ни fast-forward push, ни fast-forward pull невозможны. Нужно интегрировать через rebase или merge: `git fetch + git rebase origin/main` (или merge). Если работаешь на shared branch, rebase опасен — лучше merge. Если на личной ветке — rebase обычно предпочтительнее для линейной истории.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

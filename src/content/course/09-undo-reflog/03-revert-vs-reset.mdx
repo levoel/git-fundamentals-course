@@ -1,0 +1,303 @@
+---
+title: "git revert vs git reset — отмена коммитов на shared истории"
+description: "git revert создаёт inverse-коммит и безопасен на shared веткой. git reset переписывает историю — на main только катастрофа. Правило: на main всегда revert, на feature до push reset OK."
+order: 3
+difficulty: "beginner"
+estimatedTime: 25
+topics: ["revert", "reset", "shared-history", "force-push", "main", "production"]
+---
+
+# git revert vs git reset — два способа отменить коммит
+
+Представь: твой коллега замержил PR в main, через 10 минут на проде стало плохо. DAG в Airflow упал, SLA нарушен, в Slack паника. Что делать — `git reset` откатить main на предыдущий коммит и форс-пушнуть, или `git revert` создать «отменяющий» коммит?
+
+Ответ: **только revert**. Reset на main, на котором работают 20 других человек — катастрофа. В этом уроке разберёмся почему, как точно работает revert (это не магия, это просто inverse-патч), и в каких случаях reset всё-таки можно (только на твоих личных feature-ветках до push).
+
+---
+
+## Главная разница: revert НЕ переписывает историю
+
+Простой пример. Есть три коммита:
+
+```
+A -> B -> C   (HEAD -> main)
+```
+
+Хотим отменить коммит B (он внёс баг).
+
+### Reset решает это так
+
+```bash
+$ git reset --hard A
+```
+
+Результат:
+
+```
+A   (HEAD -> main)
+```
+
+B и C **удалены из истории** ветки main. Указатель сдвинут на A.
+
+### Revert решает это так
+
+```bash
+$ git revert B
+```
+
+Результат:
+
+```
+A -> B -> C -> B'   (HEAD -> main)
+```
+
+Где B' — **новый коммит**, который содержит **обратные изменения** к B. Если B добавил строку `password = "secret"`, B' удалит эту строку. Если B удалил функцию — B' её добавит обратно. Это inverse-патч, прикрученный сверху.
+
+История **не переписана**. B по-прежнему на месте. Просто после него едет «коммит, который его отменяет».
+
+<DiagramContainer title="Reset vs Revert на тех же коммитах">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox tooltip="Исходное состояние">До</DataBox>
+      <FlowNode tooltip="Первый коммит">A</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="Коммит с багом">B (баг)</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="Текущий HEAD">C</FlowNode>
+    </FlowRow>
+    <FlowRow>
+      <DataBox tooltip="reset --hard A: B и C исчезли из ветки. Force-push сломает других">После reset</DataBox>
+      <FlowNode tooltip="HEAD теперь здесь">A (HEAD)</FlowNode>
+    </FlowRow>
+    <FlowRow>
+      <DataBox tooltip="revert B: создан новый коммит B' с обратным патчем. Старые B, C на месте. Push обычный">После revert B</DataBox>
+      <FlowNode tooltip="">A</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="">B</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="">C</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="Inverse коммит">B' (HEAD)</FlowNode>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+---
+
+## Почему reset на shared веткой — катастрофа
+
+Команда из 5 человек, все базируются на main. У всех в `git log` видна история `A -> B -> C`. Ты делаешь `git reset --hard A` и `git push --force`. Теперь на сервере history — просто A.
+
+Что будет у коллеги Васи, который как раз вчера сделал `git pull` и базируется на C, добавив свой коммит D?
+
+```bash
+# У Васи локально
+A -> B -> C -> D    (HEAD -> main)
+
+# На сервере (после твоего force-push)
+A    (origin/main)
+
+# Вася делает git pull
+$ git pull
+# Конфликт: локальная история разошлась с remote
+# Вася в панике делает git push --force, перезаписывая твой reset...
+# Или: Вася делает git pull --rebase, его D ребейзится на A, но
+# коммиты B и C приходят обратно как Васины — теперь они автор Вася!
+```
+
+Это **broken state** репозитория. Любая попытка восстановить — порождает новые проблемы. Полдня команды чинит конфликты и переделывает PR. Production может быть в неконсистентном состоянии (часть людей деплоит со старой версии main, часть с новой).
+
+**Правило**: коммит, который **уже запушен** и доступен другим людям — никогда не trogaй через reset. Только revert.
+
+<Callout type="danger">
+Force-push в main / master — почти всегда плохая идея в team setting. Большинство компаний явно запрещают это через GitHub branch protection rules (`Allow force pushes: never`). Если ты junior и слышишь команду «надо force-pushить main» — это red flag, обсуди с tech lead, скорее всего есть другой способ.
+</Callout>
+
+---
+
+## Как revert работает технически
+
+Revert не магия. Он делает три вещи:
+
+1. Берёт diff коммита, который отменяешь: `git diff B^..B` — патч из его родителя в него.
+2. **Применяет обратный патч** на текущий HEAD: всё что было `+` становится `-` и наоборот.
+3. Создаёт новый коммит с этим обратным патчем и автогенерированным message: `Revert "Original message"`.
+
+```bash
+$ git revert abc1234
+
+# Откроется редактор с пред-заполненным message:
+Revert "Add user_validation feature"
+
+This reverts commit abc1234.
+
+# Сохраняешь, получаешь новый коммит на HEAD
+$ git log --oneline
+ddd4444 (HEAD -> main) Revert "Add user_validation feature"
+abc1234 Add user_validation feature
+def5678 Initial pipeline
+```
+
+Просто и предсказуемо. Никакого ущерба для других людей.
+
+---
+
+## Revert: важные нюансы
+
+### Конфликты при revert
+
+Если в коммите B изменилась функция, а в C она изменилась ещё раз — revert B может вызвать конфликт. Git не сможет автоматически применить обратный патч на изменённый контекст.
+
+```bash
+$ git revert abc1234
+Auto-merging pipeline.py
+CONFLICT (content): Merge conflict in pipeline.py
+```
+
+Дальше — обычное разрешение конфликта (модуль 06):
+
+```bash
+$ vim pipeline.py        # руками решаешь
+$ git add pipeline.py
+$ git revert --continue
+```
+
+Можно отменить процесс: `git revert --abort`.
+
+### Revert merge-коммита
+
+Это особый случай. Когда ты ревертишь коммит merge (из feature в main), Git **не знает**, какую сторону «отменить». Надо указать `-m 1` (отменить изменения из side branch) или `-m 2`:
+
+```bash
+$ git revert -m 1 <merge-commit-sha>
+```
+
+`-m 1` = «оставь main как было до merge, отмени всё что пришло из feature». В 99% случаев тебе нужно именно `-m 1` (отмена замерженного PR).
+
+<Callout type="warning">
+Revert merge-коммита **не уничтожает** ту feature-ветку. Если потом ты захочешь её замержить заново — Git подумает «эти коммиты уже мержились, ничего нового нет». Чтобы по-настоящему replay-нуть feature, надо ещё ревертнуть revert. Это известная боль — детали в [git docs revert-a-faulty-merge](https://git-scm.com/docs/git-revert).
+</Callout>
+
+### Revert диапазона коммитов
+
+```bash
+$ git revert abc1234..def5678         # ревертит все коммиты в диапазоне, по одному
+$ git revert -n abc1234..def5678      # ревертит всё, но без auto-commit, один общий коммит руками
+```
+
+`-n` (`--no-commit`) полезно для атомарного «отменяющего» коммита с одним message.
+
+---
+
+## Когда reset всё-таки OK
+
+Reset безопасен **только** на:
+
+1. **Локальной ветке, никогда не запушенной**: ты делаешь эксперимент, коммитишь, понимаешь что бред, `git reset --hard HEAD~3`. Никто кроме тебя не видел эти коммиты — никому не сломаешь.
+
+2. **Личной feature-ветке, где ты единственный автор, до создания PR**: ты пушнул `feature/my-pipeline` на свой fork или личную ветку, никто на ней не базируется. Force-push здесь приемлем — ты предупреждаешь только себя.
+
+3. **После squash в interactive rebase**: модуль 07 покрывает это — переписать историю локально перед PR.
+
+Где **никогда** не использовать reset:
+
+- `main` / `master` / `develop` / любая ветка, на которой работает команда.
+- Любая ветка после Pull Request open — на ней могут базироваться комментарии review, force-push их собьёт.
+- Любая release-ветка, тегированная для прода.
+
+---
+
+## Реальный DE-сценарий: revert merged PR
+
+Ты — junior на DE-команде. PR #234 «Add new dbt model for revenue» был замержен в main 15 минут назад. На прометее запылала метрика `dbt_test_failures`. Tech lead в Slack: «откатываемся».
+
+Не так:
+
+```bash
+$ git reset --hard HEAD~1
+$ git push --force origin main
+# Сломал всё для 10 человек, кого-то обоссанные локальные ветки
+```
+
+Правильно:
+
+```bash
+# 1. Найди merge-коммит PR
+$ git log --oneline --merges -5
+abc1234 (HEAD -> main) Merge pull request #234 from feature/revenue-model
+...
+
+# 2. Сделай revert merge-коммита
+$ git revert -m 1 abc1234
+
+# 3. Push нормально (не force)
+$ git push origin main
+
+# 4. Открой PR с описанием
+$ gh pr create --title "revert: PR #234 revenue model" \
+    --body "Reverts #234 due to dbt test failures on prod. Issue: ..."
+```
+
+В Slack: «Сделал revert PR #234 в #456, прошу review». Производство восстановлено через 2 минуты. История целая, можно потом понять причину, исправить и replay-нуть фичу.
+
+<Callout type="tip">
+В GitHub есть кнопка «Revert» прямо на странице merged PR. Она делает в точности `git revert -m 1 <merge>` и открывает новый PR с этим revert. Самый простой способ для junior — не надо лезть в терминал.
+</Callout>
+
+---
+
+## Decision matrix
+
+| Ситуация | Команда | Почему |
+|---|---|---|
+| Локальный коммит, ещё не запушен | `git reset --hard HEAD~1` | Никто не пострадает |
+| Свой PR, force-push разрешён, нет ревью | `git reset` + `push --force-with-lease` | Локально твоя территория |
+| Merged PR на main | `git revert -m 1 <merge>` | Shared история, force-push запрещён |
+| Один коммит на main (не через PR) | `git revert <hash>` | Снова shared |
+| Diрcty файлы в working tree (не commit) | `git restore <file>` | Reset не нужен |
+| 5 коммитов на личной feature, хочется squash | `git reset --soft origin/feature && commit` | Подготовка к PR |
+
+---
+
+## Попробуй сам
+
+Воспроизведи оба сценария:
+
+```bash
+$ mkdir revert-demo && cd revert-demo
+$ git init
+$ echo "good" > app.py && git add . && git commit -m "Initial"
+$ echo "buggy code" > app.py && git commit -am "Add buggy feature"
+$ echo "after bug" > extra.py && git add . && git commit -m "Other work"
+
+$ git log --oneline
+ccc Other work
+bbb Add buggy feature
+aaa Initial
+
+# revert средний коммит
+$ git revert HEAD~1
+# В редакторе оставь default message, сохрани
+
+$ git log --oneline
+ddd Revert "Add buggy feature"
+ccc Other work
+bbb Add buggy feature
+aaa Initial
+
+$ cat app.py
+good                    # инверсия применена!
+
+$ cat extra.py
+after bug               # work «после бага» не тронули
+```
+
+Видишь — revert аккуратно вытащил только изменения буггнутого коммита, не трогая последующую работу.
+
+---
+
+## Killer takeaway
+
+`git revert` — это создание нового коммита с обратными изменениями. История не переписывается, push обычный, безопасно для shared веток. `git reset` — это сдвиг указателя ветки, переписывает историю, требует force-push, опасно для команды. Запомни: **revert на любую ветку, где работают другие. Reset только на личных ветках до push**. В сомнительных случаях — всегда revert. Force-push в main — почти всегда катастрофа.
+
+<KnowledgeCheck quizSlug="09-undo-reflog/03-revert-vs-reset" />

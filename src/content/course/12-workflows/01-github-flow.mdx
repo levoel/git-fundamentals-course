@@ -1,0 +1,271 @@
+---
+title: "GitHub Flow — простейший workflow для SaaS"
+description: "GitHub Flow: main всегда production-ready. Feature branch -> PR -> merge -> deploy. Подходит SaaS / continuous deployment. Большинство DE команд это."
+order: 1
+difficulty: "beginner"
+estimatedTime: 20
+topics: ["github-flow", "workflow", "saas", "continuous-deployment", "main-branch"]
+---
+
+# GitHub Flow — простейший workflow для SaaS
+
+«Какой workflow в вашей команде?» — стандартный вопрос на onboarding. Существуют десятки git workflows с разной сложностью: GitHub Flow, GitFlow, GitLab Flow, Trunk-Based Development, OneFlow. Большинство DE команд работают по одному из трёх: GitHub Flow (простой), GitFlow (сложный), Trunk-Based (продвинутый).
+
+Начнём с **GitHub Flow** — самого простого и самого популярного в SaaS / DE-командах с continuous deployment.
+
+В этом уроке: что такое GitHub Flow, его правила, плюсы/минусы, и когда подходит/не подходит.
+
+---
+
+## Базовая модель GitHub Flow
+
+GitHub Flow сводится к **5 правилам**:
+
+1. **`main` всегда production-ready**: код в main = код на проде (или близко). Из main можно деплоить в любой момент.
+2. **Любое изменение — через feature ветку** от main. Никаких прямых commits в main.
+3. **Push ветки на remote** часто — для backup и видимости.
+4. **Pull Request** для discussion и review.
+5. **Merge в main -> deploy** (обычно автоматически через CI/CD).
+
+Это всё. Никаких develop/staging/release веток. Никаких сложных правил.
+
+<DiagramContainer title="GitHub Flow — линейная история">
+  <FlowColumn>
+    <FlowRow>
+      <FlowNode tooltip="main всегда production">main</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="">M1</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="">M2</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="После merge feature">M3 (merge feature/A)</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="">M4 (merge feature/B)</FlowNode>
+    </FlowRow>
+    <FlowRow>
+      <DataBox tooltip="feature/A — короткая ветка, 1-3 дня">feature/A</DataBox>
+      <FlowNode tooltip="">F1</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="merge в main через PR">F2 -> merge</FlowNode>
+    </FlowRow>
+    <FlowRow>
+      <DataBox tooltip="feature/B — параллельная короткая ветка">feature/B</DataBox>
+      <FlowNode tooltip="">B1</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="">B2</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="merge через PR">B3 -> merge</FlowNode>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+---
+
+## Жизненный цикл feature
+
+```bash
+# 1. Создаём ветку от свежего main
+$ git switch main && git pull
+$ git switch -c feature/add-revenue-mart
+
+# 2. Работаем — 1-3 дня
+$ vim models/marts/revenue.sql
+$ git commit -am "feat(marts): add revenue mart"
+$ git push -u origin feature/add-revenue-mart
+
+# 3. PR + review + CI
+$ gh pr create --fill
+
+# 4. После approve — merge (обычно squash)
+$ gh pr merge --squash --delete-branch
+
+# 5. CI/CD автоматически деплоит main
+# (CI hook на merge to main -> deploy dbt prod, или build Docker, etc)
+```
+
+Жизнь feature ветки: **1-3 дня**. Если больше — что-то идёт не так. Лучше раздробить.
+
+---
+
+## Что делает GitHub Flow популярным в DE
+
+### 1. Простота
+
+Один тип веток (feature). Одна цель (main всегда деплоится). Никаких релизных циклов, release/staging/develop. Junior въезжает за день.
+
+### 2. Continuous deployment friendly
+
+Main всегда зелёный -> deploy в любой момент. Это нативная модель для SaaS: новая фича появилась в main -> через 5 минут она у users. dbt-команды деплоят на BigQuery / Snowflake автоматически на merge. Airflow-команды obnovляют DAGs репо через ArgoCD / sync.
+
+### 3. Гибкость рилизов
+
+Релиз не привязан к ветке. Один merge = один релиз. 10 merges за день = 10 mini-релизов. Полностью контролируется CD pipeline (feature flags для контроля roll-out, blue/green deployment, canary).
+
+### 4. Минимум merge-конфликтов
+
+Короткие feature branches (часы-дни, не недели) -> меньше шанс расхождения с main. Каждый день `git pull` main в feature, чтобы оставаться синхронизированным.
+
+### 5. Чистая история
+
+Squash merge -> один коммит на feature в main. `git log main --oneline` читается элементарно.
+
+---
+
+## Что делает GitHub Flow не идеальным
+
+### 1. Нет «release» концепции
+
+Если продукт релизится **версиями** (mobile app v2.3.0, library v1.7.0) — GitHub Flow слабо подходит. Нет ветки которая «фиксирует release», нет staging для tested версии. Каждый merge — релиз, что для mobile app может быть disastrous (нельзя катать обновление каждые 10 минут).
+
+### 2. Требует CI/CD culture
+
+Если нет автоматических тестов на каждом PR — main быстро становится не production-ready. Нужны: unit tests, integration tests, линтер, type-checker. И всё это блокирует merge при fail.
+
+### 3. Сложно для длинных features
+
+Feature на 3 недели в одной ветке -> конфликты с быстро движущейся main. Решения: feature flags (merge маленькими кусочками с флагом OFF), stack PRs (зависимые маленькие PR). Без этих практик GitHub Flow ломается на больших features.
+
+### 4. Нет staging environment в Git
+
+В GitFlow есть `develop` ветка — туда merge всё что в работе, тестируется на staging. В GitHub Flow staging — это **отдельный environment**, на который deploy с main (или с PR ветки через preview deployments). Не Git концепт.
+
+---
+
+## Best practices для GitHub Flow в DE
+
+### 1. Короткие feature branches
+
+Цель — **1 день, max 3 дня**. Больше — обсуди с tech lead как раздробить.
+
+### 2. Daily pull main
+
+```bash
+$ git switch feature/my-work
+$ git fetch origin
+$ git rebase origin/main          # или git merge origin/main
+```
+
+Чтобы feature ветка не отставала. Раз в день — норма.
+
+### 3. Feature flags для большие changes
+
+Хочешь добавить новый DAG, но не запускать сразу. Деплой feature flag OFF, проверь стабильность, включи позже:
+
+```python
+# config/feature_flags.py
+ENABLE_NEW_REVENUE_DAG = False  # bool flag
+
+# dags/new_revenue.py
+from config.feature_flags import ENABLE_NEW_REVENUE_DAG
+
+if ENABLE_NEW_REVENUE_DAG:
+    @dag(...)
+    def new_revenue_dag():
+        ...
+```
+
+PR с **новый DAG + flag OFF** -> merge безопасно (никто не triggers). Второй PR через неделю **flag -> ON** -> активация.
+
+### 4. Branch protection rules
+
+На GitHub:
+- Require PR before merging.
+- Require status checks (CI must pass).
+- Require ≥1 approval.
+- Restrict who can push (только через PR merge).
+- Auto-delete branches after merge.
+
+Без этого main быстро деградирует.
+
+### 5. CODEOWNERS файл
+
+Файл `.github/CODEOWNERS` определяет автоматические reviewers:
+
+```
+# .github/CODEOWNERS
+dags/         @airflow-team
+models/marts/ @data-team
+docs/         @tech-writer
+```
+
+PR с изменениями в `dags/` автоматически назначает `@airflow-team` reviewer. Junior может не знать кому ассайнить — CODEOWNERS делает за него.
+
+---
+
+## DE-сценарий: dbt репо на GitHub Flow
+
+Команда dbt с 5 DE. Репо `data-warehouse`. CI/CD на BigQuery.
+
+**Setup**:
+- main защищён, требует PR + 1 approval + CI passing.
+- CI: `dbt parse`, `dbt run --select state:modified+`, `dbt test --select state:modified+`, `sqlfluff`.
+- CD: на merge to main -> deploy dbt prod через GitHub Actions.
+- CODEOWNERS: `models/marts/` -> `@analytics-lead`, `models/staging/` -> `@de-team`.
+
+**Workflow** (один день):
+
+```
+09:00  PM создал issue #234 «Add customer LTV mart»
+09:30  Я создаю feature/customer-ltv от main
+09:30-13:00  Работа, 2 коммита
+13:00  Push, gh pr create --fill
+13:05  CI run (3 минуты) — passed
+13:10  Notification в Slack — analytics-lead requested
+14:00  Lead оставил 2 nit + 1 suggestion (1 строка)
+14:05  Я применил suggestion (1 click), реплай на nit-ы «ack», fix через commit
+14:20  Lead approve
+14:25  gh pr merge --squash --delete-branch
+14:30  GitHub Actions: deploy to BigQuery prod
+14:35  Slack notification: deployment successful
+
+Total: 1 working day, issue -> prod.
+```
+
+Это **скорость GitHub Flow**. Junior после онбординга достигает такого темпа через 2-3 недели.
+
+---
+
+## Anti-pattern: GitFlow ради GitFlow
+
+Иногда junior копирует GitFlow из старого туториала, не понимая зачем. В команде на 5 DE с continuous deployment вводят `develop`, `release/x.y.z`, `hotfix/*` — получают сложность без бенефита:
+
+- Merge feature -> develop -> main -> ещё один merge.
+- Release ветки которые никто не использует.
+- Hotfix flow для system который и так SAS.
+
+В 99% DE команд это лишний overhead. GitHub Flow с feature flags решает те же задачи проще.
+
+<Callout type="warning">
+Если ты junior и команда уже работает по GitHub Flow — не предлагай переход на GitFlow «потому что круче». Это часто sign of cargo cult. Сначала пойми **зачем** более сложный workflow нужен, потом советуй (urok 04 покрывает decision matrix).
+</Callout>
+
+---
+
+## Когда GitHub Flow точно подходит
+
+- **DE-команда SaaS** (most common case).
+- **dbt / Airflow / Spark репозитории** в продуктовой компании.
+- **CI/CD pipeline зрелый**: тесты на каждом PR, автоматический deployment.
+- **Continuous deployment**: deploy в любой момент OK.
+- **Команда 2-20 DE**.
+- **Solo / маленький pet project** (даже проще — без PR review).
+
+---
+
+## Когда GitHub Flow НЕ подходит
+
+- **Mobile app с store releases** — нужны version branches.
+- **Library / SDK** с semver discipline — нужны release ветки.
+- **Enterprise с regulatory compliance** требующий tested staging branch.
+- **Команда без CI/CD culture** — main быстро ломается.
+- **Long-running features без feature flags** — merge fragmentation.
+
+Подробнее в уроке 04 (decision matrix).
+
+---
+
+## Killer takeaway
+
+GitHub Flow = «main всегда production-ready, feature branches короткие (1-3 дня), PR + review + CI -> merge -> auto-deploy». Простейший workflow, доминирует в SaaS / DE командах. Требует CI/CD culture и feature flags для больших изменений. Junior DE в большинстве компаний работает именно по GitHub Flow — освой это первым.
+
+<KnowledgeCheck quizSlug="12-workflows/01-github-flow" />

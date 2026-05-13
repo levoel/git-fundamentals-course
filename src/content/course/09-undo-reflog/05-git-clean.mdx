@@ -1,0 +1,307 @@
+---
+title: "git clean — удаление untracked файлов"
+description: "git clean -n (dry-run!), -f (force), -fd (dirs), -fdx (ignored). Опасно — НЕ восстанавливается через reflog. Когда юзать: после неудачного эксперимента, чистка build artifacts, __pycache__."
+order: 5
+difficulty: "beginner"
+estimatedTime: 20
+topics: ["clean", "untracked", "gitignore", "build-artifacts", "pycache", "dangerous"]
+---
+
+# git clean — удаление untracked файлов
+
+`git restore` (урок 01) и `git reset` (урок 02) работают с **tracked** файлами — теми, что когда-то были закоммичены или хотя бы в index. А что делать с **untracked** мусором — `__pycache__/`, `dist/`, `node_modules/`, `*.log`, оставшиеся от экспериментов скрипты?
+
+Для этого есть `git clean`. Это команда «удали то, что Git не отслеживает». Опасная, потому что reflog **не помогает** — untracked файлы никогда не были в репо.
+
+---
+
+## Зачем существует git clean
+
+Сценарий: ты экспериментировал с DAG-файлом, нагенерировал `dags/__pycache__/`, `*.pyc`, `tmp_test_run.py`, `output.csv`. Хочешь вернуть рабочую директорию в чистое состояние — только tracked файлы, ничего лишнего.
+
+Вручную:
+
+```bash
+$ rm -rf __pycache__ *.pyc tmp_test_run.py output.csv
+# Что-то забыл удалить? Пропустил вложенную dir с pycache?
+```
+
+Через git clean:
+
+```bash
+$ git clean -fd
+Removing __pycache__/
+Removing tmp_test_run.py
+Removing output.csv
+```
+
+Git точно знает, какие файлы он отслеживает, а какие нет — поэтому удаляет именно untracked. Tracked файлы (даже модифицированные) не трогает.
+
+---
+
+## Базовые флаги
+
+`git clean` без флагов **ничего не делает** — он по умолчанию защищён конфигом `clean.requireForce=true`. Нужно явно указать что хочешь.
+
+| Флаг | Что делает |
+|---|---|
+| `-n` (`--dry-run`) | Показать, что **будет** удалено, но не удалять |
+| `-f` (`--force`) | Реально удалить (untracked файлы, не директории) |
+| `-d` | И директории тоже |
+| `-x` | Включая файлы из .gitignore |
+| `-X` | **Только** файлы из .gitignore (полезно для cleanup build artifacts) |
+| `-i` | Interactive mode (выбор, что удалять) |
+
+Комбинируются:
+
+```bash
+$ git clean -nd               # dry-run: показать untracked файлы и dirs
+$ git clean -fd               # реально удалить untracked + dirs
+$ git clean -fdx              # + игнорируемые файлы (всё, что не tracked)
+$ git clean -fdX              # ТОЛЬКО игнорируемые (build artifacts, кэш)
+```
+
+<Callout type="danger">
+`git clean -f` **необратим**. Reflog не помогает — untracked файлы вне Git репозитория. После удаления — путь только через файловую систему (Trash на macOS, Recycle Bin на Windows), и то не всегда. **Всегда сначала `-n`** для dry-run.
+</Callout>
+
+---
+
+## Mental model: что считается untracked
+
+В Git каждый файл в working tree — в одной из трёх категорий:
+
+<DiagramContainer title="Категории файлов в working tree">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox tooltip="Файлы, которые Git отслеживает: были в коммите или в index">tracked</DataBox>
+      <FlowNode tooltip="git restore / reset работает с ними">git restore / reset</FlowNode>
+    </FlowRow>
+    <FlowRow>
+      <DataBox tooltip="Файлы, которые не tracked, не в .gitignore — Git их «видит» как новые">untracked</DataBox>
+      <FlowNode tooltip="git clean -f удаляет их">git clean -f</FlowNode>
+    </FlowRow>
+    <FlowRow>
+      <DataBox tooltip="Файлы, упомянутые в .gitignore: __pycache__, .env, dist/, ...">ignored</DataBox>
+      <FlowNode tooltip="git clean -fX удаляет только их">git clean -fX</FlowNode>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+`git status` показывает:
+
+- Tracked-modified в секции `Changes not staged for commit:`.
+- Tracked-staged в `Changes to be committed:`.
+- Untracked в `Untracked files:`.
+- Ignored — **не показывает по умолчанию** (для этого `git status --ignored`).
+
+---
+
+## Сценарий 1: чистка после Python экспериментов
+
+После запуска Python скриптов накопилось:
+
+```
+my-repo/
+├── dags/                   # tracked
+│   ├── etl.py              # tracked
+│   └── __pycache__/        # untracked (есть в .gitignore)
+│       └── etl.cpython-311.pyc
+├── scripts/                # tracked
+│   ├── deploy.sh           # tracked
+│   └── tmp_debug.py        # untracked (новый, не в .gitignore)
+└── output.csv              # untracked (новый)
+```
+
+Хочу удалить всё untracked + ignored (включая `__pycache__/`):
+
+```bash
+$ git clean -nfdx
+Would remove __pycache__/
+Would remove scripts/tmp_debug.py
+Would remove output.csv
+
+# Выглядит правильно, удаляем
+$ git clean -fdx
+Removing __pycache__/
+Removing scripts/tmp_debug.py
+Removing output.csv
+
+$ git status
+On branch main
+nothing to commit, working tree clean
+```
+
+Готово, репо в чистом состоянии.
+
+---
+
+## Сценарий 2: чистка только build artifacts (-X)
+
+Часто `.gitignore` правильно настроен: содержит `dist/`, `__pycache__/`, `.coverage`, `*.pyc`. А untracked файлы в working tree — это незакоммиченные новые файлы (например, новый DAG, который ты сейчас пишешь), которые **нельзя** удалять.
+
+Здесь `-X` (большая X) спасает:
+
+```bash
+$ git clean -nfdX
+Would remove dist/
+Would remove .coverage
+Would remove __pycache__/
+Would remove dags/__pycache__/
+
+$ git clean -fdX
+# Удалили только то, что в .gitignore. Незакоммиченные новые файлы не тронули
+```
+
+Это полезно перед коммитом, чтобы убрать кэш и убедиться что репо чистый.
+
+---
+
+## Сценарий 3: интерактивный mode
+
+Если не уверен, что удалять — `-i`:
+
+```bash
+$ git clean -i
+Would remove the following items:
+  output.csv  scripts/tmp_debug.py  __pycache__/
+
+*** Commands ***
+    1: clean                2: filter by pattern    3: select by numbers
+    4: ask each             5: quit                 6: help
+What now> 4
+
+Remove output.csv [y/N]? y
+Remove scripts/tmp_debug.py [y/N]? n
+Remove __pycache__/ [y/N]? y
+```
+
+Удобно для review, когда среди untracked есть что-то ценное (новый DAG, неоткоммиченные данные для проверки).
+
+---
+
+## DE-сценарий: чистка после Airflow CI run
+
+CI на ветке запустил DAG-тесты, оставил локально:
+
+- `airflow.db` (SQLite метаданных Airflow)
+- `logs/` (Airflow task logs)
+- `__pycache__/` в каждой папке с .py
+- `.pytest_cache/`
+- `dags/.airflowignore` — этот **tracked**, не трогаем
+
+Все эти артефакты в `.gitignore`. После CI на локали:
+
+```bash
+$ git clean -nfdX
+Would remove airflow.db
+Would remove logs/
+Would remove .pytest_cache/
+Would remove dags/__pycache__/
+Would remove plugins/__pycache__/
+...
+
+$ git clean -fdX        # очистили build artifacts
+$ git status            # чистый репо
+```
+
+Это полезно перед PR — чтобы случайно не подцепить артефакт в коммит. Особенно если работаешь без `.gitignore` дисциплины — `clean -X` спасает.
+
+---
+
+## Что НЕ удаляет git clean
+
+`git clean` **не трогает**:
+
+1. Tracked файлы (modified или нет).
+2. Tracked файлы, добавленные в .gitignore через `git update-index --skip-worktree` (отдельный механизм).
+3. `.git/` директория и её содержимое — это сам Git, неприкосновенно.
+4. Submodules (модуль 16) — если только не указать `-f -f` (двойной force).
+
+Если хочешь полностью обнулить рабочую копию **со всем**:
+
+```bash
+$ git reset --hard HEAD        # tracked файлы -> HEAD состояние
+$ git clean -fdx               # untracked + ignored удалить
+```
+
+Эти две команды вместе = «верни репо как сразу после clone, без всякого мусора».
+
+---
+
+## Конфиг безопасности: requireForce
+
+По умолчанию Git требует `-f` или `--force` чтобы реально удалять:
+
+```bash
+$ git clean
+fatal: clean.requireForce defaults to true and neither -i, -n, nor -f given;
+refusing to clean
+```
+
+Это умное защитное поведение — нельзя удалить файлы случайно набрав `git clean`. Можно отключить (не рекомендуется):
+
+```bash
+$ git config clean.requireForce false
+```
+
+После этого `git clean` без флагов будет удалять — опасно. Не трогай этот конфиг.
+
+---
+
+## Сравнительная таблица: чистим тру / нтру / ign
+
+| Хочу удалить | Команда |
+|---|---|
+| Только untracked файлы (не dirs) | `git clean -f` |
+| Untracked файлы + dirs | `git clean -fd` |
+| Untracked + ignored (everything not tracked) | `git clean -fdx` |
+| Только ignored (build artifacts) | `git clean -fdX` |
+| Полный reset working tree | `git reset --hard HEAD && git clean -fdx` |
+| Безопасный посмотреть-сначала | `git clean -nXd` (или любой с `-n`) |
+
+Mnemonic: **малая x — расширение include** (тоже игнорируемые), **большая X — exclusive** (только игнорируемые).
+
+---
+
+## Попробуй сам
+
+```bash
+$ mkdir clean-demo && cd clean-demo
+$ git init
+$ echo "tracked" > a.txt && git add . && git commit -m "C1"
+
+# Создаём мусор
+$ echo "untracked file" > b.txt
+$ mkdir junk && echo "in junk" > junk/c.txt
+$ echo "build artifact" > out.log
+$ echo "*.log" > .gitignore && git add .gitignore && git commit -m "Gitignore"
+
+$ git status
+# Untracked: b.txt, junk/
+# .log не виден в untracked (он в gitignore)
+
+# Сначала dry-run
+$ git clean -nd
+Would remove b.txt
+Would remove junk/
+
+$ git clean -ndX
+Would remove out.log    # только ignored
+
+$ git clean -ndx
+Would remove b.txt
+Would remove junk/
+Would remove out.log    # всё
+
+$ git clean -fdx        # реально удаляем
+$ git status            # чистый
+```
+
+---
+
+## Killer takeaway
+
+`git clean` — единственный безопасный способ массово удалять untracked файлы. **Всегда сначала `-n` (dry-run)**, потому что удаление **необратимо** — reflog тут бесполезен. Запомни три формы: `-fd` (untracked + dirs), `-fdx` (всё, что не tracked), `-fdX` (только ignored / build artifacts). Это твоя ежедневная утилита для подготовки чистого репо перед PR.
+
+<KnowledgeCheck quizSlug="09-undo-reflog/05-git-clean" />

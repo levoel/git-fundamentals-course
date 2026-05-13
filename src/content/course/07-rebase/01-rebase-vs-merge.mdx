@@ -1,0 +1,330 @@
+---
+title: "Rebase vs merge: разные философии"
+description: "Merge сохраняет историю, rebase переписывает; когда что и какой граф получается"
+order: 1
+difficulty: "intermediate"
+estimatedTime: 20
+topics: ["Git", "rebase", "merge", "history"]
+---
+
+# Rebase vs merge: разные философии
+
+Каждое утро ты приходишь на работу, на `main` у коллег появились новые коммиты, а у тебя — своя feature ветка с тремя коммитами в работе. Чтобы синхронизироваться с `main`, есть два пути: **merge** и **rebase**. Они дают разный результат, разную историю, и каждый имеет своё место.
+
+В этом уроке мы разбираемся в концептуальной разнице, смотрим на графы коммитов после каждого подхода, и обсуждаем, когда какой выбрать.
+
+---
+
+## Стартовая ситуация
+
+Представь: ты создал ветку `feature/x` от `main` неделю назад. С тех пор:
+
+- В `main` коллеги добавили 3 коммита (M1, M2, M3).
+- В `feature/x` ты сделал 3 своих (F1, F2, F3).
+
+<DiagramContainer title="Стартовая ситуация: две ветки разошлись" color="blue">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center items-center flex-wrap">
+      <Tooltip content="Общий предок — точка, откуда обе ветки разошлись">
+        <DataBox label="merge base" className="border-zinc-500/30 w-32">
+          <div className="text-xs">C0</div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="3 коммита в main от коллег">
+        <DataBox label="main" className="border-blue-500/30 w-56">
+          <div className="text-xs">C0 -> M1 -> M2 -> M3</div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+    <FlowRow className="gap-3 justify-center items-center flex-wrap">
+      <Tooltip content="3 твоих коммита в feature">
+        <DataBox label="feature/x" className="border-purple-500/30 w-56 mx-auto">
+          <div className="text-xs">C0 -> F1 -> F2 -> F3</div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Тебе нужно "вобрать" изменения из `main`. Есть два пути.
+
+---
+
+## Путь 1: `git merge main` (merge approach)
+
+```bash
+$ git switch feature/x
+$ git merge main
+```
+
+Git создаёт **merge commit** (M*), у которого два родителя: твой F3 и M3 из main.
+
+<DiagramContainer title="После merge: граф ветвистый, но история сохранена" color="orange">
+  <FlowColumn className="p-4 gap-3">
+    <Tooltip content="Граф после git merge — образуется ромб (diamond)">
+      <DataBox label="После merge main" className="border-orange-500/30 w-full max-w-2xl mx-auto">
+        <div className="text-xs font-mono space-y-1">
+          <div>{'           ┌── M1 ── M2 ── M3 ──┐'}</div>
+          <div>{'C0 ────────┤                     ├── M* (merge commit)'}</div>
+          <div>{'           └── F1 ── F2 ── F3 ──┘'}</div>
+        </div>
+      </DataBox>
+    </Tooltip>
+  </FlowColumn>
+</DiagramContainer>
+
+Что произошло:
+
+- Твои коммиты F1, F2, F3 **не изменились** — те же SHA, те же сообщения.
+- M1, M2, M3 не изменились.
+- Создан новый коммит M* с двумя родителями: F3 и M3.
+- M* содержит "снимок" объединённого состояния.
+
+**Плюсы:**
+
+- История **точно отражает реальность**: "вот когда я мерджнул main в feature".
+- Не теряются original SHA — ссылки на коммиты остаются валидными.
+- Безопасно для shared branches: никто не получает rewritten history.
+
+**Минусы:**
+
+- История становится "ёлкообразной" — много веток и слияний.
+- Сложно читать `git log --graph` для большого проекта.
+- В feature-ветке появляется лишний merge commit "Merge branch 'main' into feature".
+
+---
+
+## Путь 2: `git rebase main` (rebase approach)
+
+```bash
+$ git switch feature/x
+$ git rebase main
+```
+
+Git **переписывает** твои коммиты F1, F2, F3 — переставляет их поверх M3.
+
+<DiagramContainer title="После rebase: линейная история, но твои коммиты теперь новые" color="green">
+  <FlowColumn className="p-4 gap-3">
+    <Tooltip content="После rebase: твои коммиты F1', F2', F3' (новые SHA) идут после M3">
+      <DataBox label="После rebase main" className="border-green-500/30 w-full max-w-2xl mx-auto">
+        <div className="text-xs font-mono space-y-1">
+          <div>{'C0 ── M1 ── M2 ── M3 ── F1\' ── F2\' ── F3\'  (feature/x)'}</div>
+        </div>
+      </DataBox>
+    </Tooltip>
+  </FlowColumn>
+</DiagramContainer>
+
+Что произошло:
+
+- Twoи коммиты F1, F2, F3 **переписаны как F1', F2', F3'** с новыми SHA. Old F1/F2/F3 потеряны (но ещё доступны через reflog).
+- Новые F1', F2', F3' имеют те же изменения (по тексту), но новые parent: F1' -> M3 (а не C0).
+- M1, M2, M3 не изменились.
+- Merge commit не создаётся.
+
+**Плюсы:**
+
+- История **линейная** — `git log` читается как roadmap, без ёлок.
+- `git bisect` работает идеально (последовательность бинарного поиска).
+- Visual git tools показывают чистый граф.
+
+**Минусы:**
+
+- Твои коммиты получили **новые SHA**. Если кто-то уже видел старые — у него теперь "старая" версия твоей ветки.
+- При конфликте — нужно разрешать его **для каждого коммита** в процессе rebase (не один раз, как при merge).
+- **Опасно** на shared branches: переписывая history, ты заставляешь всех делать сложные операции восстановления.
+
+---
+
+## Что значит "новые SHA"
+
+SHA коммита — это hash от содержимого + метаданных + parent. Если меняется любое из этого — SHA меняется. При rebase меняется parent (была C0, стала M3), значит и SHA меняется.
+
+```bash
+# До rebase
+$ git log --oneline feature/x
+abc1234 F3
+def5678 F2
+9876543 F1
+c0c0c0c init
+
+# После rebase
+$ git log --oneline feature/x
+fff8888 F3   ← новый SHA
+eee7777 F2   ← новый SHA
+ddd6666 F1   ← новый SHA
+m3m3m3m M3
+m2m2m2m M2
+m1m1m1m M1
+c0c0c0c init
+```
+
+Старые коммиты `abc1234`, `def5678`, `9876543` всё ещё в `.git/objects/` (до запуска git gc), доступны через `git reflog`. Но указатель `feature/x` теперь смотрит на новый top.
+
+---
+
+## Сравнение бок-о-бок
+
+| Аспект | `git merge` | `git rebase` |
+|--------|-------------|--------------|
+| История | Сохраняется ветвистой | Переписывается линейной |
+| SHA коммитов ветки | Не меняются | Меняются (новые объекты) |
+| Merge commits | Создаются | Не создаются |
+| Безопасность на shared branches | Безопасно | Опасно — нужен force push |
+| Конфликты разрешаются | Один раз для всего merge | Для каждого коммита по отдельности |
+| `git bisect` качество | Хуже (merge commits сбивают) | Лучше (линейная история) |
+| `git blame` качество | Те же оригинальные коммиты | Можно потерять контекст |
+| Сложность для джуна | Легче понять | Сложнее (новые SHA, конфликты на каждом шаге) |
+
+---
+
+## Аналогия: запись или редактирование
+
+Хорошая аналогия — **дневник vs. книга**:
+
+- **Merge** = дневник. Записываешь по дням, как было. Не подчищаешь "ну я тогда передумал". История правдива, но местами хаотична.
+
+- **Rebase** = книга. Переставляешь главы, переписываешь, шлифуешь. Финальный текст читается легко, но не отражает, в каком порядке ты на самом деле писал.
+
+Оба варианта валидны. Команда выбирает policy: "у нас merge culture" или "у нас rebase culture".
+
+---
+
+## Pull через merge vs pull через rebase
+
+Команда `git pull` тоже делает выбор:
+
+```bash
+# По дефолту pull = fetch + merge
+$ git pull
+
+# Pull = fetch + rebase (если настроено или явно)
+$ git pull --rebase
+
+# Глобально включить rebase-first pull
+git config --global pull.rebase true
+```
+
+Если ты часто делаешь `git pull` на feature-ветке (что чтобы вобрать `main`), `--rebase` обычно лучше: не создаёт merge commits, история чище.
+
+<Callout type="tip">
+Хороший дефолт для джуна: `pull.rebase = true` плюс `pull.ff = only`. Тогда `git pull` либо делает fast-forward (всё ок), либо требует явный rebase. Это убирает класс ошибок "случайно создал ветвистую историю".
+</Callout>
+
+---
+
+## Squash merge — третий вариант
+
+В дополнение к merge и rebase, GitHub/GitLab часто предлагают третий option при merge PR: **squash merge**.
+
+```bash
+# Локальный эквивалент
+git merge --squash feature/x
+git commit -m "feat: add x feature"
+```
+
+Что происходит:
+
+- Все коммиты из `feature/x` объединяются в **один** коммит.
+- Этот один коммит ложится на `main` без merge-commit (как fast-forward).
+- Original ветка `feature/x` остаётся с её коммитами (если она не удалена).
+
+<DiagramContainer title="Squash merge: 3 коммита feature становятся одним в main" color="purple">
+  <FlowColumn className="p-4 gap-3">
+    <Tooltip content="До: 3 отдельных коммита в feature">
+      <DataBox label="до squash" className="border-zinc-500/30 w-full max-w-xl mx-auto">
+        <div className="text-xs font-mono">{'main: C0 — M1 — M2 — M3'}</div>
+        <div className="text-xs font-mono">{'feature: C0 — F1 — F2 — F3'}</div>
+      </DataBox>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="После: один коммит S, который содержит все изменения F1+F2+F3">
+      <DataBox label="после squash в main" className="border-purple-500/30 w-full max-w-xl mx-auto">
+        <div className="text-xs font-mono">{'main: C0 — M1 — M2 — M3 — S (= F1+F2+F3 squashed)'}</div>
+      </DataBox>
+    </Tooltip>
+  </FlowColumn>
+</DiagramContainer>
+
+**Плюсы squash:**
+
+- Одна "единица" в `main` history — легко откатить (`git revert` одного коммита).
+- Не загромождает `main` промежуточными "wip" и "fix typo" коммитами.
+
+**Минусы squash:**
+
+- Теряется детальная история работы.
+- Авторство в `git blame` указывает на squash-коммит, а не на original commits.
+
+Многие команды используют squash как дефолт для PR merge, оставляя rebase для personal sync с main.
+
+---
+
+## Когда использовать что: cheat sheet
+
+| Ситуация | Выбор |
+|----------|-------|
+| Синхронизировать свою личную feature ветку с main (до PR) | `rebase` |
+| Долгоживущий шеренгу ветку, на которой работает несколько людей | `merge` |
+| Сливать готовую feature в main через PR | `squash` (для атомарности) или `merge` (для детальной истории) — зависит от team policy |
+| Сливать release ветку в main после релиза | `merge` (с merge commit) — отражает событие "release X.Y" |
+| Откатить только что сделанный merge | `git reset --hard ORIG_HEAD` или `git revert -m 1 <merge-sha>` |
+| Подтянуть свежий main в свою ветку, чтобы тесты CI работали | `rebase` или `merge` — по vкусу команды |
+
+---
+
+## Demo: одна и та же ситуация двумя путями
+
+```bash
+mkdir rebase-vs-merge && cd rebase-vs-merge
+git init -b main
+
+# Базовый коммит
+echo "v0" > file.txt
+git add . && git commit -m "C0 init"
+
+# Симулируем 3 коммита в main
+for i in 1 2 3; do
+    echo "main change $i" >> file.txt
+    git commit -am "M$i: main change $i"
+done
+
+# Возвращаемся в C0 и делаем ветку feature
+git switch -c feature HEAD~3
+
+# 3 коммита в feature
+for i in 1 2 3; do
+    echo "feature change $i" > feature$i.txt
+    git add .
+    git commit -m "F$i: feature change $i"
+done
+
+# Сравним подходы — клонируем репо в отдельные папки
+cd ..
+
+cp -r rebase-vs-merge merge-demo
+cp -r rebase-vs-merge rebase-demo
+
+# Демо merge
+cd merge-demo
+git switch feature
+git merge main
+git log --oneline --graph --all
+# Увидишь ромб
+
+# Демо rebase
+cd ../rebase-demo
+git switch feature
+git rebase main
+git log --oneline --graph --all
+# Увидишь линию
+```
+
+Открой результат каждой команды визуально (`gitk --all` или GitLens в VS Code), и разница в графе будет очевидна.
+
+---
+
+<KnowledgeCheck
+  question="Команда настроила `pull.rebase = true` глобально. Junior, не зная этого, сделал на своей `feature` ветке несколько локальных коммитов и `git pull`. Pull прошёл без проблем. Чем результат отличается от того, что junior получил бы при `pull.rebase = false`, и почему важно знать настройку команды?"
+  answer="С `pull.rebase = true`: команда выполнила `git fetch + git rebase origin/feature`. Это переписало локальные коммиты junior'а — их SHA изменились, и они теперь идут после коммитов, которые были на сервере. История остаётся **линейной**, без merge commits. Junior может это и не заметить — внешне всё работает. С `pull.rebase = false` (дефолт без настройки): команда выполнила `git fetch + git merge origin/feature` — Git создал бы merge commit 'Merge branch ... into feature'. История стала бы ветвистой. Если бы junior потом делал `git push`, всё бы прошло, но в feature-ветку влетел бы лишний merge commit. Почему важно знать настройку команды: (1) при rebase **меняются SHA локальных коммитов** — если junior уже их кому-то показал (например, для review), эти SHA теперь invalid. (2) Команды rebase-culture не любят merge commits в feature-ветках, у них есть branch protection / CI правила, которые могут отвергать PR с extra merge commits. (3) При rebase **конфликты разрешаются по одному для каждого коммита** — это совсем другой опыт. Junior должен спросить: 'какой workflow в команде, rebase или merge?', и настроить локально `pull.rebase` соответственно. Дополнительно, для безопасности новичков, полезен `pull.ff = only` — Git разрешит pull только если возможен fast-forward, иначе явно потребует решения rebase vs merge."
+/>

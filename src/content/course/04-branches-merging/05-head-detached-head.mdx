@@ -1,0 +1,365 @@
+---
+title: "HEAD и detached HEAD — где вы сейчас"
+description: "HEAD как указатель на ветку. Detached HEAD: что это, когда случается, как безопасно выйти (создать ветку)"
+order: 5
+difficulty: "beginner"
+estimatedTime: 16
+topics: ["Git", "HEAD", "Detached HEAD", "Branches"]
+---
+
+# HEAD и detached HEAD — где вы сейчас
+
+HEAD — это указатель, который Git использует, чтобы понимать «где вы сейчас». Обычно HEAD указывает на ветку (через `ref: refs/heads/branch-name`), и всё работает интуитивно. Но иногда HEAD оказывается в особом состоянии — **detached HEAD** — когда указывает напрямую на коммит, а не на ветку. Это пугает junior, и в этом уроке мы разберём, что это, когда случается, и как безопасно из этого состояния выйти.
+
+После урока detached HEAD перестанет быть пугающим. Вы будете знать, что это нормальное состояние, как в него попасть, как выйти, и какие коммиты могут «потеряться», если оттуда выйти неосторожно.
+
+---
+
+## HEAD в нормальном состоянии
+
+Обычно HEAD указывает на ветку:
+
+```bash
+cat .git/HEAD
+# ref: refs/heads/main
+```
+
+Это «attached» состояние: HEAD прикреплён к ветке. Когда вы делаете коммит, Git:
+
+1. Создаёт новый commit-объект
+2. Обновляет файл ветки (refs/heads/main) на SHA нового коммита
+3. HEAD по-прежнему указывает на refs/heads/main, и через эту ссылку — на новый коммит
+
+<DiagramContainer title="HEAD прикреплён к ветке (нормальное состояние)" color="indigo">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="HEAD" variant="highlight" tooltip="Указатель: ref: refs/heads/main">HEAD</DataBox>
+      <Arrow direction="right" label="ссылается на" />
+      <DataBox label="refs/heads/main" tooltip="Файл ветки. Содержит SHA текущего коммита">main</DataBox>
+      <Arrow direction="right" label="ссылается на" />
+      <DataBox label="commit C2" tooltip="Текущий последний коммит ветки">C2</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="git commit" tooltip="После коммита">+ C3</DataBox>
+      <Arrow direction="right" label="" />
+      <DataBox label="refs/heads/main" tooltip="Двигается на C3 автоматически" variant="highlight">main -> C3</DataBox>
+      <Arrow direction="right" label="" />
+      <DataBox label="HEAD" tooltip="По-прежнему указывает на main, через main теперь на C3">HEAD -> main -> C3</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Это и есть «двигаться вместе с веткой»: коммитите — ветка двигается вперёд, HEAD за ней автоматически.
+
+---
+
+## Detached HEAD: что это
+
+**Detached HEAD** — это когда HEAD указывает **напрямую на commit**, а не на ветку:
+
+```bash
+cat .git/HEAD
+# c5b6a7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4
+# (просто SHA, без 'ref: ...')
+```
+
+Это состояние, в котором вы «находитесь» не на ветке, а на конкретном коммите. Из этого вытекают важные следствия:
+
+<DiagramContainer title="HEAD в detached состоянии" color="amber">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="HEAD" variant="warning" tooltip="Указатель напрямую на коммит, не через ветку">HEAD</DataBox>
+      <Arrow direction="right" label="напрямую" />
+      <DataBox label="commit X" tooltip="Какой-то коммит из истории. Не на ветке">X</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Ветка main" tooltip="Существует, но HEAD на неё не указывает" variant="warning">main -> C3 (где-то)</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Коммит в detached" tooltip="Если вы сделаете git commit, новый коммит создастся. HEAD двинется на него. Но НИКАКАЯ ветка на этот коммит не указывает. Если уйти отсюда — коммит потеряется (только в reflog)" variant="warning">Опасно</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Главный риск: **коммиты, сделанные в detached HEAD, не принадлежат никакой ветке**. Если вы переключитесь куда-то (`git switch main`), эти коммиты станут unreachable. Через 30 дней (default reflog expiry) они исчезнут с git gc.
+
+---
+
+## Когда случается detached HEAD
+
+Несколько типичных сценариев:
+
+### 1. `git checkout <SHA>` или `git switch --detach`
+
+```bash
+git checkout abc1234
+# Или:
+git switch --detach abc1234
+# HEAD is now at abc1234 (some old commit)
+# You are in 'detached HEAD' state...
+```
+
+Это явный переход на конкретный коммит из истории. Git выдаст предупреждение.
+
+### 2. Checkout на тег
+
+Теги — это обычно `lightweight tag` указатель на коммит. При checkout на тег вы попадаете в detached HEAD:
+
+```bash
+git checkout v1.0
+# Note: switching to 'v1.0'.
+# You are in 'detached HEAD' state...
+```
+
+### 3. Checkout на remote tracking branch
+
+```bash
+git checkout origin/main
+# Тоже detached, потому что origin/main — отслеживающая ветка, не локальная
+```
+
+### 4. Во время interactive rebase
+
+При `git rebase -i`, между шагами вы можете оказаться в detached HEAD. Git автоматически выходит из него в конце rebase.
+
+### 5. Сабмодули
+
+В Git submodules HEAD по умолчанию detached на конкретном коммите. Это by design — модуль 16.
+
+---
+
+## Что значит предупреждение Git
+
+При попадании в detached HEAD Git выдаёт пугающий текст:
+
+```text
+Note: switching to 'abc1234'.
+
+You are in 'detached HEAD' state. You can look around, make experimental
+changes and commit them, and you can discard any commits you make in this
+state without impacting any branches by switching back to a branch.
+
+If you want to create a new branch to retain commits you create, you may
+do so (now or later) by using -c with the switch command. Example:
+
+  git switch -c <new-branch-name>
+
+Or undo this operation with:
+
+  git switch -
+
+Turn off this advice by setting config variable advice.detachedHead to false
+
+HEAD is now at abc1234 some message
+```
+
+Это **не ошибка**. Git просто объясняет: вы в особом состоянии, осторожно, и вот как выйти.
+
+---
+
+## Когда detached HEAD полезен
+
+Сценарии, где detached HEAD — нормальный workflow:
+
+### Просмотр старого состояния
+
+«Хочу посмотреть, как выглядел проект 2 месяца назад»:
+
+```bash
+git checkout abc1234   # коммит из прошлого
+# Просматриваю файлы, запускаю код, понимаю, как было...
+
+git switch -           # возвращаюсь куда был
+```
+
+Тут detached HEAD безопасен, потому что я не делаю коммитов. Просто смотрю.
+
+### Тестирование старой версии
+
+«Воспроизвести баг на v1.0»:
+
+```bash
+git checkout v1.0
+# Запустить, проверить
+git switch -
+```
+
+### Эксперимент
+
+«Что будет, если применить старый алгоритм?»:
+
+```bash
+git checkout v2.5
+# Поправил код, проверил — хочу сохранить
+git switch -c experiment/old-algo   # ← КЛЮЧЕВОЕ: создаём ветку!
+git commit -am "Try old algo"
+```
+
+Здесь критично: если я хочу сохранить коммиты — **создаю ветку**, пока я в detached HEAD. Без ветки коммиты «потеряются».
+
+---
+
+## Как безопасно выйти из detached HEAD
+
+### Если коммитов не делали
+
+Просто переключитесь куда-то:
+
+```bash
+git switch main       # вернуться на main
+git switch -          # вернуться где был
+git switch -c feat/x  # создать ветку отсюда (не нужно, если ничего не коммитили)
+```
+
+### Если коммиты были — спасайте их веткой
+
+```bash
+# Сейчас в detached, есть коммиты
+git switch -c rescue-branch
+# Все коммиты теперь принадлежат rescue-branch
+# Можете дальше: merge, push, что угодно
+```
+
+После `git switch -c <branch>` из detached HEAD ваши коммиты «прикрепляются» к новой ветке и больше не теряются.
+
+### Если уже ушли, но потерялись коммиты
+
+```bash
+# Случайно сделали git switch main, потеряли коммиты detached
+git reflog
+# 1: 12345 HEAD@{0}: switch: moving from <SHA-detached> to main
+# 2: <SHA-detached> HEAD@{1}: commit: my work
+# ...
+
+# Восстановить:
+git switch -c rescue <SHA-detached>
+```
+
+reflog (модуль 09) сохраняет историю движений HEAD ещё ~30 дней. Через него легко вернуть потерянные коммиты.
+
+---
+
+## Безопасные практики
+
+1. **Если в detached HEAD ничего не коммитили** — выходите безопасно через `git switch -`.
+2. **Если делали коммиты в detached HEAD** — обязательно `git switch -c <branch>` ПЕРЕД переключением.
+3. **Если потеряли коммиты случайно** — `git reflog` всё помнит, восстановите через `git switch -c rescue <SHA>`.
+
+---
+
+## Просмотр HEAD-состояния
+
+```bash
+git status
+# Если на ветке:
+# On branch main
+
+# Если в detached:
+# HEAD detached at abc1234
+```
+
+```bash
+git branch
+# * (HEAD detached at abc1234)   ← звёздочка не на ветке, а на «detached»
+#   main
+#   feature/x
+```
+
+```bash
+cat .git/HEAD
+# Detached: SHA напрямую
+# Attached: ref: refs/heads/...
+```
+
+---
+
+## Visual model: HEAD как «вы здесь»
+
+Подумайте о HEAD как о метке «вы здесь» на карте репозитория:
+
+<DiagramContainer title="HEAD = вы здесь" color="purple">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Attached" tooltip="«Вы на улице Main, дом 42» — указано через переменную (улица). Сменили дом 42 на 43 — улица та же, дом обновился (ветка двигается)">Improved by branch</DataBox>
+      <DataBox label="Detached" tooltip="«Вы в точке с координатами (lat, lon)» — указано напрямую, без улицы. Двинулись — координаты сменились, но никто не знает «улицу» где вы" variant="warning">Pinpoint</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Этот mental model хорошо работает: ветка — это «улица», коммит — «дом». Attached HEAD говорит «на улице main». Detached — «в конкретной точке без улицы».
+
+---
+
+## Попробуй сам
+
+1. Попадите в detached HEAD сознательно:
+
+```bash
+mkdir -p ~/git-sandbox/lesson-04-head
+cd ~/git-sandbox/lesson-04-head
+git init
+
+# Три коммита на main
+echo "1" > a && git add . && git commit -m "C1"
+echo "2" > a && git add . && git commit -m "C2"
+echo "3" > a && git add . && git commit -m "C3"
+
+git log --oneline
+# C3 (HEAD -> main) ...
+# C2 ...
+# C1 ...
+
+# Переключаемся на C1 (старый коммит)
+C1_SHA=$(git rev-parse HEAD~2)
+git checkout $C1_SHA
+
+# Видите предупреждение про detached HEAD
+git status
+cat .git/HEAD
+# Теперь SHA напрямую, не ref:
+```
+
+2. Сделайте коммит в detached HEAD (опасно!):
+
+```bash
+echo "in detached" > b.txt
+git add . && git commit -m "Detached commit"
+
+git log --oneline
+# <new-sha> (HEAD) Detached commit
+# C1
+```
+
+3. Случайно переключитесь на main:
+
+```bash
+git switch main
+git log --oneline
+# Где ваш detached commit?? Его не видно в main.
+```
+
+4. Восстановите через reflog:
+
+```bash
+git reflog
+# Найдите detached commit
+git switch -c rescue <detached-SHA>
+git log --oneline
+# Теперь rescue имеет тот коммит
+```
+
+5. Или попадите в detached HEAD и сразу создайте ветку:
+
+```bash
+C1_SHA=$(git rev-parse main~3)  # или какой-то старый
+git checkout $C1_SHA
+git switch -c experiment/from-c1
+# Теперь experiment/from-c1 — обычная ветка от C1, без detached HEAD-состояния
+```
+
+---
+
+<KnowledgeCheck
+  question="Junior случайно сделал три коммита в detached HEAD состоянии, потом сделал `git switch main` и теперь не видит свои коммиты. Они потеряны навсегда?"
+  answer="Нет, пока. Detached commits 'отвязываются' от текущего HEAD при переключении, но физически остаются в .git/objects/ — Git не удаляет объекты сразу. Восстановление: 1) `git reflog` — журнал всех движений HEAD за последние ~30 дней. Найдите запись типа 'HEAD@{1}: commit: my detached work'. 2) Запомните SHA detached-коммита. 3) `git switch -c rescue-branch <SHA>` — создайте новую ветку прямо на этом коммите. Все три коммита (и их parent-цепочка) станут доступны на rescue-branch. Если бы Junior сделал `git switch -c new-branch` ДО переключения на main — коммиты прикрепились бы к new-branch сразу, без танцев с reflog. Правило: после коммитов в detached HEAD — `git switch -c <branch>` обязательно, прежде чем уходить. Объекты живы в .git/objects/ до git gc (30 дней по умолчанию), reflog — основной инструмент спасения. Модуль 09 разбирает reflog подробно."
+/>

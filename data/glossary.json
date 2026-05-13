@@ -1,0 +1,598 @@
+{
+  "categories": [
+    {
+      "id": "core-concepts",
+      "name": "Основные концепции",
+      "terms": [
+        {
+          "term": "Repository",
+          "termEn": "Repository (репозиторий)",
+          "definition": "Каталог проекта, в котором Git отслеживает изменения. Физически это набор файлов в рабочем каталоге плюс скрытая папка `.git/`, где Git хранит всю историю, ветки, конфиг и объекты. Различают local repository (на вашей машине, с полной историей) и remote repository (на сервере вроде GitHub, к которому push/pull). Git — distributed VCS: каждый клон содержит полную копию истории и работоспособен без сетевого соединения. Repository может быть bare (без working tree, обычно на сервере) или non-bare (обычный, у разработчика). Удаление `.git/` превращает каталог в обычные файлы без истории.",
+          "example": "git init my-project          # создать новый репо\ngit clone <url> my-project   # клонировать существующий\nls -la my-project/.git/      # внутренности репо\n# HEAD, config, objects/, refs/, hooks/, index, logs/",
+          "relatedLessons": [
+            { "title": "Что такое репозиторий", "slug": "01-what-is-git/02-repository" },
+            { "title": "git init и .git/", "slug": "03-three-trees/01-git-init-internals" }
+          ]
+        },
+        {
+          "term": "Commit",
+          "termEn": "Commit (коммит)",
+          "definition": "Снимок состояния проекта в определённый момент времени плюс метаданные. Физически commit — это git object, содержащий: ссылку на tree object (snapshot структуры файлов), parent commit hash(es), автора (имя, email, timestamp), коммиттера (часто тот же, но при rebase/cherry-pick — другой), сообщение. Идентифицируется SHA-1 hash (с Git 2.42 опционально SHA-256), вычисленным из содержимого. Immutable — изменить commit нельзя, можно создать новый с такими же изменениями (что и делает amend/rebase). Merge commit имеет 2+ parents, root commit — 0 parents, обычный — 1 parent.",
+          "example": "git commit -m \"feat: add CSV parser\"\n\n# anatomy объекта commit:\n# tree    9d2f...        ← snapshot файлов\n# parent  3a8c...        ← предыдущий commit (может быть 0/1/2+)\n# author  Lev <l@e> 1715000000 +0300\n# committer Lev <l@e> 1715000000 +0300\n#\n# feat: add CSV parser\n\ngit cat-file -p HEAD     # посмотреть содержимое",
+          "relatedLessons": [
+            { "title": "git add и git commit", "slug": "03-three-trees/03-add-commit-status" },
+            { "title": "Объекты Git: blob, tree, commit", "slug": "03-three-trees/05-objects" }
+          ]
+        },
+        {
+          "term": "Branch",
+          "termEn": "Branch (ветка)",
+          "definition": "Подвижный указатель (mutable pointer) на commit. Физически это файл в `.git/refs/heads/<branch>`, содержащий 40-символьный SHA коммита. При `git commit` Git создаёт новый commit с текущим HEAD как parent и обновляет указатель ветки на новый commit. Создание ветки — это просто запись нового файла с SHA: O(1) операция, никакого копирования файлов не происходит. Default branch обычно называется `main` (в новых репо) или `master` (в старых). Ветка не «содержит» коммиты — она лишь указывает на последний; история восстанавливается обходом parent-указателей.",
+          "example": "git branch feature/etl-rewrite     # создать ветку\ngit switch feature/etl-rewrite     # переключиться (Git 2.23+)\ngit branch -d feature/old          # удалить (если merged)\ngit branch -D feature/old          # форсированное удаление\n\n# Под капотом:\ncat .git/refs/heads/main\n# 3a8c2f1e9d... ← просто SHA",
+          "relatedLessons": [
+            { "title": "Что такое ветка", "slug": "04-branches-merging/01-what-is-branch" },
+            { "title": "refs и .git/refs/", "slug": "04-branches-merging/02-refs-internals" }
+          ]
+        },
+        {
+          "term": "HEAD",
+          "termEn": "HEAD",
+          "definition": "Специальный ref, указывающий на текущий checkout — обычно на ветку, реже напрямую на commit (detached HEAD). Физически — файл `.git/HEAD`, содержащий либо `ref: refs/heads/main` (symbolic ref на ветку), либо 40-символьный SHA (detached). HEAD определяет, какой commit станет parent следующего commit. При `git switch branch` обновляется `.git/HEAD` и working tree приводится к состоянию того commit. Detached HEAD возникает при `git checkout <sha>` — изменения тут опасны, потому что новые commits не привязаны к ветке и легко теряются.",
+          "example": "cat .git/HEAD\n# ref: refs/heads/main\n\ngit checkout 3a8c2f1e   # detached HEAD\ncat .git/HEAD\n# 3a8c2f1e9d4b5c...     ← напрямую SHA\n\ngit rev-parse HEAD       # SHA текущего commit\ngit log HEAD~3..HEAD     # последние 3 коммита",
+          "relatedLessons": [
+            { "title": "HEAD и detached HEAD", "slug": "04-branches-merging/03-head" },
+            { "title": "refs и .git/refs/", "slug": "04-branches-merging/02-refs-internals" }
+          ]
+        },
+        {
+          "term": "Working Tree",
+          "termEn": "Working Tree (working directory, рабочее дерево)",
+          "definition": "Каталог проекта, в котором лежат файлы такими, какими вы их видите и редактируете — НЕ внутри `.git/`. Это первая из «трёх областей» Git (working tree -> index -> repository). Изменения в working tree не отслеживаются Git, пока не сделать `git add` (в index) и `git commit` (в repository). `git status` сравнивает working tree с index (показывает modified/untracked) и index с HEAD (показывает staged). При `git checkout` / `git switch` working tree приводится к состоянию выбранного commit — несохранённые изменения могут быть потеряны.",
+          "example": "# Три области:\n# working tree -> git add -> index -> git commit -> repository (.git)\n\necho \"DEBUG=1\" >> config.py  # модификация в working tree\ngit status                    # \"modified: config.py\" в красном\ngit diff                      # diff working tree vs index",
+          "relatedLessons": [
+            { "title": "Три дерева Git", "slug": "03-three-trees/02-three-trees-overview" }
+          ]
+        },
+        {
+          "term": "Index (Staging Area)",
+          "termEn": "Index / Staging Area",
+          "definition": "Промежуточная область между working tree и repository. Физически — бинарный файл `.git/index` (НЕ путать с .gitignore), содержащий список tracked файлов с их SHA blob, timestamps, permissions. Когда вы делаете `git add file.py`, Git создаёт blob object с содержимым file.py и обновляет запись в index. `git commit` фиксирует содержимое index как новый commit. Index позволяет точечно собирать commit из части изменений — `git add -p` интерактивно выбирает hunks. `git reset HEAD <file>` убирает из index, `git restore --staged <file>` (Git 2.23+) — то же самое.",
+          "example": "git add file.py             # working tree -> index\ngit add -p                  # patch mode — выбрать hunks\ngit restore --staged file   # убрать из index (Git 2.23+)\n\ngit ls-files --stage        # содержимое index\n# 100644 9d2f3c... 0  config.py",
+          "relatedLessons": [
+            { "title": "Index — staging area", "slug": "03-three-trees/04-index-staging" }
+          ]
+        },
+        {
+          "term": "Tree object",
+          "termEn": "Tree (объект дерева)",
+          "definition": "Git object, представляющий snapshot каталога: список (mode, type, hash, name) для каждого файла и поддиректории. Mode — права доступа (100644 для обычного файла, 100755 для исполняемого, 040000 для дерева). Type — blob (файл) или tree (подкаталог). Hash — SHA того blob/tree. Name — имя файла/каталога. Корневой tree commit описывает структуру всего проекта на момент commit; вложенные trees — поддиректории. Этот рекурсивный механизм позволяет Git эффективно хранить snapshots: неизменённые файлы share один blob, неизменённые поддиректории — один tree.",
+          "example": "git cat-file -p HEAD^{tree}\n# 100644 blob 9d2f3c...    README.md\n# 100644 blob 3a8b1e...    config.py\n# 040000 tree b7c9f4...    src\n\ngit ls-tree HEAD            # то же самое\ngit ls-tree -r HEAD         # рекурсивно",
+          "relatedLessons": [
+            { "title": "Объекты Git", "slug": "03-three-trees/05-objects" }
+          ]
+        },
+        {
+          "term": "Blob",
+          "termEn": "Blob (binary large object)",
+          "definition": "Git object, хранящий содержимое одного файла (БЕЗ имени — имя задаётся в parent tree). Имя blob — SHA от содержимого, поэтому два идентичных файла дают один blob (deduplication). Хранение: zlib-сжатый файл в `.git/objects/<первые-2-символа-SHA>/<остальные-38>` (loose object) или внутри packfile. Blob не знает о других blob и о имени — это чисто содержимое. Из-за SHA-content-addressing любое изменение файла даёт новый blob с новым SHA — старый blob продолжает существовать в objects/, пока не запустится `git gc`.",
+          "example": "echo 'hello' | git hash-object --stdin\n# ce013625030ba8dba906f756967f9e9ca394464a\n\ngit hash-object README.md       # SHA blob этого файла\ngit cat-file -p <sha>            # содержимое\ngit cat-file -t <sha>            # тип: blob\n\nls .git/objects/ce/              # 013625030ba...",
+          "relatedLessons": [
+            { "title": "Объекты Git", "slug": "03-three-trees/05-objects" }
+          ]
+        },
+        {
+          "term": "Tag",
+          "termEn": "Tag (тег)",
+          "definition": "Именованный указатель на конкретный commit, в отличие от ветки — НЕ перемещается. Хранится в `.git/refs/tags/<name>`. Два типа: lightweight tag (просто файл с SHA коммита, без метаданных) и annotated tag (полноценный git object с автором, датой, сообщением и опционально GPG-подписью). Annotated теги рекомендуются для релизов (v1.0.0, v2.4.1) — содержат tagger info и могут быть подписаны для verifiable releases. Lightweight подходит для временных меток. Push тегов происходит отдельно (`git push --tags` или `git push origin v1.0.0`) — обычный push их не передаёт.",
+          "example": "# Lightweight\ngit tag v1.0.0\n\n# Annotated (recommended for releases)\ngit tag -a v1.0.0 -m \"Release 1.0.0\"\n\n# Подписанный (требует GPG)\ngit tag -s v1.0.0 -m \"Signed release\"\n\ngit tag -l                  # список\ngit show v1.0.0             # содержимое\ngit push origin v1.0.0      # push отдельного tag",
+          "relatedLessons": [
+            { "title": "Tags: lightweight vs annotated", "slug": "10-stash-tags-cherry-pick/03-tags" }
+          ]
+        },
+        {
+          "term": "Remote",
+          "termEn": "Remote (удалённый репозиторий)",
+          "definition": "Именованная ссылка на внешний репозиторий (URL + alias). Конфигурация хранится в `.git/config` в секции `[remote \"<name>\"]`. При `git clone <url>` автоматически создаётся remote `origin`. Можно иметь несколько remotes (например, `origin` — ваш fork, `upstream` — оригинальный репо). `git fetch <remote>` скачивает объекты и обновляет remote-tracking branches (`refs/remotes/<remote>/<branch>`). `git push <remote> <branch>` отправляет ваши commits на сервер. URL может быть HTTPS (требует токен) или SSH (требует key pair).",
+          "example": "git remote -v\n# origin  git@github.com:me/repo.git (fetch)\n# origin  git@github.com:me/repo.git (push)\n\ngit remote add upstream https://github.com/orig/repo.git\ngit remote set-url origin git@github.com:me/repo.git\ngit remote rename origin github\ngit remote remove old-remote",
+          "relatedLessons": [
+            { "title": "Что такое remote", "slug": "05-remotes/01-remote-concept" }
+          ]
+        },
+        {
+          "term": "Origin",
+          "termEn": "Origin",
+          "definition": "Соглашение об имени remote по умолчанию — alias для удалённого репо, откуда был сделан clone. НЕ магическое слово в Git, а просто конвенция (можно переименовать). При `git push` без аргументов Git ищет remote по конфигу ветки (branch.<name>.remote) — обычно origin. `origin/main`, `origin/feature/x` — это remote-tracking branches: локальные снимки состояния веток на сервере, обновляемые через `git fetch`. Не путать с самой веткой на сервере: `origin/main` — это ваш локальный кэш, может быть устаревшим до следующего fetch.",
+          "example": "git clone <url>            # автоматически создаёт remote origin\ngit remote -v              # origin <url>\n\ngit branch -a              # включая origin/*\n# * main\n#   remotes/origin/main\n#   remotes/origin/feature/x\n\ngit fetch origin            # обновить origin/* refs",
+          "relatedLessons": [
+            { "title": "Origin и upstream", "slug": "05-remotes/02-origin-upstream" }
+          ]
+        },
+        {
+          "term": "Upstream",
+          "termEn": "Upstream (вышестоящий)",
+          "definition": "Два смысла. (1) Tracking relationship: ветка `feature/x` имеет upstream `origin/feature/x` — Git знает, куда push/pull. Устанавливается через `git push -u origin feature/x` (-u = --set-upstream) или `git branch --set-upstream-to`. (2) Конвенциональное имя remote для оригинального репозитория, когда вы fork: `origin` — ваш fork, `upstream` — original. При работе с fork-based contribution: `git fetch upstream`, `git merge upstream/main` для синхронизации с оригиналом перед PR.",
+          "example": "# (1) Upstream branch tracking\ngit push -u origin feature/x     # set upstream\ngit branch -vv                    # видно tracking\n# * feature/x abc123 [origin/feature/x] msg\n\n# (2) Fork workflow\ngit remote add upstream https://github.com/original/repo.git\ngit fetch upstream\ngit rebase upstream/main",
+          "relatedLessons": [
+            { "title": "Origin и upstream", "slug": "05-remotes/02-origin-upstream" }
+          ]
+        },
+        {
+          "term": "Refspec",
+          "termEn": "Refspec",
+          "definition": "Синтаксис маппинга ссылок между local и remote, формата `[+]<src>:<dst>`. `+` означает forced update (можно перезаписать non-fast-forward). По умолчанию `git push origin main` использует refspec `refs/heads/main:refs/heads/main`. `git fetch origin` использует refspec `+refs/heads/*:refs/remotes/origin/*` — обновляет все ветки в `refs/remotes/origin/`. Используется в `.git/config`: `fetch = +refs/heads/*:refs/remotes/origin/*`. Знание refspec помогает решать нетривиальные сценарии — push в другую ветку (`git push origin local:remote-branch`), delete remote branch (`git push origin :branch`).",
+          "example": "# Push local main -> remote main\ngit push origin main\n# равно: git push origin refs/heads/main:refs/heads/main\n\n# Push local feature -> другая ветка на remote\ngit push origin feature:experimental\n\n# Delete remote branch\ngit push origin :old-branch\n# или: git push origin --delete old-branch\n\ncat .git/config | grep -A2 remote",
+          "relatedLessons": [
+            { "title": "Refspec и push/fetch", "slug": "05-remotes/05-refspec" }
+          ]
+        },
+        {
+          "term": "Merge Base",
+          "termEn": "Merge Base (база слияния)",
+          "definition": "Ближайший общий предок (LCA — lowest common ancestor) двух веток в DAG коммитов. Это commit, от которого ветки разошлись. Используется как точка отсчёта в three-way merge: Git сравнивает merge base с каждой из веток (HEAD и MERGE_HEAD), вычисляет два набора изменений и пытается объединить. Если у двух веток несколько merge bases (рекурсивный сценарий с criss-cross merge), Git делает recursive merge — рекурсивно мёрджит сами bases. Знание merge base критично для разбора конфликтов — `git merge-base feature main` показывает SHA точки расхождения.",
+          "example": "git merge-base feature main\n# 3a8c2f1e9d... ← общий предок\n\n# Визуализация:\n#       o---o feature\n#      /\n# o---o---o main\n#     ^\n#     merge-base\n\ngit log --oneline 3a8c2f1e..HEAD     # коммиты после расхождения",
+          "relatedLessons": [
+            { "title": "Three-way merge", "slug": "04-branches-merging/06-three-way-merge" }
+          ]
+        },
+        {
+          "term": "Fast-forward",
+          "termEn": "Fast-forward merge",
+          "definition": "Простейший вид merge: целевая ветка является прямым предком источника, поэтому Git просто перемещает указатель ветки вперёд, без создания merge commit. Возможен, когда target branch не имеет своих коммитов после merge base. Команда `git merge --ff-only` разрешает только такой merge (fail иначе) — полезно в скриптах. `--no-ff` форсирует создание merge commit даже при возможности fast-forward — сохраняет explicit «merged feature X» в истории (политика GitFlow). По умолчанию `git pull` делает fast-forward, если возможно. Trunk-based workflows часто требуют ff-only через protected branches.",
+          "example": "# Fast-forward возможен:\n# main:    o---o\n# feature: o---o---o---o\n#                       ^ HEAD feature\n#\n# git switch main\n# git merge feature\n# main:    o---o---o---o   ← указатель просто перемещается\n#                       ^ HEAD main\n\ngit merge --ff-only feature      # ff или fail\ngit merge --no-ff feature        # всегда merge commit",
+          "relatedLessons": [
+            { "title": "Fast-forward vs three-way", "slug": "04-branches-merging/05-fast-forward" }
+          ]
+        },
+        {
+          "term": "Three-way merge",
+          "termEn": "Three-way merge",
+          "definition": "Алгоритм merge для случая, когда обе ветки имеют коммиты после merge base. Git сравнивает три версии: (1) merge base, (2) tip нашей ветки, (3) tip их ветки. Для каждого файла применяется логика: если изменена только с одной стороны — берётся изменённая; если с обеих сторон одинаково — берётся изменённая; если по-разному — conflict. Результат становится новым commit с двумя parents (merge commit). Алгоритм recursive (default) обрабатывает случаи нескольких merge bases. Существуют альтернативы: `-s ours` (берёт нашу версию полностью), `-s theirs` (наоборот), `-X ours/theirs` (только для конфликтных hunks).",
+          "example": "git merge feature\n# Auto-merging dag.py\n# CONFLICT (content): Merge conflict in dag.py\n# Automatic merge failed; fix conflicts and then commit\n\n# Стратегии\ngit merge -s ort feature              # default с Git 2.34\ngit merge -X theirs feature           # предпочитать их при conflict\ngit merge --abort                     # откатить",
+          "relatedLessons": [
+            { "title": "Three-way merge", "slug": "04-branches-merging/06-three-way-merge" }
+          ]
+        },
+        {
+          "term": "Rebase",
+          "termEn": "Rebase",
+          "definition": "Переписывание истории через перенос commits на новую базу. `git rebase main` берёт коммиты текущей ветки после merge base, временно их прячет, перемещает ветку на tip main, и заново применяет каждый коммит. Каждый rebased commit имеет НОВЫЙ SHA — это новый commit, не тот же. Поэтому rebase публичной (расшаренной) ветки катастрофичен: коллеги получат «расходящуюся историю». Interactive rebase (`-i`) позволяет reorder/squash/edit/drop коммиты. Часто используется перед PR для очистки локальной истории. Главное правило: НЕ rebase то, что уже push на remote и есть у коллег.",
+          "example": "git switch feature/etl-rewrite\ngit rebase main                # перенести на новый main\n\n# Interactive\ngit rebase -i HEAD~5\n# pick   abc1 first commit\n# squash def2 second\n# reword 9a8b third\n# drop   1c2d fourth\n\ngit rebase --abort             # откатить\ngit rebase --continue          # после resolve conflict",
+          "relatedLessons": [
+            { "title": "Что такое rebase", "slug": "07-rebase/01-what-is-rebase" },
+            { "title": "Interactive rebase", "slug": "07-rebase/03-interactive" }
+          ]
+        },
+        {
+          "term": "Reflog",
+          "termEn": "Reflog (журнал ссылок)",
+          "definition": "Локальный журнал всех движений HEAD и веток за последние ~90 дней (по умолчанию, настраивается через `gc.reflogExpire`). Хранится в `.git/logs/HEAD` и `.git/logs/refs/heads/<branch>`. Каждая запись: from SHA, to SHA, дата, операция (commit, merge, rebase, reset, checkout). Reflog — машина времени Git: позволяет восстановить «потерянный» коммит после `git reset --hard`, неудачного rebase, удалённой ветки. Reflog НЕ синхронизируется с remote — только локальный. Старые записи удаляются `git gc` после expire. Для commits, не достижимых из веток/тегов, reflog — последний шанс.",
+          "example": "git reflog\n# HEAD@{0} HEAD@{1} ...\n# abc1234 (HEAD -> main) HEAD@{0}: commit: fix\n# def5678 HEAD@{1}: reset: moving to HEAD~3\n# 9a8b765 HEAD@{2}: commit: feat: csv parser\n\n# Восстановить ветку после reset --hard\ngit reset --hard HEAD@{1}\n# или\ngit reset --hard 9a8b765",
+          "relatedLessons": [
+            { "title": "reflog как машина времени", "slug": "09-undo-reflog/05-reflog" }
+          ]
+        },
+        {
+          "term": "Packfile",
+          "termEn": "Packfile",
+          "definition": "Сжатый бинарный файл (`.git/objects/pack/*.pack` + `.idx`), содержащий множество git objects в одном file с delta-compression. После какого-то порога Git собирает loose objects в packfile через `git gc` или автоматически. Pack использует zlib + delta encoding: похожие blobs хранятся как diff относительно базового, экономя место. Index file (`.idx`) даёт быстрый lookup объекта по SHA внутри pack. Когда вы делаете `git push`, Git создаёт временный packfile для эффективной передачи. `git fsck`, `git verify-pack -v <pack>` помогают диагностировать проблемы. Слишком много мелких packs замедляют — `git repack -a -d` объединяет.",
+          "example": "ls .git/objects/pack/\n# pack-3a8c.idx pack-3a8c.pack\n\ngit count-objects -v\n# count: 4              ← loose objects\n# size: 16 KiB\n# in-pack: 12345        ← в packs\n# packs: 2\n\ngit gc                  # объединить loose в pack\ngit repack -a -d        # full repack",
+          "relatedLessons": [
+            { "title": "Packfiles и gc", "slug": "19-recovery/05-packfiles" }
+          ]
+        },
+        {
+          "term": "DAG (Directed Acyclic Graph)",
+          "termEn": "Commit DAG",
+          "definition": "Структура коммитов Git — направленный ациклический граф. Каждый commit имеет 0+ parent pointers (root commit — 0, обычный — 1, merge commit — 2+). Направленность: parent -> child. Ацикличность: commit не может быть своим предком, ведь SHA включает parent hash — циклическая зависимость невозможна. Ветки — это указатели на отдельные «листья» DAG. `git log --graph --all --oneline` визуализирует DAG. Merge создаёт vertex с двумя входами, rebase «выпрямляет» граф в линию. Понимание DAG критично для merge/rebase — вы должны видеть в голове «откуда commit, куда идёт».",
+          "example": "git log --graph --all --oneline --decorate\n# * a3b1c (HEAD -> main) Merge feature\n# |\\\n# | * 8d2f (feature) feat: csv\n# | * 7c1a feat: dag\n# * | 5e9b fix: typo\n# |/\n# * 3a8c initial",
+          "relatedLessons": [
+            { "title": "DAG коммитов", "slug": "01-what-is-git/03-dag" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "commands",
+      "name": "Команды",
+      "terms": [
+        {
+          "term": "git init",
+          "termEn": "git init",
+          "definition": "Инициализирует новый Git репозиторий: создаёт каталог `.git/` с подкаталогами (`objects/`, `refs/`, `hooks/`), файлами (`HEAD`, `config`, `description`), пустым index. После init у репо нет коммитов, HEAD указывает на несуществующую ветку (default обычно `main`, настраивается через `init.defaultBranch`). Работает только в каталоге без `.git/` — повторный init безопасен, но обычно ничего не меняет (только обновит hooks template). `git init --bare` создаёт bare repo для сервера (без working tree).",
+          "example": "git init                    # инициализировать current dir\ngit init my-project         # создать и инициализировать\ngit init --bare project.git # bare (для сервера)\n\n# Default branch — главный config\ngit config --global init.defaultBranch main\n\nls -la .git/\n# HEAD config description hooks/ info/ objects/ refs/",
+          "relatedLessons": [
+            { "title": "git init и .git/", "slug": "03-three-trees/01-git-init-internals" }
+          ]
+        },
+        {
+          "term": "git clone",
+          "termEn": "git clone",
+          "definition": "Создаёт локальную копию remote репозитория: инициализирует `.git/`, добавляет remote `origin`, скачивает все объекты, создаёт remote-tracking branches (`refs/remotes/origin/*`), checkout default branch. Опции: `--depth N` (shallow clone — только последние N коммитов, экономит трафик/место для большого репо), `--branch <name>` (clone определённой ветки), `--single-branch` (только одну ветку, без остальных), `--bare`, `--mirror` (полное зеркало для backup). Под капотом — fetch + checkout. Shallow clones имеют ограничения (нельзя push/fetch шибко глубокого, нельзя merge старых коммитов).",
+          "example": "git clone https://github.com/user/repo.git\ngit clone git@github.com:user/repo.git my-dir\ngit clone --depth 1 <url>           # shallow\ngit clone --branch develop <url>     # specific branch\ngit clone --recurse-submodules <url> # с submodules",
+          "relatedLessons": [
+            { "title": "git clone vs init", "slug": "05-remotes/03-clone" }
+          ]
+        },
+        {
+          "term": "git add",
+          "termEn": "git add",
+          "definition": "Добавляет изменения из working tree в index (staging area), создавая blob objects в `.git/objects/`. После `git add file.py` Git вычисляет SHA содержимого, сохраняет blob и записывает имя файла + SHA + права в `.git/index`. Опции: `-A` или `--all` (включая deletions всего репо), `-u` (только модифицированные/удалённые tracked, БЕЗ untracked), `-p` (patch mode — интерактивный выбор hunks). `git add .` добавляет всё в текущем каталоге, `git add -p` — самая важная команда для clean PR (commit по одной логической части).",
+          "example": "git add file.py              # один файл\ngit add src/                 # каталог\ngit add .                    # текущий каталог\ngit add -A                   # весь репо\ngit add -u                   # только tracked\ngit add -p                   # patch mode\n\ngit status                   # увидеть staged/unstaged",
+          "relatedLessons": [
+            { "title": "git add и git commit", "slug": "03-three-trees/03-add-commit-status" }
+          ]
+        },
+        {
+          "term": "git commit",
+          "termEn": "git commit",
+          "definition": "Создаёт новый commit из содержимого index с текущим HEAD как parent. Обновляет ветку, на которую указывает HEAD, на новый commit SHA. Опции: `-m \"msg\"` (inline сообщение), `-a` (auto-stage tracked файлы, не работает для untracked), `--amend` (заменяет последний commit новым с теми же changes + новыми изменениями — НОВЫЙ SHA), `--no-verify` (skip pre-commit hooks — обычно плохая идея), `--allow-empty` (commit без изменений). Conventional Commits — стандарт сообщений: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `test:`. `--amend` нельзя делать после push, если ветка расшарена.",
+          "example": "git commit -m \"feat: add CSV parser\"\ngit commit -am \"fix: typo\"        # add tracked + commit\ngit commit --amend                 # переписать последний\ngit commit --amend --no-edit       # без изменения сообщения\ngit commit --fixup=<sha>           # fixup для autosquash",
+          "relatedLessons": [
+            { "title": "git add и git commit", "slug": "03-three-trees/03-add-commit-status" }
+          ]
+        },
+        {
+          "term": "git push",
+          "termEn": "git push",
+          "definition": "Отправляет commits из локальной ветки на remote и обновляет remote-tracking ref. По умолчанию push возможен только если remote ветка является предком local (fast-forward) — иначе rejected с non-fast-forward. `--force` (или `-f`) перезаписывает remote — опасно, может потерять чужие commits. `--force-with-lease` — безопасный force: push только если remote-tracking ref совпадает с тем, что на сервере (то есть никто не пушил между вашим fetch и push). `-u` или `--set-upstream` устанавливает tracking при первом push. `git push origin :branch` или `--delete branch` удаляет remote ветку. `--tags` отправляет все tags.",
+          "example": "git push                     # на установленный upstream\ngit push -u origin feature/x # set upstream + push\ngit push --force-with-lease  # безопасный force\ngit push origin --delete branch    # удалить remote\ngit push origin v1.0.0       # push tag\ngit push --tags              # все tags",
+          "relatedLessons": [
+            { "title": "push, pull, fetch", "slug": "05-remotes/04-push-pull-fetch" }
+          ]
+        },
+        {
+          "term": "git fetch",
+          "termEn": "git fetch",
+          "definition": "Скачивает с remote новые объекты (commits, trees, blobs) и обновляет remote-tracking branches (`refs/remotes/origin/*`). НЕ изменяет working tree, не merge ничего в локальную ветку. После fetch вы можете изучить новые commits (`git log main..origin/main`) перед интеграцией. `git fetch --all` — все remotes. `--prune` (или `-p`) удаляет remote-tracking refs для веток, удалённых на сервере. `--tags` скачивает tags. Безопасная команда — её можно запускать когда угодно без побочных эффектов на ваши изменения.",
+          "example": "git fetch                    # default remote (origin)\ngit fetch --all              # все remotes\ngit fetch --prune            # удалить stale origin/*\ngit fetch origin main        # specific branch\n\n# Что нового на сервере?\ngit log main..origin/main --oneline",
+          "relatedLessons": [
+            { "title": "push, pull, fetch", "slug": "05-remotes/04-push-pull-fetch" }
+          ]
+        },
+        {
+          "term": "git pull",
+          "termEn": "git pull",
+          "definition": "Композитная команда: `git fetch` + `git merge` (или `rebase` при `pull.rebase=true` или `--rebase`). Скачивает изменения с remote и сразу интегрирует их в текущую ветку. По умолчанию делает fast-forward, если возможно, иначе создаёт merge commit. Опасность: при divergent histories pull создаёт merge commit, замусоривая историю. Многие команды настраивают `pull.rebase = true` (или `pull.ff = only`), чтобы получать линейную историю. Junior часто путает: pull не «обновляет origin/*» отдельно — это всегда fetch+merge на текущую ветку.",
+          "example": "git pull                     # fetch + merge\ngit pull --rebase            # fetch + rebase\ngit pull --ff-only           # fail если не fast-forward\n\n# Глобально\ngit config --global pull.rebase true\ngit config --global pull.ff only",
+          "relatedLessons": [
+            { "title": "push, pull, fetch", "slug": "05-remotes/04-push-pull-fetch" }
+          ]
+        },
+        {
+          "term": "git merge",
+          "termEn": "git merge",
+          "definition": "Интегрирует изменения из одной ветки в другую (текущую). Алгоритм: находит merge base, делает three-way merge. Результат — merge commit с двумя parents (или просто fast-forward без коммита). Опции: `--no-ff` (всегда создаёт merge commit, даже когда возможен fast-forward), `--ff-only` (только fast-forward или fail), `--squash` (применяет изменения как один commit БЕЗ merge commit — теряется связь с feature branch), `--abort` (откатить merge до начала), `-s ort` (default стратегия с Git 2.34), `-X theirs` или `-X ours` (при conflict предпочитать одну сторону).",
+          "example": "git switch main\ngit merge feature/etl-rewrite\n\n# Force merge commit (no fast-forward)\ngit merge --no-ff feature/etl-rewrite\n\n# Squash\ngit merge --squash feature/etl-rewrite\ngit commit -m \"feat: ETL rewrite (squashed)\"\n\n# Abort\ngit merge --abort",
+          "relatedLessons": [
+            { "title": "git merge command", "slug": "04-branches-merging/04-git-merge" }
+          ]
+        },
+        {
+          "term": "git status",
+          "termEn": "git status",
+          "definition": "Показывает состояние working tree и index: что staged (готово к commit), что modified но не staged, что untracked. Также показывает текущую ветку, ahead/behind отношение к upstream, состояние merge/rebase in progress. Опции: `-s` (short format), `-b` (показывать branch info), `--porcelain` (parse-able для скриптов). Junior должен делать `git status` ПОСТОЯННО — перед commit, после pull, в любой непонятной ситуации. Это основной способ ориентироваться в репо.",
+          "example": "git status\n# On branch feature/etl\n# Your branch is ahead of 'origin/feature/etl' by 2 commits.\n#\n# Changes to be committed:\n#   new file:   dag.py\n#\n# Changes not staged for commit:\n#   modified:   config.py\n#\n# Untracked files:\n#   notes.md\n\ngit status -sb               # short format",
+          "relatedLessons": [
+            { "title": "git status", "slug": "03-three-trees/03-add-commit-status" }
+          ]
+        },
+        {
+          "term": "git log",
+          "termEn": "git log",
+          "definition": "Показывает историю коммитов начиная с HEAD назад через parents. Опции: `--oneline` (компактный формат), `--graph` (ASCII DAG), `--all` (все ветки, не только текущая), `--decorate` (имена refs у коммитов), `-p` (с patch — diff каждого commit), `--stat` (статистика измененных файлов), `-n N` (последние N коммитов), `--since=\"2 weeks ago\"`, `--author=<name>`, `--grep=<pattern>` (поиск в сообщениях), `<commit1>..<commit2>` (commits в range). Powerful: `git log --graph --oneline --all --decorate` — визуализация DAG всего репо.",
+          "example": "git log --oneline -10\ngit log --graph --all --oneline --decorate\ngit log --since=\"1 week ago\" --author=Lev\ngit log --grep=\"fix\"\ngit log --stat\ngit log main..feature        # коммиты в feature но не в main\ngit log -p dag.py            # история изменений файла",
+          "relatedLessons": [
+            { "title": "git log форматы", "slug": "08-history-inspection/01-git-log" }
+          ]
+        },
+        {
+          "term": "git diff",
+          "termEn": "git diff",
+          "definition": "Показывает изменения между разными состояниями. По умолчанию `git diff` — working tree vs index (unstaged изменения). `git diff --staged` (или `--cached`) — index vs HEAD (что будет в commit). `git diff <commit>` — working tree vs commit. `git diff <c1> <c2>` — между двумя commits. `git diff <branch1>...<branch2>` — three-dot diff: изменения в branch2 от их merge-base. Опции: `--stat` (summary), `--name-only`, `--word-diff`, `--color-words`, `-w` (ignore whitespace). Один из главных tool для self-review перед commit.",
+          "example": "git diff                     # working tree vs index\ngit diff --staged            # index vs HEAD\ngit diff HEAD~3 HEAD          # последние 3 commits\ngit diff main feature        # между ветками\ngit diff main...feature      # three-dot\ngit diff --stat              # только статистика\ngit diff -- dag.py           # один файл",
+          "relatedLessons": [
+            { "title": "git diff: формы и опции", "slug": "08-history-inspection/02-git-diff" }
+          ]
+        },
+        {
+          "term": "git switch",
+          "termEn": "git switch",
+          "definition": "Современная команда (Git 2.23+) для переключения веток — заменяет половину функционала `git checkout`, которая была перегружена. `git switch <branch>` переключает на существующую ветку, обновляя working tree. `-c <name>` создаёт новую ветку. `-` (минус) переключает на предыдущую (как `cd -`). `--detach <commit>` для detached HEAD намеренно. Не работает с restore-related операциями (для них `git restore`). Если есть незакоммиченные изменения в conflict с целевой веткой — switch fail, нужно stash или commit сначала.",
+          "example": "git switch main                  # переключиться на main\ngit switch -c feature/new        # создать и переключиться\ngit switch -                     # на предыдущую ветку\ngit switch --detach 3a8c2f1      # detached HEAD\ngit switch --discard-changes main # отбросить изменения",
+          "relatedLessons": [
+            { "title": "git switch vs checkout", "slug": "04-branches-merging/07-switch-restore" }
+          ]
+        },
+        {
+          "term": "git restore",
+          "termEn": "git restore",
+          "definition": "Современная команда (Git 2.23+) для восстановления файлов — вторая половина старого `git checkout`. `git restore <file>` восстанавливает файл в working tree из index (отменяет unstaged изменения — ОПАСНО, изменения теряются). `--staged <file>` убирает из index (НЕ из working tree) — теперь не staged, но изменения остаются. `--source=<commit> <file>` восстанавливает из конкретного коммита. `--staged --worktree` — и из index, и из working tree (полный откат).",
+          "example": "git restore file.py              # отменить unstaged (теряются изменения!)\ngit restore --staged file.py     # убрать из index\ngit restore --source=HEAD~3 file.py   # версия из 3 commits назад\ngit restore --source=main --staged --worktree file.py    # полный откат",
+          "relatedLessons": [
+            { "title": "git restore vs reset", "slug": "09-undo-reflog/02-git-restore" }
+          ]
+        },
+        {
+          "term": "git reset",
+          "termEn": "git reset",
+          "definition": "Перемещает указатель ветки (и опционально index/working tree) на указанный commit. Три режима. `--soft <commit>` — только HEAD/branch, index и working tree не трогает (изменения остаются staged). `--mixed` (default) — HEAD + index, working tree не трогает (изменения unstaged). `--hard` — HEAD + index + working tree, ОПАСНО, изменения теряются. Типичные сценарии: `git reset --soft HEAD~3` (объединить 3 commits в один), `git reset HEAD <file>` (убрать из staging — старый синтаксис, лучше `git restore --staged`), `git reset --hard origin/main` (синхронизировать локальную ветку с remote).",
+          "example": "git reset --soft HEAD~3      # отменить 3 commits, оставить changes staged\ngit reset --mixed HEAD~1     # отменить commit, unstage\ngit reset --hard HEAD~1      # ОПАСНО — удалить commit и изменения\ngit reset --hard origin/main # синхронизация с remote\ngit reset HEAD file.py       # unstage (старый синтаксис)",
+          "relatedLessons": [
+            { "title": "git reset: soft, mixed, hard", "slug": "09-undo-reflog/01-git-reset" }
+          ]
+        },
+        {
+          "term": "git revert",
+          "termEn": "git revert",
+          "definition": "Создаёт НОВЫЙ commit, отменяющий изменения указанного commit. В отличие от reset не переписывает историю — старый commit остаётся, появляется новый «inverse». Безопасно для публичных веток. Полезно когда: запушили багу в main, нужно откатить, но reset --hard невозможен (history уже у коллег). `--no-commit` (или `-n`) применяет revert без коммита (можно объединить несколько reverts). Merge commit reverted с `-m 1` (specify parent). Опасность: revert НЕ удаляет commit из истории, только применяет inverse — при reverted-merge новый merge той же ветки НЕ повторит изменения (надо revert revert).",
+          "example": "git revert <bad-commit>           # создать revert commit\ngit revert HEAD                   # revert последний\ngit revert -n <c1> <c2> <c3>      # revert несколько без commit\ngit revert --abort                # откатить in-progress\ngit revert -m 1 <merge-commit>    # revert merge commit",
+          "relatedLessons": [
+            { "title": "git revert vs reset", "slug": "09-undo-reflog/03-git-revert" }
+          ]
+        },
+        {
+          "term": "git stash",
+          "termEn": "git stash",
+          "definition": "Временно прячет незакоммиченные изменения (working tree + index) в стек stashes, восстанавливая чистое состояние. Полезно когда нужно срочно переключиться на другую ветку, не коммитя half-done работу. `git stash push` (или просто `git stash`) — сохранить. `git stash list` — посмотреть stack. `git stash pop` — применить и удалить top (по умолчанию stash@{0}). `git stash apply` — применить без удаления. `-u` (или `--include-untracked`) включает untracked. `-m \"msg\"` — описание stash. Stashes хранятся локально, не push на remote.",
+          "example": "git stash                        # сохранить changes\ngit stash push -m \"WIP refactor\" # с описанием\ngit stash list                   # все stashes\n# stash@{0}: On main: WIP refactor\n# stash@{1}: On feature: WIP test\n\ngit stash pop                    # apply + drop\ngit stash apply stash@{1}        # apply specific\ngit stash drop stash@{0}         # удалить\ngit stash clear                  # удалить все",
+          "relatedLessons": [
+            { "title": "git stash", "slug": "10-stash-tags-cherry-pick/01-stash" }
+          ]
+        },
+        {
+          "term": "git cherry-pick",
+          "termEn": "git cherry-pick",
+          "definition": "Применяет изменения из конкретного commit на текущую ветку, создавая новый commit с такими же изменениями (новый SHA, может быть конфликт). Полезно для: переноса hotfix из main в release-ветку, выборочного переноса commits без полной merge ветки. `git cherry-pick <commit>` или несколько: `git cherry-pick <c1>..<c2>` (range, не включает c1) или `git cherry-pick <c1>^..<c2>` (с включением). `-x` добавляет в сообщение ссылку «(cherry picked from commit ...)». `--abort` / `--continue` / `--skip` при конфликте.",
+          "example": "git cherry-pick abc1234           # один commit\ngit cherry-pick abc1234 def5678   # несколько\ngit cherry-pick abc..def          # range (не включая abc)\ngit cherry-pick abc^..def         # range (включая abc)\ngit cherry-pick -x abc1234        # с reference в сообщении\ngit cherry-pick --abort           # отмена",
+          "relatedLessons": [
+            { "title": "cherry-pick", "slug": "10-stash-tags-cherry-pick/04-cherry-pick" }
+          ]
+        },
+        {
+          "term": "git tag (команда)",
+          "termEn": "git tag",
+          "definition": "Создаёт, удаляет, ищет tags. `git tag <name>` — lightweight tag на HEAD. `git tag -a <name> -m \"msg\"` — annotated. `git tag -s <name>` — GPG-signed. `git tag -l \"v1.*\"` — поиск по pattern. `git tag -d <name>` — удалить local. `git push origin --delete <tag>` — удалить remote. `git tag <name> <commit>` — tag не HEAD, а другой commit. Tags НЕ передаются автоматически при `git push` — нужно `git push --tags` или `git push origin <tag>`. После tag создан, лучше его не двигать — multiple tags на один commit допустимы.",
+          "example": "git tag v1.0.0                   # lightweight\ngit tag -a v1.0.0 -m \"Release\"   # annotated\ngit tag -l                       # список\ngit tag -l \"v1.*\"                # фильтр\ngit tag -d v1.0.0                # удалить local\ngit push origin v1.0.0           # push tag\ngit push origin --delete v1.0.0  # удалить remote",
+          "relatedLessons": [
+            { "title": "Tags: lightweight vs annotated", "slug": "10-stash-tags-cherry-pick/03-tags" }
+          ]
+        },
+        {
+          "term": "git blame",
+          "termEn": "git blame",
+          "definition": "Показывает, кто и когда последний раз изменил каждую строку файла. Для каждой строки: SHA commit, автор, дата, номер строки, содержимое. Используется чтобы понять контекст «зачем эта строка тут», найти автора для вопроса, отследить когда регрессия попала. Опции: `-L <start>,<end>` (только диапазон строк), `-w` (ignore whitespace changes), `-C` (track copied lines между файлами), `-M` (track moved lines внутри файла). НЕ для shaming — для understanding. На GitHub blame view доступен через UI.",
+          "example": "git blame dag.py\n# 3a8c2f1 (Lev 2026-03-15)  def extract():\n# 7b9d4e5 (Alice 2026-04-02)     data = read_csv()\n\ngit blame -L 10,20 dag.py        # только строки 10-20\ngit blame -w -M dag.py           # ignore ws + track moves\ngit log -p --follow dag.py       # альтернатива — история файла",
+          "relatedLessons": [
+            { "title": "git blame", "slug": "08-history-inspection/03-blame" }
+          ]
+        },
+        {
+          "term": "git bisect",
+          "termEn": "git bisect",
+          "definition": "Binary search по истории для поиска commit, в котором был внесён баг. Workflow: `git bisect start` -> `git bisect bad` (текущий commit плохой) -> `git bisect good <commit>` (известный хороший) -> Git чекаутит commit посередине range -> вы тестируете -> `git bisect good` или `bisect bad` -> повтор -> пока не сузится до одного. Для N коммитов нужно log2(N) шагов: для 1024 — всего 10 итераций. `git bisect run <script>` автоматизирует через exit code (0 = good, не-0 = bad). `git bisect reset` возвращает на исходную ветку.",
+          "example": "git bisect start\ngit bisect bad HEAD               # сейчас сломано\ngit bisect good v1.0.0            # неделю назад работало\n# Git чекаутит commit в середине\n# тестируем...\ngit bisect good                   # или bad\n# повторяем\ngit bisect reset                  # выйти\n\n# Автоматизация\ngit bisect run pytest tests/test_etl.py",
+          "relatedLessons": [
+            { "title": "git bisect: поиск bad commit", "slug": "08-history-inspection/04-bisect" }
+          ]
+        },
+        {
+          "term": "git fsck",
+          "termEn": "git fsck",
+          "definition": "File system check для репозитория: проверяет integrity объектов, ищет dangling/unreachable objects (не достижимые из refs). Полезно при диагностике corrupted repo или поиске «потерянных» коммитов после reset --hard. `--lost-found` создаёт `.git/lost-found/` с unreachable objects. `--unreachable` показывает объекты, не достижимые из refs. `--full` полная проверка (medlennее). Если fsck находит broken objects — репо повреждён, может потребоваться recovery из remote/backup.",
+          "example": "git fsck                         # базовая проверка\ngit fsck --full --unreachable    # полная + unreachable\ngit fsck --lost-found            # в .git/lost-found/\n\n# Поиск потерянного commit\ngit fsck --unreachable --no-reflogs | grep commit\n# unreachable commit 3a8c2f1...\ngit show 3a8c2f1                 # содержимое\ngit cherry-pick 3a8c2f1          # вернуть",
+          "relatedLessons": [
+            { "title": "git fsck и recovery", "slug": "19-recovery/04-fsck" }
+          ]
+        },
+        {
+          "term": "git gc",
+          "termEn": "git gc (garbage collection)",
+          "definition": "Очищает репозиторий: упаковывает loose objects в packfiles, удаляет unreachable objects старше gc.pruneExpire (default 2 weeks), удаляет stale reflog entries (старше gc.reflogExpire — 90 дней). Запускается автоматически при некоторых командах, если накопилось > gc.auto loose objects (default 6700). `git gc --aggressive` делает более тщательную delta-compression (медленно, для одноразовой оптимизации). `git gc --prune=now` удаляет unreachable немедленно. ВАЖНО: после gc reflog для удалённых ranges потерян — recovery невозможен.",
+          "example": "git gc                           # auto gc\ngit gc --aggressive --prune=now  # тщательная очистка\ngit count-objects -v             # размер до/после\n\n# Отключить auto\ngit config gc.auto 0\n\n# Удалить unreachable старше 1 hour\ngit gc --prune=1.hour.ago",
+          "relatedLessons": [
+            { "title": "git gc и cleanup", "slug": "19-recovery/06-gc" }
+          ]
+        },
+        {
+          "term": "git prune",
+          "termEn": "git prune",
+          "definition": "Удаляет unreachable objects из object database. Обычно вызывается внутри `git gc` — отдельно почти не нужен. `git prune --expire <date>` — указать когда objects считаются «старыми» (default 2 weeks). `git prune --dry-run` — показать что было бы удалено. ВАЖНО: prune навсегда уничтожает объекты — после prune recovery commit через reflog/fsck может стать невозможным. Часто `git remote prune origin` (или `git fetch --prune`) — другое, удаляет stale remote-tracking refs для веток, удалённых на сервере.",
+          "example": "git prune --dry-run              # что было бы удалено\ngit prune --expire=now           # удалить ВСЁ unreachable\n\n# Удалить stale origin/* refs\ngit remote prune origin\ngit fetch --prune                # эквивалент",
+          "relatedLessons": [
+            { "title": "git gc и cleanup", "slug": "19-recovery/06-gc" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "workflows",
+      "name": "Workflow и процессы",
+      "terms": [
+        {
+          "term": "GitFlow",
+          "termEn": "GitFlow",
+          "definition": "Сложный workflow от Vincent Driessen (2010), популярный в early-2010s: основные ветки `main` (production) и `develop` (интеграция), supporting branches `feature/*` (из develop, в develop), `release/*` (из develop для подготовки релиза, в main и develop), `hotfix/*` (из main, в main и develop). Подходит для проектов с явными release циклами и parallel versions. Критика: излишне сложен для команд с continuous deployment, генерирует лишние merge commits. Вытесняется trunk-based и GitHub Flow в современных DE-командах.",
+          "example": "# Feature\ngit switch develop\ngit switch -c feature/csv-loader\n# работа...\ngit switch develop\ngit merge --no-ff feature/csv-loader\n\n# Release\ngit switch -c release/1.2.0 develop\n# QA, bumps...\ngit switch main && git merge --no-ff release/1.2.0\ngit tag -a v1.2.0\ngit switch develop && git merge --no-ff release/1.2.0",
+          "relatedLessons": [
+            { "title": "GitFlow", "slug": "12-workflows/02-gitflow" }
+          ]
+        },
+        {
+          "term": "GitHub Flow",
+          "termEn": "GitHub Flow",
+          "definition": "Простой workflow от GitHub: одна long-lived ветка `main`, для любого изменения создаётся `feature/*` или `fix/*` ветка, открывается PR, после review и CI green — merge в main. Main всегда deployable. Подходит для команд с continuous deployment, web-проектов, маленьких/средних команд. Pros: простота, минимум церемонии, быстрое intergration. Cons: нет formal release branches (для версионированных libraries это проблема), всё зависит от CI/тестов на PR. Большинство DE-команд используют этот или trunk-based.",
+          "example": "git switch main\ngit pull --rebase\ngit switch -c feature/parquet-loader\n# код...\ngit commit -m \"feat: parquet loader\"\ngit push -u origin feature/parquet-loader\n# открыть PR на GitHub -> review -> CI -> merge\n\ngit switch main\ngit pull\ngit branch -d feature/parquet-loader",
+          "relatedLessons": [
+            { "title": "GitHub Flow", "slug": "12-workflows/01-github-flow" }
+          ]
+        },
+        {
+          "term": "Trunk-based development",
+          "termEn": "Trunk-based development",
+          "definition": "Workflow, где все разработчики коммитят в одну ветку (trunk, обычно `main`) часто — несколько раз в день. Feature branches очень короткоживущие (< 1 дня) или отсутствуют (коммиты сразу в trunk через pair programming). Использует feature flags для скрытия незаконченных функций. Требует strong CI и pre-commit testing. Pros: минимальная divergence, нет painful merges, fast integration. Cons: нужны feature flags infrastructure, строгая дисциплина. Распространён в Google, Facebook, продвинутых DevOps командах.",
+          "example": "# Все работают в main, feature flags скрывают unfinished\ngit switch main\ngit pull --rebase\n# короткая работа, частые коммиты\ngit commit -m \"feat: parquet loader behind flag\"\ngit push\n\n# Feature flag в коде:\nif feature_enabled(\"parquet_loader\"):\n    parquet_load(...)\nelse:\n    legacy_load(...)",
+          "relatedLessons": [
+            { "title": "Trunk-based development", "slug": "12-workflows/03-trunk-based" }
+          ]
+        },
+        {
+          "term": "Pull Request",
+          "termEn": "Pull Request (PR) / Merge Request (MR)",
+          "definition": "Запрос на интеграцию изменений из одной ветки в другую — формат collaboration на GitHub (Pull Request) и GitLab (Merge Request). PR содержит: title, description, базовая и source branch, список commits, diff, обсуждение, reviewers, статус CI, labels. PR — основной инструмент code review: коллеги читают diff, оставляют comments на конкретные строки, suggested changes, approve/request changes. После approve и passing CI — merge (button on UI). PR может быть Draft (work in progress, не готов к review). PR не существует в Git core — это feature хостинга (GitHub/GitLab/Bitbucket).",
+          "example": "# Открыть PR через GitHub CLI\ngh pr create --base main --head feature/parquet \\\n  --title \"feat: parquet loader\" \\\n  --body \"Adds support for reading .parquet files...\"\n\ngh pr list\ngh pr view 42\ngh pr review 42 --approve\ngh pr merge 42 --squash",
+          "relatedLessons": [
+            { "title": "Anatomy PR", "slug": "11-pull-requests/01-anatomy" },
+            { "title": "PR с GitHub CLI", "slug": "11-pull-requests/03-gh-cli" }
+          ]
+        },
+        {
+          "term": "Code Review",
+          "termEn": "Code Review",
+          "definition": "Процесс асинхронного просмотра кода коллегами перед merge. На GitHub/GitLab выполняется через PR/MR: reviewer оставляет inline comments на строки diff, может приложить suggested changes (одной кнопкой принимаются автором), отмечает Approve / Request changes / Comment. Цели: ловля багов до prod, sharing знаний, поддержание code style, mentoring junior. Best practices: small PRs (< 400 строк), clear description, atomic commits, ответы на каждый comment, не merge без approve. Junior DE — обязательная часть работы и обучения.",
+          "example": "gh pr review 42 --comment -b \"LGTM with minor nits\"\ngh pr review 42 --approve\ngh pr review 42 --request-changes -b \"see comments\"\n\n# Suggested change на GitHub\n# ```suggestion\n# new_code_line\n# ```",
+          "relatedLessons": [
+            { "title": "Code review этика", "slug": "11-pull-requests/04-code-review" }
+          ]
+        },
+        {
+          "term": "Squash and merge",
+          "termEn": "Squash and Merge",
+          "definition": "Merge стратегия: все commits из feature branch объединяются в один commit, который применяется к target branch как single change. Использует `git merge --squash` под капотом + commit. Pros: чистая линейная история на main, каждый PR — один commit, легко revert. Cons: теряются intermediate commits (детали разработки), теряется feature branch как entity в DAG. На GitHub: «Squash and merge» button в PR. Часто комбинируется с branch protection rule «require linear history». Default для многих DE-команд с GitHub Flow.",
+          "example": "# Локально\ngit switch main\ngit merge --squash feature/parquet\ngit commit -m \"feat: parquet loader (#42)\"\n\n# На GitHub\ngh pr merge 42 --squash --delete-branch\n\n# Settings -> Pull Requests -> Allow squash merging",
+          "relatedLessons": [
+            { "title": "Squash, rebase, merge стратегии", "slug": "11-pull-requests/05-merge-strategies" }
+          ]
+        },
+        {
+          "term": "Rebase and merge",
+          "termEn": "Rebase and Merge",
+          "definition": "Merge стратегия: commits из feature branch rebased на tip target branch, потом fast-forward applied — без merge commit. Сохраняет все commits feature ветки (в отличие от squash), но даёт линейную историю (в отличие от merge commit). Pros: detailed history без merge commits, atomic commits сохраняются. Cons: каждый rebased commit получает новый SHA, поэтому если кто-то clonёд branch — проблемы; работает с force-push, что добавляет risk. На GitHub: «Rebase and merge» button. Используется в командах, ценящих atomic commits как research/debug инструмент.",
+          "example": "# Локально\ngit switch feature/parquet\ngit rebase main\ngit switch main\ngit merge --ff-only feature/parquet\n\n# На GitHub\ngh pr merge 42 --rebase --delete-branch",
+          "relatedLessons": [
+            { "title": "Squash, rebase, merge стратегии", "slug": "11-pull-requests/05-merge-strategies" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ci-cd",
+      "name": "CI/CD и автоматизация",
+      "terms": [
+        {
+          "term": "GitHub Actions",
+          "termEn": "GitHub Actions",
+          "definition": "CI/CD платформа, интегрированная в GitHub. Workflows определяются YAML-файлами в `.github/workflows/*.yml`, запускаются на events (push, pull_request, schedule, manual). Workflow содержит jobs, jobs содержат steps. Каждая job выполняется на runner (Linux/Windows/macOS, ubuntu-latest самый частый). Marketplace actions (например `actions/checkout`, `actions/setup-python`) — переиспользуемые блоки. Secrets хранятся в repo/org settings, доступны через `${{ secrets.NAME }}`. Билтины: matrix builds, conditional jobs, dependent jobs, artifacts, caching. Бесплатно для public репо, limit minutes для private.",
+          "example": "# .github/workflows/ci.yml\nname: CI\non: [push, pull_request]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-python@v5\n        with: { python-version: '3.12' }\n      - run: pip install -r requirements.txt\n      - run: pytest",
+          "relatedLessons": [
+            { "title": "GitHub Actions basics", "slug": "18-ci-cd-github-actions/01-actions-basics" }
+          ]
+        },
+        {
+          "term": "Branch Protection",
+          "termEn": "Branch Protection Rule",
+          "definition": "Настройка GitHub/GitLab, ограничивающая прямые push в защищённую ветку (обычно main). Возможные ограничения: require PR before merging, require N approvals, require passing status checks (CI), require up-to-date branch, require signed commits, prevent force push, prevent deletion, restrict who can push. Конфигурируется на Settings -> Branches -> Add rule. Обязательная практика для production кода — даже maintainer не должен push в main напрямую. С 2023 на GitHub также Rulesets — более гибкая альтернатива rules.",
+          "example": "# Github UI: Settings -> Branches -> Add rule\n# Branch name pattern: main\n# [x] Require a pull request before merging\n#   [x] Require approvals: 1\n# [x] Require status checks to pass before merging\n#   - test (required)\n#   - lint (required)\n# [x] Require linear history\n# [x] Do not allow bypassing the above settings",
+          "relatedLessons": [
+            { "title": "Branch protection", "slug": "18-ci-cd-github-actions/03-branch-protection" }
+          ]
+        },
+        {
+          "term": "Status Check",
+          "termEn": "Status Check / Required Check",
+          "definition": "Результат проверки от CI/external service, прикреплённый к commit. На GitHub status check может быть от GitHub Actions job, external CI (CircleCI, Jenkins), bot (Codecov, Dependabot). Каждый check имеет status (pending, success, failure, error) и описание. Branch protection rule может требовать определённые checks pass, прежде чем merge разрешён. Required checks указываются по имени job из workflow или name external app. Important: required check должен запускаться на PR, иначе он будет «pending» вечно — обычно настраивается на `pull_request` event.",
+          "example": "# В branch protection указаны required checks:\n# - test\n# - lint  \n# - codecov/project\n\n# Просмотр в PR:\n# All checks have passed\n# 3 successful checks\n#   - test (GitHub Actions)\n#   - lint (GitHub Actions)\n#   - codecov/project (Codecov)\n\ngh pr checks 42",
+          "relatedLessons": [
+            { "title": "Status checks", "slug": "18-ci-cd-github-actions/04-status-checks" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "security",
+      "name": "Безопасность и секреты",
+      "terms": [
+        {
+          "term": "gitleaks",
+          "termEn": "gitleaks",
+          "definition": "Open-source инструмент для сканирования репо на наличие secrets (API keys, passwords, tokens, AWS credentials) в коде и истории. Использует regex patterns для известных форматов (AWS access key, GitHub token, Stripe key, etc) и Shannon entropy для random strings. Запускается локально (`gitleaks detect`), как pre-commit hook (`gitleaks protect --staged`), или в CI (GitHub Actions). Поддерживает `.gitleaks.toml` для кастомных rules и whitelist. Важно: даже если secret удалён в новом commit, он остаётся в истории — gitleaks сканирует ВСЮ историю по умолчанию.",
+          "example": "# Локальный scan\ngitleaks detect --source . --verbose\n\n# Pre-commit\ngitleaks protect --staged\n\n# CI\n- uses: gitleaks/gitleaks-action@v2\n  env:\n    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n\n# .gitleaks.toml\n[allowlist]\nregexes = ['fake-test-key']",
+          "relatedLessons": [
+            { "title": "gitleaks detect", "slug": "17-secrets-security/02-gitleaks" }
+          ]
+        },
+        {
+          "term": "BFG Repo-Cleaner",
+          "termEn": "BFG Repo-Cleaner",
+          "definition": "Инструмент для быстрой очистки больших/чувствительных файлов из истории Git. Java-based, в 10–720x быстрее `git filter-branch`. Use cases: удалить случайно закоммиченный 2GB CSV из истории, заменить пароль в каждом commit на `***REMOVED***`. Команды: `bfg --delete-files <name>`, `bfg --strip-blobs-bigger-than 50M`, `bfg --replace-text passwords.txt`. После BFG обязательно `git reflog expire --expire=now --all && git gc --prune=now --aggressive`. Важно: HEAD commit не трогается — то, что в latest commit, надо удалить и commit отдельно ДО запуска BFG.",
+          "example": "# Удалить большой файл из истории\nbfg --strip-blobs-bigger-than 50M\n\n# Удалить конкретный файл\nbfg --delete-files secrets.txt\n\n# Заменить текст\nbfg --replace-text passwords.txt\n\n# Cleanup после\ngit reflog expire --expire=now --all\ngit gc --prune=now --aggressive\ngit push --force",
+          "relatedLessons": [
+            { "title": "BFG Repo-Cleaner", "slug": "17-secrets-security/04-bfg" }
+          ]
+        },
+        {
+          "term": "git-filter-repo",
+          "termEn": "git-filter-repo",
+          "definition": "Современная замена устаревшего `git filter-branch` (последний 100x медленнее и имеет проблемы). Python-based tool для rewriting git history: удаление файлов из истории, переименование, изменение author/email, splitting/joining repos. Recommended by Git core team. Аналог BFG для большинства задач, но более гибкий. Установка: `pip install git-filter-repo`. После filter-repo Git refuses push на remote — нужно push --force, и все коллеги должны re-clone. Опции: `--invert-paths --path secrets.txt` (удалить только этот файл), `--strip-blobs-bigger-than 10M`, `--mailmap` (изменить email).",
+          "example": "pip install git-filter-repo\n\n# Удалить файл из всей истории\ngit filter-repo --invert-paths --path .env\n\n# Удалить большие файлы\ngit filter-repo --strip-blobs-bigger-than 10M\n\n# Изменить email во всех коммитах\ngit filter-repo --mailmap mailmap.txt\n\ngit push origin --force --all",
+          "relatedLessons": [
+            { "title": "git-filter-repo", "slug": "17-secrets-security/05-filter-repo" }
+          ]
+        },
+        {
+          "term": "SSH keys",
+          "termEn": "SSH ключи для Git",
+          "definition": "Пара ключей (private + public) для аутентификации с remote git server без пароля. Private key (`~/.ssh/id_ed25519`) НИКОГДА не share — хранится на машине, опционально с passphrase. Public key (`~/.ssh/id_ed25519.pub`) — добавляется в GitHub/GitLab account settings. SSH URL начинается с `git@github.com:` (не `https://`). Recommended: ed25519 (быстрее, безопаснее RSA), passphrase + ssh-agent (для удобства). Проверка: `ssh -T git@github.com`. Switch repo URL: `git remote set-url origin git@github.com:user/repo.git`.",
+          "example": "# Генерация ключа\nssh-keygen -t ed25519 -C \"you@email.com\"\n\n# Добавить в ssh-agent\neval \"$(ssh-agent -s)\"\nssh-add ~/.ssh/id_ed25519\n\n# Public key в GitHub\ncat ~/.ssh/id_ed25519.pub\n# скопировать в GitHub -> Settings -> SSH keys\n\n# Проверка\nssh -T git@github.com\n# Hi user! You've successfully authenticated...",
+          "relatedLessons": [
+            { "title": "SSH keys для GitHub", "slug": "02-install-config/04-ssh-keys" }
+          ]
+        },
+        {
+          "term": "GPG signing",
+          "termEn": "GPG-signed commits",
+          "definition": "Криптографическая подпись commits/tags через GPG (или SSH с Git 2.34+, или Sigstore). Доказывает, что commit действительно создан владельцем приватного ключа. На GitHub signed commits отображаются как «Verified» badge. Setup: создать GPG key (`gpg --full-generate-key`), добавить public key в GitHub, настроить Git (`user.signingkey`, `commit.gpgsign true`). Подпись commits: `git commit -S -m \"msg\"` (или auto с config). Tags: `git tag -s v1.0.0`. Проверка: `git log --show-signature`. Branch protection rule «require signed commits» форсирует это для всей команды.",
+          "example": "# Setup\ngpg --full-generate-key\ngpg --list-secret-keys --keyid-format=long\n# sec   rsa4096/3AA5C34371567BD2\n\ngit config --global user.signingkey 3AA5C34371567BD2\ngit config --global commit.gpgsign true\ngit config --global tag.gpgsign true\n\ngit commit -S -m \"feat: signed\"\ngit log --show-signature",
+          "relatedLessons": [
+            { "title": "GPG signing", "slug": "17-secrets-security/06-gpg-signing" }
+          ]
+        },
+        {
+          "term": "Git LFS",
+          "termEn": "Git Large File Storage",
+          "definition": "Extension для Git, хранящий большие файлы (binaries, datasets, models) во внешнем storage, а в git — только pointer-файлы. Решает проблему распухания репо при коммите больших файлов. Workflow: `git lfs install` (one-time setup), `git lfs track \"*.parquet\"` создаёт запись в `.gitattributes`, дальше `git add` для tracked файлов кладёт указатель в репо и сам файл в LFS storage. Pros: small repo, fast clone. Cons: требует поддержки на server (GitHub/GitLab), отдельный bandwidth/storage (на GitHub — quotas), не подходит для частых random access (DVC лучше для ML datasets).",
+          "example": "git lfs install                    # one-time\ngit lfs track \"*.parquet\"          # обновляет .gitattributes\ngit add .gitattributes\ngit add data.parquet               # -> LFS storage\ngit commit -m \"data: add parquet\"\ngit push                           # push LFS + pointer\n\ngit lfs ls-files                   # tracked LFS files",
+          "relatedLessons": [
+            { "title": "Git LFS basics", "slug": "14-lfs-big-data/01-git-lfs" }
+          ]
+        },
+        {
+          "term": "pre-commit framework",
+          "termEn": "pre-commit framework",
+          "definition": "Python tool для управления pre-commit hooks (НЕ Git built-in pre-commit hook, а framework сверху). Конфигурируется в `.pre-commit-config.yaml` — список hooks (ruff, black, isort, sqlfluff, detect-secrets, yamllint, etc) с версиями. Установка: `pip install pre-commit`, потом `pre-commit install` создаёт `.git/hooks/pre-commit`, запускающий framework. На каждый `git commit` запускаются настроенные checks; если fail — commit блокируется. CI integration через pre-commit.ci (auto-PR on update) или GitHub Actions. Стандарт для современных Python/DE проектов.",
+          "example": "# .pre-commit-config.yaml\nrepos:\n  - repo: https://github.com/astral-sh/ruff-pre-commit\n    rev: v0.4.0\n    hooks:\n      - id: ruff\n      - id: ruff-format\n  - repo: https://github.com/Yelp/detect-secrets\n    rev: v1.4.0\n    hooks:\n      - id: detect-secrets\n\npip install pre-commit\npre-commit install\npre-commit run --all-files",
+          "relatedLessons": [
+            { "title": "pre-commit framework", "slug": "15-hooks-automation/02-pre-commit-framework" }
+          ]
+        },
+        {
+          "term": ".gitignore",
+          "termEn": ".gitignore",
+          "definition": "Файл, описывающий, какие пути Git должен игнорировать (не tracking, не показывать в status, не add при `git add .`). Поддерживает glob patterns: `*.log`, `__pycache__/`, `node_modules/`, отрицание `!`, anchored patterns начинающиеся с `/`. Hierarchical: `.gitignore` в любом каталоге применяется к этому каталогу и вниз. Глобальный `~/.gitignore_global` для OS-specific (`.DS_Store`, `Thumbs.db`), per-user IDE (`.idea/`). ВАЖНО: gitignore работает только для untracked файлов; если файл уже в index, нужно `git rm --cached <file>` сначала.",
+          "example": "# .gitignore (Python проект)\n__pycache__/\n*.pyc\n.venv/\n.env\n.env.*\n!.env.example\n*.log\n.DS_Store\n.idea/\n.vscode/\ndist/\nbuild/\n*.egg-info/\n\n# Глобальный\ngit config --global core.excludesfile ~/.gitignore_global",
+          "relatedLessons": [
+            { "title": ".gitignore patterns", "slug": "13-gitignore-attributes/01-gitignore" }
+          ]
+        },
+        {
+          "term": ".gitattributes",
+          "termEn": ".gitattributes",
+          "definition": "Файл, задающий атрибуты файлам для Git: line endings (text/binary/eol), diff/merge drivers, LFS tracking, export-ignore (для archives), filter operations. Решает Windows/Unix CRLF проблемы (`* text=auto`), кастомные diff для JSON/CSV (`*.json diff=json`), маркирует LFS-файлы (`*.parquet filter=lfs`). Pattern syntax как в .gitignore. Хранится в репо (`.gitattributes`) или в каталоге, или глобально (`~/.config/git/attributes` + `core.attributesFile`). Часто забывается, но критичен для cross-platform DE-команд.",
+          "example": "# .gitattributes\n* text=auto eol=lf\n*.sh text eol=lf\n*.py text eol=lf\n*.png binary\n\n# LFS\n*.parquet filter=lfs diff=lfs merge=lfs -text\n*.csv filter=lfs diff=lfs merge=lfs -text\n\n# Кастомный diff для notebooks\n*.ipynb diff=jupyternotebook",
+          "relatedLessons": [
+            { "title": ".gitattributes и line endings", "slug": "13-gitignore-attributes/02-gitattributes" }
+          ]
+        }
+      ]
+    }
+  ]
+}

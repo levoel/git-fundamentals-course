@@ -1,0 +1,74 @@
+{
+  "lessonSlug": "02-install-config/01-install-macos-linux-windows",
+  "moduleId": "02-install-config",
+  "_meta": {
+    "idPrefix": "git-m02-01",
+    "description": "Quiz for lesson 2.1 — Установка Git"
+  },
+  "questions": [
+    {
+      "id": "git-m02-01-q1",
+      "type": "multiple-choice",
+      "question": "Какая команда установит Git на macOS через стандартный менеджер пакетов?",
+      "options": [
+        { "id": "a", "text": "apt install git" },
+        { "id": "b", "text": "brew install git" },
+        { "id": "c", "text": "pacman -S git" },
+        { "id": "d", "text": "git install" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Homebrew (brew) — фактический стандарт менеджера пакетов на macOS для разработчиков. brew install git ставит свежую версию Git в /opt/homebrew/bin (Apple Silicon) или /usr/local/bin (Intel). apt — для Ubuntu/Debian. pacman — для Arch. «git install» — несуществующая команда.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m02-01-q2",
+      "type": "multiple-choice",
+      "question": "Для будущего Junior Data Engineer на Windows-машине какой способ установки Git предпочтительнее?",
+      "options": [
+        { "id": "a", "text": "Git for Windows — самый простой инсталлер" },
+        { "id": "b", "text": "WSL2 + Ubuntu + apt install git — даёт полноценный Linux-стек для DE-работы (Docker, PostgreSQL, Airflow нативно работают только на Linux)" },
+        { "id": "c", "text": "Скачать и собрать из исходников" },
+        { "id": "d", "text": "Cygwin" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Для DE-работы WSL2 + Ubuntu — лучший выбор на Windows. DE-инструменты (Docker, PostgreSQL, Kafka, Airflow, Spark) разработаны для Linux и нативно работают только там. WSL2 даёт полноценный Linux внутри Windows. Git for Windows подходит, если работа не выходит за рамки Git, но для DE это редкость.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m02-01-q3",
+      "type": "multiple-choice",
+      "question": "Команда `git --version` в актуальной системе на май 2026 года должна показать примерно:",
+      "options": [
+        { "id": "a", "text": "git version 1.8.0" },
+        { "id": "b", "text": "git version 2.10.0" },
+        { "id": "c", "text": "git version 2.54.0" },
+        { "id": "d", "text": "git version 3.0.0" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "На май 2026 актуальная версия Git — 2.54 (релиз февраль 2026). Старые версии (1.x, ранние 2.x) ещё работают, но не имеют git switch/restore (появились в 2.23) и других удобств. Версия 3.0 пока не выпущена — она на горизонте с SHA-256 как default (~2027).",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m02-01-q4",
+      "type": "multiple-choice",
+      "question": "На Ubuntu apt-репозиторий предлагает версию Git 2.43, но вы хотите более свежую. Что сделать?",
+      "options": [
+        { "id": "a", "text": "Скачать .exe с git-scm.com" },
+        { "id": "b", "text": "Подключить PPA git-core: `sudo add-apt-repository ppa:git-core/ppa && sudo apt update && sudo apt install git`" },
+        { "id": "c", "text": "Обновить Ubuntu до версии 50.04" },
+        { "id": "d", "text": "Невозможно — пакет в apt всегда устарелый" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "PPA git-core поддерживается мейнтейнерами Git и содержит свежие версии, не дожидаясь релиза Ubuntu. Подключаем PPA, обновляем индекс пакетов, ставим Git. Альтернатива — сборка из исходников. Скачивать .exe на Linux — это для Windows.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m02-01-q5",
+      "type": "true-false",
+      "question": "Если Git ставится через Apple Xcode Command Line Tools на macOS, он всегда самой свежей версии.",
+      "correctAnswer": false,
+      "explanation": "Нет. Xcode CLI Tools ставят свою версию Git, которая обычно отстаёт от mainline-релиза Git на 1-2 минорные версии. Это нормально для базовой работы, но если хочется свежей версии — устанавливайте через Homebrew (`brew install git`), который обновляет Git сразу после релиза.",
+      "bloomLevel": "conceptual"
+    }
+  ]
+}

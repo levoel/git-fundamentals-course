@@ -1,0 +1,74 @@
+{
+  "lessonSlug": "03-three-trees/02-git-init",
+  "moduleId": "03-three-trees",
+  "_meta": {
+    "idPrefix": "git-m03-02",
+    "description": "Quiz for lesson 3.2 — git init и устройство .git/"
+  },
+  "questions": [
+    {
+      "id": "git-m03-02-q1",
+      "type": "multiple-choice",
+      "question": "Что создаёт команда git init в текущей директории?",
+      "options": [
+        { "id": "a", "text": "Файл .gitignore" },
+        { "id": "b", "text": "Поддиректорию .git/ со всей служебной инфраструктурой Git (HEAD, config, objects/, refs/, hooks/, info/)" },
+        { "id": "c", "text": "Файл README.md" },
+        { "id": "d", "text": "Запись в системном реестре" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "git init создаёт скрытую директорию .git/, которая и есть «репозиторий». В ней: HEAD (текущая ветка), config (локальные настройки), objects/ (хранилище объектов — пока пустое), refs/ (указатели на коммиты), hooks/ (шаблоны hook-скриптов), info/ (локальные исключения). Удалить .git/ — значит «разгитить» директорию, файлы остаются, но Git их больше не знает.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m03-02-q2",
+      "type": "multiple-choice",
+      "question": "Что содержит файл .git/HEAD сразу после git init?",
+      "options": [
+        { "id": "a", "text": "SHA первого коммита" },
+        { "id": "b", "text": "Пустой файл" },
+        { "id": "c", "text": "Строку 'ref: refs/heads/main' (или master, если init.defaultBranch не настроен)" },
+        { "id": "d", "text": "JSON с конфигурацией репозитория" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "Файл .git/HEAD сразу после git init содержит указатель на будущую ветку: 'ref: refs/heads/main'. Сам файл refs/heads/main ещё не существует (нет коммитов). После первого commit этот файл создастся и будет содержать SHA коммита, а HEAD будет ссылаться на него. Если у вас в config init.defaultBranch=main — будет main, иначе по умолчанию (в современных Git) — main, в очень старых — master.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m03-02-q3",
+      "type": "multiple-choice",
+      "question": "Что хранится в директории .git/objects/?",
+      "options": [
+        { "id": "a", "text": "Только коммиты" },
+        { "id": "b", "text": "Только blob-ы (содержимое файлов)" },
+        { "id": "c", "text": "ВСЕ объекты Git: blob (содержимое файлов), tree (snapshot директорий), commit (метаданные + ссылка на tree), tag (annotated tags). Каждый объект — отдельный файл, путь по SHA: первые 2 hex — поддиректория, остальные 38 — имя файла" },
+        { "id": "d", "text": "Бинарный лог всех операций" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "objects/ — сердце репозитория. В нём хранятся все объекты Git четырёх типов: blob, tree, commit, tag. Каждый объект — отдельный gzip-сжатый файл. Путь: .git/objects/<2 hex>/<38 hex> — например, .git/objects/3b/18e512... Разбивка по первым 2 hex символам — для производительности файловой системы (избежать тысячи файлов в одной директории).",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m03-02-q4",
+      "type": "multiple-choice",
+      "question": "Что такое bare-репозиторий и где он используется?",
+      "options": [
+        { "id": "a", "text": "Это репозиторий без коммитов" },
+        { "id": "b", "text": "Это репозиторий без working tree — только .git/-структура развёрнутая в корне. Используется на серверах (origin на GitHub, GitLab self-hosted). В bare-репо нельзя редактировать файлы — только обмен коммитами через push/pull/fetch" },
+        { "id": "c", "text": "Это репозиторий без .git/ директории" },
+        { "id": "d", "text": "Это репозиторий с одной веткой" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Bare-репозиторий — это репозиторий без working tree. Создаётся через `git init --bare repo.git`. Структура .git/ (HEAD, config, objects/, refs/) развёрнута прямо в корне директории, без обёртки .git/. Файлы существуют только как blob/tree-объекты, недоступны для редактирования. Bare-репо нужны на серверах, потому что серверу не нужно держать «текущую копию файлов» — только историю коммитов для push/pull. GitHub под капотом — bare-репо.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m03-02-q5",
+      "type": "true-false",
+      "question": "Hook-скрипты в .git/hooks/*.sample активны сразу после git init и запускаются автоматически.",
+      "correctAnswer": false,
+      "explanation": "Нет. Файлы в .git/hooks/ с расширением .sample — это просто примеры. Git ищет хуки без расширения .sample (например, pre-commit, не pre-commit.sample). Чтобы активировать: либо переименовать (mv pre-commit.sample pre-commit), либо создать собственный файл. И ещё файл должен быть executable (chmod +x). Подробно про хуки — модуль 15.",
+      "bloomLevel": "conceptual"
+    }
+  ]
+}

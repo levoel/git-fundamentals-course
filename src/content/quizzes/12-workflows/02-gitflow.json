@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "12-workflows/02-gitflow",
+  "moduleId": "12-workflows",
+  "_meta": { "idPrefix": "git-m12-02" },
+  "questions": [
+    {
+      "id": "git-m12-02-q1",
+      "type": "multiple-choice",
+      "question": "5 типов веток в GitFlow и их роли?",
+      "options": [
+        { "id": "a", "text": "main, dev, qa, prod, hotfix" },
+        { "id": "b", "text": "(1) main — только releases (каждый commit = production release с tag); (2) develop — integration, активная разработка; (3) feature/* — новые фичи от develop, merge в develop; (4) release/* — заморозка для подготовки release, merge в main+develop; (5) hotfix/* — критические prod fixes от main, merge в main+develop" },
+        { "id": "c", "text": "Только main и feature" },
+        { "id": "d", "text": "main, develop, feature, hotfix" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Driessen 2010 GitFlow: 5 типов веток с чёткими ролями. main — история releases. develop — integration. feature — новые фичи (от/к develop). release — preparation новой версии (от develop, в main+develop). hotfix — urgent prod fix (от main, в main+develop). Sophisticated separation: stable releases vs active development vs feature work vs release prep vs emergencies.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m12-02-q2",
+      "type": "multiple-choice",
+      "question": "Почему hotfix должен merge в BOTH main AND develop?",
+      "options": [
+        { "id": "a", "text": "Из-за CI requirements" },
+        { "id": "b", "text": "Merge в main даёт новый patch release (v1.2.1). Merge в develop критично иначе fix потеряется: develop работает дальше, следующий release включит regression (старый buggy код). Это known pitfall GitFlow — забыть merge в develop = bug возвращается" },
+        { "id": "c", "text": "Это просто convention" },
+        { "id": "d", "text": "Hotfix merge только в main" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Critical detail GitFlow. Hotfix создаёт fix для прода (новый patch release из main). Develop branch idёт параллельно с фичами для следующего major release. Если не merge hotfix в develop — следующий release (с develop) не имеет fix -> regression появляется в проде когда new release deployed. Это easy to forget — много teams теряли часы на debugging возвращённого бага. Тоже relevant для release branches: они merge в BOTH (main для release, develop для continued development).",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m12-02-q3",
+      "type": "multiple-choice",
+      "question": "Когда GitFlow реально оправдан в DE контексте?",
+      "options": [
+        { "id": "a", "text": "В любой команде >5 человек" },
+        { "id": "b", "text": "(1) DE репо для библиотеки (custom Spark connector, Airflow provider) с semver releases для users; (2) Enterprise DE с regulatory requirements (финтех/healthcare); (3) DE продукт как packaged software (Docker images, customers pin specific версию); (4) Legacy команда с устоявшимся GitFlow процессом. Для продуктовых SaaS DE команд (90%+) — GitHub Flow проще и быстрее" },
+        { "id": "c", "text": "Всегда лучше чем GitHub Flow" },
+        { "id": "d", "text": "Только для open-source" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "GitFlow specific use cases: versioned products (semver releases важны), regulated industries (audit/compliance per version), packaged software (customers выбирают версию), legacy migration costs. В большинстве продуктовых DE команд (SaaS, dbt internal, Airflow company repo) — GitFlow overhead не оправдан. Sам автор (Vincent Driessen) в 2020 году retracted endorsement для continuous delivery teams.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m12-02-q4",
+      "type": "multiple-choice",
+      "question": "Что в GitFlow конкретно плохо для современного SaaS DE?",
+      "options": [
+        { "id": "a", "text": "Слишком быстро" },
+        { "id": "b", "text": "(1) Complexity overhead — 5 типов веток, multiple merges; (2) Slow iteration — feature не на проде до release (недели); (3) Merge hell — long-lived develop расходится с main; (4) Не подходит для feature flags / blue-green / canary; (5) Auto-rollback сложнее (multiple branches involved). В SaaS где скорость и safety primary — GitFlow drag" },
+        { "id": "c", "text": "Плохая поддержка GitHub" },
+        { "id": "d", "text": "Не работает с CI" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "GitFlow trade-offs: stability через rigorous process vs speed через minimal process. SaaS DE 2026 ценит speed + safety. GitFlow даёт stability через release process, но загружает overhead — для team с зрелым CI/CD/monitoring overhead не нужен (CI gates main -> safety без branches). Feature flags решают 'unfinished features in main' гораздо лучше чем release branches. Slow iteration (release раз в 2 недели) против continuous deployment — фундаментальный mismatch.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m12-02-q5",
+      "type": "true-false",
+      "question": "Vincent Driessen, автор GitFlow, до сих пор рекомендует его для всех команд.",
+      "correctAnswer": false,
+      "explanation": "Нет. В 2020 году Driessen опубликовал update к оригинальной статье 2010 года: 'If your team is doing continuous delivery of software, I would suggest to adopt a much simpler workflow'. Он явно говорит — для CD teams (большинство SaaS 2026) GitFlow не подходит. Original статья 2010 года остаётся historical artifact, но industry сдвинулась к simpler workflows (GitHub Flow, Trunk-Based). Junior часто копирует GitFlow из старых tutorials не зная про update — это cargo cult.",
+      "bloomLevel": "conceptual"
+    }
+  ]
+}

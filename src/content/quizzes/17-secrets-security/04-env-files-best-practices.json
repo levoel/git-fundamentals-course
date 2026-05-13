@@ -1,0 +1,73 @@
+{
+  "lessonSlug": "17-secrets-security/04-env-files-best-practices",
+  "moduleId": "17-secrets-security",
+  "_meta": {
+    "idPrefix": "git-m17-04"
+  },
+  "questions": [
+    {
+      "id": "git-m17-04-q1",
+      "type": "multiple-choice",
+      "question": "В DE-проекте Airflow какой подход для хранения secrets ЛУЧШЕ для production?",
+      "options": [
+        {"id": "a", "text": "Connections в Airflow UI с введёнными паролями через UI — стандартный туториал способ"},
+        {"id": "b", "text": "Environment variables через AIRFLOW_CONN_<name>, заданные через docker-compose"},
+        {"id": "c", "text": "Secrets backend (AWS Secrets Manager / HashiCorp Vault), настроенный через airflow.cfg [secrets] backend=..."},
+        {"id": "d", "text": "Hardcode в DAG-файле как Python константы для производительности"}
+      ],
+      "correctAnswer": "c",
+      "explanation": "Secrets backend — production-grade. Преимущества: (1) пароль НЕ в Airflow metadata DB (backup не содержит); (2) централизованная rotation (один update в Secrets Manager -> все DAGs видят новый пароль); (3) IAM access control — kто видит какой secret; (4) audit log через CloudTrail. Connections в UI — окей для дев, но пароль в metadata DB. ENV vars — лучше чем UI, но видны через ps -e environ. Hardcode в DAG — никогда (модуль 17 урок 1).",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m17-04-q2",
+      "type": "multiple-choice",
+      "question": "В dbt profiles.yml как правильно подключать Snowflake password в CI/CD?",
+      "options": [
+        {"id": "a", "text": "Прямо строкой: password: 'real_password' и коммитить profiles.yml как часть репо"},
+        {"id": "b", "text": "Через password: \"{{ env_var('SNOWFLAKE_PASSWORD') }}\" — dbt подставит из переменной окружения в runtime"},
+        {"id": "c", "text": "Через password: !secret env:SNOWFLAKE_PASSWORD — YAML expansion"},
+        {"id": "d", "text": "Хранить profiles.yml в Snowflake как user metadata"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "env_var() — Jinja-функция dbt, подставляет значение переменной окружения в runtime. profiles.yml содержит template с {{ env_var(...) }}, реальные значения никогда не сохраняются на диск. CI/CD передаёт переменные через GitHub Actions secrets -> env vars. Локально — через direnv или dotenv. profiles.yml шаблон коммитим (без секретов), реальный profiles.yml с secret-данными — никогда. !secret env: — синтаксис Home Assistant, не dbt. Прямой password — anti-pattern (никогда не коммитить).",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m17-04-q3",
+      "type": "multiple-choice",
+      "question": "Junior настроил direnv с .envrc, который делает `dotenv` и `source .venv/bin/activate`. Что должно быть коммитнуто, что нет?",
+      "options": [
+        {"id": "a", "text": ".envrc и .env — оба коммитим, чтобы все имели одинаковый setup"},
+        {"id": "b", "text": "Только .envrc коммитим (он содержит логику, не секреты), .env в .gitignore (содержит конкретные значения)"},
+        {"id": "c", "text": "Только .env коммитим, .envrc в .gitignore"},
+        {"id": "d", "text": "Ничего не коммитим, обе файлы локальные"}
+      ],
+      "correctAnswer": "b",
+      "explanation": ".envrc содержит логику (dotenv, source venv, PATH setup) — это shareable между разработчиками. Коммитим, чтобы новый член команды cd в репо -> direnv allow -> правильный setup. .env содержит реальные значения переменных (пароли, ключи) — никогда не коммитим, всегда в .gitignore. Обычно вместе с .envrc коммитим и .env.example (template без значений) для onboarding.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m17-04-q4",
+      "type": "true-false",
+      "question": "Если файл .env когда-то был случайно закоммичен, добавление его в .gitignore теперь автоматически удалит его из истории Git.",
+      "correctAnswer": false,
+      "explanation": ".gitignore работает только для UNTRACKED файлов. Файл, который уже tracked (был добавлен через git add), .gitignore не игнорирует — даже если правило для него добавлено. Чтобы убрать tracked файл: (1) git rm --cached .env (удаляет из tracking, не из истории и не с диска); (2) git commit с этим изменением; (3) добавить .env в .gitignore; (4) commit. После этого .env перестанет tracked-ся. НО — старые версии .env остаются в истории Git (см. модуль 17 урок 1), они доступны через git log -p .env. Для удаления из истории нужен git filter-repo (модуль 17 урок 3). И обязательно rotate секреты ДО cleanup.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m17-04-q5",
+      "type": "multiple-choice",
+      "question": "Какие из этих файлов ОБЯЗАТЕЛЬНО должны быть в .gitignore для типичного DE-проекта (Python + Airflow + dbt)?",
+      "options": [
+        {"id": "a", "text": ".env, *.pem, *.p8, profiles.yml, target/, .venv/, __pycache__/, *.parquet"},
+        {"id": "b", "text": "*.py, *.sql, *.yml — все исходники для безопасности"},
+        {"id": "c", "text": "Только .env"},
+        {"id": "d", "text": "README.md и LICENSE — служебная информация"}
+      ],
+      "correctAnswer": "a",
+      "explanation": "Минимальный .gitignore для DE-проекта: (1) .env — переменные с секретами; (2) *.pem, *.p8 — private keys для Snowflake key-pair auth, SSH; (3) profiles.yml — dbt credentials; (4) target/ — dbt build artifacts (огромные, всегда регенерируются); (5) .venv/ — virtual environment (десятки MB); (6) __pycache__/ — Python bytecode; (7) *.parquet, *.duckdb, *.sqlite — data files (не должны быть в Git, для них LFS или другое storage). Исходники .py/.sql/.yml — наоборот, ДОЛЖНЫ коммититься (это код). README.md тоже коммитим.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

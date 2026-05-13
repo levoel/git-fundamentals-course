@@ -1,0 +1,74 @@
+{
+  "lessonSlug": "04-branches-merging/04-three-way-merge",
+  "moduleId": "04-branches-merging",
+  "_meta": {
+    "idPrefix": "git-m04-04",
+    "description": "Quiz for lesson 4.4 — Three-way merge"
+  },
+  "questions": [
+    {
+      "id": "git-m04-04-q1",
+      "type": "multiple-choice",
+      "question": "Что такое merge base в three-way merge?",
+      "options": [
+        { "id": "a", "text": "Первый коммит репозитория" },
+        { "id": "b", "text": "Самый недавний общий предок двух веток — точка, в которой они «разошлись» от общей истории" },
+        { "id": "c", "text": "Текущая ветка main" },
+        { "id": "d", "text": "Бакап репозитория" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Merge base — это «точка ветвления»: самый недавний общий предок двух веток. От него обе ветки 'отпочковались'. Git использует его как базу для сравнения: считает diff base->main и diff base->feature, объединяет их в merge commit. Найти merge base двух веток: `git merge-base main feature/x`.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m04-04-q2",
+      "type": "multiple-choice",
+      "question": "Сколько parent-ов у merge commit, созданного через three-way merge?",
+      "options": [
+        { "id": "a", "text": "Один — как у обычного commit" },
+        { "id": "b", "text": "Ноль — это root commit" },
+        { "id": "c", "text": "Два: первый parent — куда мержили (target ветка), второй — что мержили (source ветка). Для octopus merge (3+ веток) может быть больше" },
+        { "id": "d", "text": "Зависит от количества файлов" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "Merge commit имеет ДВА parent: первый = верхушка ветки, в которую мержили (например, последний коммит main), второй = верхушка ветки, что мержили (последний коммит feature/x). Octopus merge — это редкий случай слияния 3+ веток одной операцией, тогда parent-ов больше. Порядок parent важен: `git log --first-parent` идёт только по первой родительской цепи, `git revert -m 1 <merge>` восстанавливает версию первого parent.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m04-04-q3",
+      "type": "multiple-choice",
+      "question": "Какую стратегию выбрать для слияния feature-ветки с 8 коммитами вида «wip», «fix typo», «try again»?",
+      "options": [
+        { "id": "a", "text": "Fast-forward — сохранить все коммиты в main" },
+        { "id": "b", "text": "--no-ff — создать merge commit с двумя parent" },
+        { "id": "c", "text": "--squash — объединить все 8 коммитов в один чистый коммит в main с осмысленным сообщением. Wip-коммиты остаются в feature-ветке, но не засоряют main" },
+        { "id": "d", "text": "git rebase --interactive" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "--squash хорош для feature-веток с 'грязной' рабочей историей: wip, typo fixes, try again. В main вы хотите одну логически чистую запись «feat: add OAuth», а не все промежуточные эксперименты. --squash применяет все изменения feature как один новый commit на main. На GitHub есть кнопка «Squash and merge» с тем же эффектом. Минус: теряется внутренняя история работы, но это обычно не страшно.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m04-04-q4",
+      "type": "multiple-choice",
+      "question": "Что делает `git merge --abort`?",
+      "options": [
+        { "id": "a", "text": "Удаляет ветку feature" },
+        { "id": "b", "text": "Прерывает текущий merge и возвращает состояние до его начала: HEAD на исходном месте, working tree без изменений merge. Полезно при конфликтах, когда хочется сначала разобраться, что происходит" },
+        { "id": "c", "text": "Отменяет последний коммит" },
+        { "id": "d", "text": "Делает force push" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Если merge в процессе (например, остановился на конфликтах) — `git merge --abort` восстанавливает состояние до начала merge: HEAD возвращается на исходный коммит, working tree откатывается, MERGE_HEAD/MERGE_MSG удаляются. Безопасный способ «отозвать» начатый merge. Полезно при неожиданных конфликтах: aborted, разобрался, вернулся когда готов.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m04-04-q5",
+      "type": "true-false",
+      "question": "При three-way merge Git автоматически объединяет изменения из обеих веток, если они в разных файлах или разных частях одного файла.",
+      "correctAnswer": true,
+      "explanation": "Да. Three-way merge: Git считает diff_main и diff_feature от merge base. Если изменения не пересекаются (разные файлы, разные строки одного файла, неперекрывающиеся hunks) — Git автоматически их объединяет в merge commit. Если ОБЕ ветки изменили одно и то же место — это КОНФЛИКТ, Git останавливается и просит junior решить руками (модуль 06). В 80%+ случаев merge проходит без конфликтов.",
+      "bloomLevel": "conceptual"
+    }
+  ]
+}

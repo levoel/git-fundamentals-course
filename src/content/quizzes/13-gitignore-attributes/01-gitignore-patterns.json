@@ -1,0 +1,78 @@
+{
+  "lessonSlug": "13-gitignore-attributes/01-gitignore-patterns",
+  "moduleId": "13-gitignore-attributes",
+  "_meta": {
+    "idPrefix": "git-m13-01",
+    "description": "Quiz for lesson 01 of module 13 — .gitignore синтаксис, паттерны, иерархия"
+  },
+  "questions": [
+    {
+      "id": "git-m13-01-q1",
+      "type": "multiple-choice",
+      "question": "В .gitignore написана строка `config.py`. У тебя в репо три файла: `/config.py`, `/api/config.py`, `/data/config.py`. Какие из них будут игнорироваться?",
+      "options": [
+        { "id": "a", "text": "Только /config.py — паттерн без слешей якорится к корню" },
+        { "id": "b", "text": "Все три — паттерн без слешей матчит файлы с этим именем на ЛЮБОЙ глубине" },
+        { "id": "c", "text": "Только /api/config.py и /data/config.py — корневой исключается" },
+        { "id": "d", "text": "Ни один — синтаксис некорректный, нужно `*.py`" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Паттерн без `/` в начале или середине матчится по имени файла на любой глубине дерева. Чтобы игнорировать ТОЛЬКО корневой config.py, нужно написать `/config.py` с leading slash — это якорит паттерн к корню репозитория. Проверить можно через `git check-ignore -v <file>`: для всех трёх файлов покажет матч с правилом `config.py`. После замены на `/config.py` матч останется только для корневого.",
+      "studyHint": "Повторите урок 01 — раздел 'Хитрость 2: leading slash — это якорь к корню'",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m13-01-q2",
+      "type": "multiple-choice",
+      "question": "Ты случайно закоммитил .env с секретами. Добавил `.env` в .gitignore. Почему Git всё равно видит изменения в .env?",
+      "options": [
+        { "id": "a", "text": "Нужно `git push --force` чтобы Git обновил статус" },
+        { "id": "b", "text": "`.gitignore` действует только на untracked файлы. .env уже tracked (в индексе) — нужно `git rm --cached .env` и commit, тогда .gitignore начнёт работать" },
+        { "id": "c", "text": ".gitignore не работает для скрытых файлов (с точкой в начале)" },
+        { "id": "d", "text": "Нужно перезапустить git daemon" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Ключевое свойство .gitignore: он влияет ТОЛЬКО на untracked файлы (новые, ещё не добавленные в индекс). Если файл уже tracked — никакое правило в .gitignore его не скроет. Нужно явно `git rm --cached .env` — это удалит файл из индекса (но оставит в filesystem). После commit-а файл становится untracked, и .gitignore начинает действовать. ВАЖНО: `git rm --cached` не удаляет файл из истории — старые коммиты по-прежнему содержат секреты. Нужна очистка истории через `git filter-repo` (модуль 17) и ротация скомпрометированных секретов.",
+      "studyHint": "Повторите урок 01 — раздел 'Debugging: почему файл игнорируется?'",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m13-01-q3",
+      "type": "multiple-choice",
+      "question": "Какой паттерн корректно игнорирует все .env файлы, КРОМЕ .env.example?",
+      "options": [
+        { "id": "a", "text": "`!.env.example` отдельной строкой (порядок неважен)" },
+        { "id": "b", "text": "Сначала `.env*`, потом `!.env.example` — отрицание должно идти ПОСЛЕ паттерна игнорирования" },
+        { "id": "c", "text": "Сначала `!.env.example`, потом `.env*` — отрицание должно идти первым" },
+        { "id": "d", "text": "Невозможно — Git не поддерживает исключения" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Git читает .gitignore сверху вниз, и каждое следующее правило может переопределить предыдущее. Поэтому правильный порядок: сначала `.env*` (игнорировать все), потом `!.env.example` (но не этот). Если поменять местами — `!.env.example` сначала не имеет эффекта (файл и так не игнорировался), а потом `.env*` снова покроет его и проигнорирует. Дополнительное ограничение: если родительская директория уже исключена (например, через `config/` с trailing slash), отменить через `!` ВНУТРЕННИЕ файлы нельзя. Для таких случаев исключай содержимое (`config/*`) и потом отменяй (`!config/README.md`).",
+      "studyHint": "Повторите урок 01 — раздел 'Хитрость 4: ! для отрицания'",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m13-01-q4",
+      "type": "multiple-choice",
+      "question": "Какой подход к global vs repo .gitignore правильный для team-проекта?",
+      "options": [
+        { "id": "a", "text": "Класть .vscode/, .idea/ в repo .gitignore — это стандарт" },
+        { "id": "b", "text": "Repo .gitignore — общие правила проекта (.venv/, *.pyc, .env). Global .gitignore (~/.gitignore_global) — личные настройки (IDE, OS-мусор). Не смешивать" },
+        { "id": "c", "text": "Только repo .gitignore — global устарел" },
+        { "id": "d", "text": "Только global .gitignore — индивидуальные настройки приоритетнее" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Принцип: что должно быть у ВСЕХ в команде — в repo .gitignore (commit-ится, видят все). Что специфично для ТВОЕЙ машины — в global .gitignore (~/.gitignore_global, не versioned). Repo: build-артефакты языка, секреты проекта (.env), типичный мусор фреймворка. Global: OS-мусор (.DS_Store), IDE-конфиги (.idea/, .vscode/), редактор-swap (*.swp). Засирать repo .gitignore чужими IDE — плохая практика: коллеги могут использовать другую IDE, и твои .idea/ им не нужны. Настройка global: `git config --global core.excludesfile ~/.gitignore_global`.",
+      "studyHint": "Повторите урок 01 — раздел 'Иерархия .gitignore: три уровня'",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m13-01-q5",
+      "type": "true-false",
+      "question": "Команда `git check-ignore -v <file>` показывает, какой именно паттерн в каком .gitignore файле игнорирует данный файл (с указанием line number).",
+      "correctAnswer": true,
+      "explanation": "Точно. Формат вывода: `<source>:<line>:<pattern>    <file>`. Например, `.gitignore:5:.env*    .env` означает, что файл .env совпал с паттерном `.env*` на строке 5 файла `.gitignore`. Это бесценно для debug-а сложных конфигураций (global + repo + subdir .gitignore). Без флага `-v` команда просто возвращает exit code: 0 — игнорируется, 1 — нет. С `-v` — показывает, почему. Привычка: когда что-то 'не работает' с .gitignore, первый шаг — `git check-ignore -v <file>`, а не чтение .gitignore глазами.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

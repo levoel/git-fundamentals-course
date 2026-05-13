@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "05-remotes/01-remote-concept",
+  "moduleId": "05-remotes",
+  "_meta": { "idPrefix": "git-m05-01" },
+  "questions": [
+    {
+      "id": "git-m05-01-q1",
+      "type": "multiple-choice",
+      "question": "Что такое remote с точки зрения Git?",
+      "options": [
+        { "id": "a", "text": "Сервер, к которому Git автоматически подключается при каждой команде" },
+        { "id": "b", "text": "Запись в .git/config с именем, URL и refspec — алиас на копию репо где-то ещё" },
+        { "id": "c", "text": "Удалённая ветка, синхронизированная с локальной" },
+        { "id": "d", "text": "Объект в .git/objects/ для хранения серверных коммитов" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Remote — это локальная запись в .git/config (имя + URL + refspec). Это просто алиас: вместо полного URL ты пишешь короткое имя 'origin'. Никаких автоматических сетевых запросов Git не делает — только при явных fetch/push/pull. Это объясняет, почему `git remote add` не валидирует URL — это просто текстовая запись.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m05-01-q2",
+      "type": "true-false",
+      "question": "Remote-tracking branch `origin/main` обновляется автоматически, когда коллега пушит изменения на сервер.",
+      "correctAnswer": "false",
+      "explanation": "Нет. `origin/main` — это локальная закладка, snapshot того, что Git видел при последнем `fetch`/`pull`/`push`. Git не делает скрытых сетевых запросов. Чтобы `origin/main` обновился к реальному состоянию сервера, нужно явно сделать `git fetch`. Это фундаментальное свойство distributed VCS — ты явно управляешь синхронизацией.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m05-01-q3",
+      "type": "multiple-choice",
+      "question": "При работе с fork на GitHub, какая конвенция имён remote?",
+      "options": [
+        { "id": "a", "text": "origin — оригинальный репо, upstream — твой fork" },
+        { "id": "b", "text": "origin — твой fork, upstream — оригинальный репо" },
+        { "id": "c", "text": "Имена должны совпадать с GitHub username" },
+        { "id": "d", "text": "Только один remote можно настроить" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Конвенция: `origin` указывает на твой fork (куда пушишь свои feature-ветки), `upstream` — на оригинальный репо (откуда получаешь обновления). Это потому что `git clone` твоего fork автоматически создаёт `origin`. После этого ты руками добавляешь `git remote add upstream <original-url>`. Workflow: `git fetch upstream` -> mergeить/rebaseить из upstream/main, `git push origin feature/x` -> пушить в свой fork, потом PR через UI из fork:feature/x в upstream:main.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m05-01-q4",
+      "type": "multiple-choice",
+      "question": "`git status` пишет: 'Your branch is ahead of origin/main by 3 commits'. На сервере действительно появилось ещё 5 новых коммитов от коллеги, но status их не показал. Почему?",
+      "options": [
+        { "id": "a", "text": "Git показывает только локальные коммиты в status" },
+        { "id": "b", "text": "Нужно перезапустить терминал, чтобы git status увидел изменения" },
+        { "id": "c", "text": "origin/main — это локальный snapshot, обновляется только при fetch/pull/push, не автоматически" },
+        { "id": "d", "text": "git status сравнивает с main на сервере в реальном времени, но 5 коммитов ещё не зарегистрировались" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "`git status` сравнивает HEAD с upstream-tracking branch (`origin/main`), который у тебя локально. Этот ref обновляется только при явных операциях с remote: `fetch`, `pull`, `push`. Чтобы увидеть реальное состояние, нужно `git fetch` — тогда `origin/main` обновится, и status покажет 'diverged, have 3 and 5 different commits each'.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m05-01-q5",
+      "type": "multiple-choice",
+      "question": "Команда `git remote show origin` делает запрос на сервер. А что делает `git remote add origin git@github.com:fake/nonexistent.git`?",
+      "options": [
+        { "id": "a", "text": "Проверяет существование репо и падает, если его нет" },
+        { "id": "b", "text": "Только локально записывает в .git/config, без сетевого запроса" },
+        { "id": "c", "text": "Клонирует репо в текущую директорию" },
+        { "id": "d", "text": "Создаёт репо на GitHub автоматически" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`git remote add` — это чисто локальная операция, она просто добавляет запись в `.git/config`. Никакого сетевого запроса не делается. Ты можешь добавить remote с любым URL, даже fake, — Git не проверит. Проверка произойдёт только при первом `fetch`/`push`. Это часто путает джунов: 'я добавил remote, всё ок'. На самом деле нужно ещё пингануть его через `git remote show origin` или `git fetch`, чтобы убедиться, что URL рабочий.",
+      "bloomLevel": "conceptual"
+    }
+  ]
+}

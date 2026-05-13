@@ -1,0 +1,88 @@
+{
+  "lessonSlug": "05-remotes/_exam",
+  "moduleId": "05-remotes",
+  "_meta": {
+    "idPrefix": "git-exam-m05",
+    "description": "Module 05 exam: 6 questions covering remotes, clone/fetch/pull/push, tracking, SSH/HTTPS, hosting"
+  },
+  "questions": [
+    {
+      "id": "git-exam-m05-q1",
+      "type": "multiple-choice",
+      "question": "Ты сделал `git clone <repo>`. Через час проверяешь `git status` — пишет 'up to date'. Но коллега утверждает, что только что напушил коммит в main. Почему status не показывает?",
+      "options": [
+        { "id": "a", "text": "GitHub задерживает propagation коммитов на ~1 час" },
+        { "id": "b", "text": "git status сравнивает с локальным origin/main, который обновляется только через fetch/pull/push" },
+        { "id": "c", "text": "Нужно перезапустить терминал" },
+        { "id": "d", "text": "git clone отключает auto-fetch" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`git status` сравнивает HEAD с локальным remote-tracking branch (`origin/main`), а не с реальным сервером. Этот ref у тебя обновляется только при `fetch`/`pull`/`push`. Чтобы увидеть свежие коммиты от коллеги, нужно `git fetch` — тогда `origin/main` синхронизируется с сервером, и status покажет 'behind'. Это фундаментальное свойство distributed VCS: явная синхронизация без скрытых сетевых запросов.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-exam-m05-q2",
+      "type": "multiple-choice",
+      "question": "Ты работаешь над PR из своего fork `your/airflow` в апстрим `apache/airflow`. После rebase своей ветки на свежий upstream/main нужно запушить. Куда и какой командой?",
+      "options": [
+        { "id": "a", "text": "git push upstream feature/x — пушим в апстрим напрямую" },
+        { "id": "b", "text": "git push origin feature/x --force-with-lease — в свой fork, после rebase нужен force" },
+        { "id": "c", "text": "git push --all" },
+        { "id": "d", "text": "git push apache feature/x --force" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "В fork-workflow: origin = твой fork (your/airflow), upstream = оригинал (apache/airflow, read-only для тебя). Пушить можешь только в origin. После rebase локальные SHA изменились, поэтому простой push отвергнут — нужен `--force-with-lease` (безопасный force, проверяет состояние сервера). НЕ просто `--force` — это опасно. После пуша PR в GitHub UI автоматически обновится. В upstream напрямую пушить нельзя — нет прав, и это правильно.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-exam-m05-q3",
+      "type": "multiple-choice",
+      "question": "Какая комбинация настроек делает работу junior-DE с remotes безопаснее всего?",
+      "options": [
+        { "id": "a", "text": "push.default=matching, pull.rebase=false, нет credential helper" },
+        { "id": "b", "text": "pull.ff=only, push.default=simple, push.autoSetupRemote=true, credential helper настроен, force-with-lease вместо force" },
+        { "id": "c", "text": "Использовать только git push --force для всех операций" },
+        { "id": "d", "text": "Отключить fetch.prune, чтобы старые ветки не пропадали" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Безопасный набор: (1) `pull.ff=only` — git pull либо делает fast-forward, либо падает с ошибкой; защищает от случайных merge commits. (2) `push.default=simple` — пушит только текущую ветку в одноимённый upstream; предотвращает push не туда. (3) `push.autoSetupRemote=true` — автоматически настраивает upstream для новых веток, чтобы не запоминать `-u`. (4) Credential helper (osxkeychain/manager-core/libsecret) — не вводить токен каждый раз. (5) `--force-with-lease` вместо `--force` — проверяет, не затираешь ли чужие коммиты. Эта комбинация убирает большинство классов ошибок начинающих.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-exam-m05-q4",
+      "type": "true-false",
+      "question": "Конвертировать репозиторий с HTTPS на SSH можно через одну команду `git remote set-url`.",
+      "correctAnswer": "true",
+      "explanation": "`git remote set-url origin git@github.com:user/repo.git` меняет URL remote без переклонирования. Полезно, когда сначала склонировал по HTTPS, потом настроил SSH-ключ. Проверить: `git remote -v`. Тоже самое в обратную сторону. Это локальная операция — меняет только `.git/config`. Альтернатива — отредактировать `.git/config` вручную, но `set-url` удобнее. Для добавления (а не замены) push URL — `git remote set-url --push origin <url>`.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-exam-m05-q5",
+      "type": "multiple-choice",
+      "question": "Команда настроила `fetch.prune=true` глобально. Что это меняет?",
+      "options": [
+        { "id": "a", "text": "fetch будет загружать только последние 10 коммитов" },
+        { "id": "b", "text": "При git fetch автоматически удаляются локальные remote-tracking branches, для которых ветка на сервере удалена" },
+        { "id": "c", "text": "Удаляются локальные ветки без upstream" },
+        { "id": "d", "text": "fetch не работает на shallow clones" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`fetch.prune=true` (эквивалент `--prune`/`-p` флага при каждом fetch) удаляет remote-tracking branches, ветки которых больше не существуют на сервере. Сценарий: после merge PR ветку `feature-x` удаляют на GitHub -> у тебя локально остаётся `origin/feature-x` как мёртвый ref. С `fetch.prune=true` следующий fetch его подчистит. Это keeps твой `git branch -r` чистым. Локальные ветки НЕ удаляются — только remote-tracking. Если хочешь удалять и локальные мерджнутые — это `git branch --merged | xargs git branch -d` (отдельная процедура, гигиена).",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-exam-m05-q6",
+      "type": "multiple-choice",
+      "question": "У тебя локальная ветка `feature/etl-fix`. Хочешь, чтобы `git push` отправил её в одноимённую ветку на origin, и при этом git pull/push без аргументов потом работали. Какая последовательность команд правильная и минимальная?",
+      "options": [
+        { "id": "a", "text": "git push --force origin feature/etl-fix" },
+        { "id": "b", "text": "git remote add origin <url> + git push" },
+        { "id": "c", "text": "git push -u origin feature/etl-fix (или просто git push если push.autoSetupRemote=true)" },
+        { "id": "d", "text": "git checkout origin/feature/etl-fix + git push" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "`git push -u origin feature/etl-fix` (или `--set-upstream`) делает два действия: (1) пушит ветку на сервер, (2) настраивает tracking — связь между локальной `feature/etl-fix` и `origin/feature/etl-fix`. После этого `git push` и `git pull` без аргументов работают. Альтернатива: настроить `push.autoSetupRemote = true` глобально один раз — тогда обычный `git push` сам создаст ветку и tracking. `--force` тут не нужен (ветка новая, нет конфликта). `git remote add` тоже не нужен — origin уже есть в склонированном репо. `git checkout origin/...` создаёт detached HEAD, не локальную ветку.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

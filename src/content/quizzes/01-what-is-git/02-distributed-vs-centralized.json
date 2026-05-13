@@ -1,0 +1,74 @@
+{
+  "lessonSlug": "01-what-is-git/02-distributed-vs-centralized",
+  "moduleId": "01-what-is-git",
+  "_meta": {
+    "idPrefix": "git-m01-02",
+    "description": "Quiz for lesson 1.2 — Distributed vs Centralized"
+  },
+  "questions": [
+    {
+      "id": "git-m01-02-q1",
+      "type": "multiple-choice",
+      "question": "Что хранится на машине разработчика в DVCS (Git) vs CVCS (SVN)?",
+      "options": [
+        { "id": "a", "text": "В обеих системах хранится только рабочая копия с текущим состоянием файлов" },
+        { "id": "b", "text": "В Git — только рабочая копия, в SVN — полный репозиторий" },
+        { "id": "c", "text": "В Git — ПОЛНЫЙ репозиторий (все commits, история, ветки, теги в .git/), в SVN — только рабочая копия текущего состояния" },
+        { "id": "d", "text": "Только бинарные diff" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "В Git каждый клон содержит полный репозиторий: все commits, всю историю, все ветки и теги в директории .git/. Это и есть «distributed»: каждый узел самодостаточен. В SVN на машине разработчика только working copy — текущее состояние файлов с метаданными о версии. Вся история — на сервере. Поэтому в Git все операции (log, diff, commit) работают офлайн, в SVN — требуют сервера.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m01-02-q2",
+      "type": "multiple-choice",
+      "question": "Junior сделал `git commit -m 'fix bug'`, но коллеги не видят изменений на GitHub. Что забыл сделать Junior?",
+      "options": [
+        { "id": "a", "text": "Запустить git status" },
+        { "id": "b", "text": "Сделать git push — commit создал коммит ЛОКАЛЬНО, для отправки на сервер нужен отдельный шаг" },
+        { "id": "c", "text": "Подключиться к VPN" },
+        { "id": "d", "text": "Сделать git init" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "В Git commit и push — две разные операции. git commit фиксирует изменения в локальном репозитории (.git/), git push отправляет их на удалённый сервер (например, GitHub). Это фундаментальная разница с SVN, где svn commit сразу отправлял на сервер. Запомни: commit ≠ push. Правильный полный flow: git add -> git commit -> git push.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m01-02-q3",
+      "type": "multiple-choice",
+      "question": "Что такое 'origin' в Git с технической точки зрения?",
+      "options": [
+        { "id": "a", "text": "Это специальный центральный репозиторий, на котором живёт «главная правда»" },
+        { "id": "b", "text": "Это просто соглашение об именовании для одного из remotes — обычно того, который связан с GitHub. Технически в Git нет иерархии: все клоны равноправны" },
+        { "id": "c", "text": "Это первый коммит в репозитории" },
+        { "id": "d", "text": "Это синоним main/master" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "В Git нет технического понятия «центральный сервер». Все клоны репозитория равноправны. origin — это просто соглашение об именовании первого удалённого репозитория (git clone автоматически называет его так). Команда может договориться, что origin — это GitHub-репозиторий, и относиться к нему как к каноническому. Но это organizational, не technical. Можно переименовать origin в anything, ничего не сломается.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m01-02-q4",
+      "type": "multiple-choice",
+      "question": "Какое преимущество DVCS перевернуло open-source разработку?",
+      "options": [
+        { "id": "a", "text": "Cheaper hosting" },
+        { "id": "b", "text": "Fork-based contributions: любой может полностью клонировать публичный репозиторий, делать в нём что угодно, и предлагать изменения через Pull Request. Этого не было в CVCS, где нужны были write-права на сервер" },
+        { "id": "c", "text": "Поддержка бинарных файлов" },
+        { "id": "d", "text": "GUI-клиенты" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "В CVS/SVN вы либо имели права писать в репозиторий, либо нет. В Git можно сделать ПОЛНЫЙ клон любого открытого проекта на свой GitHub-аккаунт (fork), делать в нём что угодно, и предложить владельцам забрать изменения (Pull Request). Эта модель — невозможна в CVCS. GitHub был построен именно вокруг fork-based contributions, что взорвало open-source: участвовать стало в 100 раз проще.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m01-02-q5",
+      "type": "true-false",
+      "question": "В DVCS (Git) `git push --force` — это безопасная операция, которую можно делать на shared веток типа main.",
+      "correctAnswer": false,
+      "explanation": "Категорически НЕТ. `git push --force` перепишет историю на сервере и УДАЛИТ коммиты коллег, которые были на ветке между вашим последним fetch и push. Никогда не делайте --force на shared веток (main, develop, любые публичные branches). Правильный flow: git pull --rebase, потом git push. Если действительно нужен force-push (например, на личной feature-branch) — используйте --force-with-lease, который проверяет, что вы не перетираете чужие коммиты. Подробно — модуль 07.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

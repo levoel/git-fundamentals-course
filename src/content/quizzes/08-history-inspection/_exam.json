@@ -1,0 +1,88 @@
+{
+  "lessonSlug": "08-history-inspection/_exam",
+  "moduleId": "08-history-inspection",
+  "_meta": {
+    "idPrefix": "git-exam-m08",
+    "description": "Module 08 exam: 6 questions covering log, diff, show, blame, bisect, pickaxe"
+  },
+  "questions": [
+    {
+      "id": "git-exam-m08-q1",
+      "type": "multiple-choice",
+      "question": "Тебе нужно посмотреть, что вошло в последний release (от тега v1.2.0 до HEAD). Какая команда минимальная и информативная?",
+      "options": [
+        { "id": "a", "text": "git log v1.2.0..HEAD --no-merges --oneline" },
+        { "id": "b", "text": "git log HEAD" },
+        { "id": "c", "text": "git diff v1.2.0" },
+        { "id": "d", "text": "git show v1.2.0" }
+      ],
+      "correctAnswer": "a",
+      "explanation": "`git log v1.2.0..HEAD --oneline` показывает коммиты, которые есть в HEAD, но нет в v1.2.0 (range syntax `A..B`). `--no-merges` фильтрует merge commits (обычно избыточны для release notes), `--oneline` — компактный формат. Получишь список 'что вошло в эту версию'. Полезные варианты: добавить `--no-merges --first-parent` для squash workflow (одна строка на смерджнутый PR). Для генерации changelog: `git log v1.2.0..HEAD --pretty=format:'- %s (%an)' --no-merges`.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-exam-m08-q2",
+      "type": "multiple-choice",
+      "question": "Code review PR коллеги. Какой git diff правильный — `main..feature` или `main...feature`?",
+      "options": [
+        { "id": "a", "text": "main..feature — две точки" },
+        { "id": "b", "text": "main...feature — три точки. Это показывает diff от merge base до feature, то есть **только изменения коллеги** относительно момента ветвления. Это то, что GitHub показывает в 'Files Changed'" },
+        { "id": "c", "text": "Без разницы" },
+        { "id": "d", "text": "git diff main" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Три точки (`...`) показывают diff от merge base до feature — только то, что коллега добавил после ветвления, как PR view на GitHub. Две точки (`..`) показывают diff между верхушками — если main за время работы коллеги получил hotfix'ы, они появятся как 'минусы' в diff (будто коллега их удалил), что сбивает review. Привыкай к `...` для PR review. Для просмотра 'актуальной разницы' двух веток — используй `..` или просто `git diff main feature`.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-exam-m08-q3",
+      "type": "true-false",
+      "question": "`.git-blame-ignore-revs` (включается через blame.ignoreRevsFile config) позволяет git blame и GitHub UI пропускать определённые коммиты, обычно cosmetic форматирование.",
+      "correctAnswer": "true",
+      "explanation": "`.git-blame-ignore-revs` — файл в корне репо со списком SHA коммитов (один на строку, можно `#` комментарии), которые `git blame` пропустит. Полезно для cosmetic коммитов: массовое форматирование Black/isort/prettier. Включается локально: `git config blame.ignoreRevsFile .git-blame-ignore-revs`. Лучше — коммитить файл в репо, так все в команде получат правильный blame. **GitHub** автоматически уважает этот файл в Blame UI с 2023+, **GitLab** тоже. Best practice: при крупном форматировании сделать **отдельный коммит** только для форматирования (без логических изменений) и сразу добавить его SHA в файл.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-exam-m08-q4",
+      "type": "multiple-choice",
+      "question": "Что лучше использовать: `git blame -L 10,20 file` или `git log -L 10,20:file` для понимания эволюции кода?",
+      "options": [
+        { "id": "a", "text": "Они идентичны" },
+        { "id": "b", "text": "blame даёт финальное состояние ('кто последний правил каждую строку'), log -L даёт эволюцию ('все коммиты, менявшие эти строки за всю историю') — для понимания развития кода полезнее log -L" },
+        { "id": "c", "text": "blame быстрее, log -L точнее, но это одно и то же" },
+        { "id": "d", "text": "log -L только для бинарных файлов" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Разные инструменты для разных задач: (1) **`git blame`** — snapshot 'who wrote each line now'. Полезно для 'кто это? спросить контекст'. Один автор на строку — последний правивший. (2) **`git log -L 10,20:file`** — это lente of commits, менявших строки 10-20 за всю историю. Видишь эволюцию: рождение функции, последовательные изменения, refactors. Используется для понимания, **как код пришёл к текущему виду**. Также есть regex range: `git log -L /^def process/,/^def/:src/etl.py` — для конкретной функции.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-exam-m08-q5",
+      "type": "multiple-choice",
+      "question": "ETL DAG падает сегодня, точно работал месяц назад. С тех пор ~80 коммитов. Лучшая стратегия найти bug-introducing commit?",
+      "options": [
+        { "id": "a", "text": "Читать все 80 коммитов руками" },
+        { "id": "b", "text": "git bisect — установить good (commit месячной давности или tag), bad (HEAD), написать test script воспроизводящий проблему, запустить `git bisect run ./test.sh` — за log₂(80) ≈ 7 шагов найдёт коммит" },
+        { "id": "c", "text": "git revert последний коммит и проверить" },
+        { "id": "d", "text": "Удалить ветку" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "bisect — оптимальный метод для регрессий в N коммитов: ручной перебор O(N) -> bisect O(log₂ N). Workflow: (1) **Стабилизировать воспроизведение**: написать test script, который надёжно exit 0 (good) / non-zero (bad). Для Airflow: `airflow tasks test daily_etl transform_orders 2026-05-13`. (2) **Установить границы**: `git bisect start && git bisect bad HEAD && git bisect good <month-ago-sha>`. (3) **Автоматизировать**: `git bisect run ./test.sh` — Git сделает 7 итераций сам. (4) Финал: Git показывает 'first bad commit'. **Проверить**: script детерминистичный? Зависимости same? Если non-deterministic — добавь retry в script.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-exam-m08-q6",
+      "type": "multiple-choice",
+      "question": "Расследование: нужно найти все коммиты, в которых менялось значение параметра `DB_POOL_SIZE` (было 10, потом 50, потом обратно, и т.д.). Самая эффективная команда?",
+      "options": [
+        { "id": "a", "text": "git grep 'DB_POOL_SIZE'" },
+        { "id": "b", "text": "git log -G 'DB_POOL_SIZE\\s*=\\s*[0-9]+' --oneline -p -- 'config/' — regex pickaxe ловит любое изменение значения, -p показывает diff каждого, ограничение directory ускоряет" },
+        { "id": "c", "text": "git diff HEAD~80 HEAD" },
+        { "id": "d", "text": "git log --grep='DB_POOL_SIZE'" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Лучший подход — `-G` regex pickaxe: (1) **`-G 'DB_POOL_SIZE\\s*=\\s*[0-9]+'`** — regex поймает все варианты значения (с пробелами, без, любое число). `-G` ловит **любое касание** строки с этим паттерном, в отличие от `-S` которая ловит только изменение количества вхождений. (2) **`-p`** — diff каждого коммита, видны конкретные значения 'было 10, стало 50'. (3) **`-- 'config/'`** — ограничить директорией для скорости. (4) **`--oneline`** в формате — компактный обзор. Альтернативы: (a) `git grep` показывает только текущее состояние, не историю. (b) `git log --grep` ищет в commit messages, не в коде. (c) `git diff HEAD~80 HEAD` покажет общий итоговый diff, но не промежуточные изменения.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

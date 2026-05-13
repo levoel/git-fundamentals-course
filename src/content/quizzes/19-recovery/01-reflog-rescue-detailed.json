@@ -1,0 +1,59 @@
+{
+  "lessonSlug": "19-recovery/01-reflog-rescue-detailed",
+  "moduleId": "19-recovery",
+  "_meta": {
+    "idPrefix": "git-m19-01"
+  },
+  "questions": [
+    {
+      "id": "git-m19-01-q1",
+      "type": "multiple-choice",
+      "question": "Junior сделал `git reset --hard HEAD~5`, потеряв 5 commits работы. Какая команда восстановит работу?",
+      "options": [
+        {"id": "a", "text": "git reset --hard HEAD~5 reverse"},
+        {"id": "b", "text": "git pull origin main"},
+        {"id": "c", "text": "git reflog -> найти HEAD@{1} (состояние до reset) -> git reset --hard HEAD@{1}"},
+        {"id": "d", "text": "git revert HEAD"}
+      ],
+      "correctAnswer": "c",
+      "explanation": "reflog хранит журнал движений HEAD. После `git reset --hard HEAD~5`: HEAD@{0} = после reset (текущая позиция, на 5 коммитов раньше); HEAD@{1} = до reset (где HEAD был перед операцией). `git reset --hard HEAD@{1}` возвращает HEAD на ту позицию. Работа восстановлена. git pull не помогает (изменения локальные, не push-нутые). revert создаёт новый коммит-инверсию, не возвращает потерянные. reverse reset не существует.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m19-01-q2",
+      "type": "multiple-choice",
+      "question": "Чем отличается `HEAD~3` от `HEAD@{3}`?",
+      "options": [
+        {"id": "a", "text": "Это синонимы"},
+        {"id": "b", "text": "HEAD~3 — три commits назад по графу (parent -> parent -> parent). HEAD@{3} — три операции назад по reflog (любая операция: commit, checkout, reset, rebase). Это разные направления — по истории commits vs по локальным действиям"},
+        {"id": "c", "text": "HEAD~3 для merge, HEAD@{3} для rebase"},
+        {"id": "d", "text": "HEAD~3 — на remote, HEAD@{3} — локально"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Критическая разница. HEAD~3 — идёт по графу commits через parent links: HEAD -> ^ -> ^^ -> ^^^. История может быть переписана rebase-ом — HEAD~3 укажет на новые commits. HEAD@{3} — идёт по reflog (журнал движений HEAD на твоей машине): 3 операции назад, любые. Сделал commit + checkout + reset = HEAD@{3} вернётся к точке до commit (3 операции). Это разные системы координат: graph time vs operation time. Для recovery после reset — нужен HEAD@{N}.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m19-01-q3",
+      "type": "multiple-choice",
+      "question": "Time-based reflog ссылка `HEAD@{2.hours.ago}` означает:",
+      "options": [
+        {"id": "a", "text": "Commit, сделанный 2 часа назад"},
+        {"id": "b", "text": "Состояние HEAD 2 часа назад по локальному reflog (ближайшая операция к этому времени). Работает только для локальных операций — если ты clone-ал репо час назад, HEAD@{2.hours.ago} не существует"},
+        {"id": "c", "text": "Remote HEAD за последние 2 часа"},
+        {"id": "d", "text": "Branch который существовал 2 часа назад"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Time-based reflog references — синтаксис Git для navigation reflog по времени. `HEAD@{2.hours.ago}` — где был HEAD по reflog 2 часа назад (ближайшая запись). Поддерживаются: `1.hour.ago`, `yesterday`, `2026-05-12.09:30`, etc. Важно: это локальный reflog, не graph времени. Свежий clone не имеет старых reflog записей. Также: `git log main@{yesterday}` — где была ветка main вчера локально.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m19-01-q4",
+      "type": "true-false",
+      "question": "Если коллега force-pushed в shared remote ветку и стёр твою локальную работу через subsequent git pull, reflog для этой ветки (например `feat/etl@{1}`) **может** помочь восстановить состояние до force pull.",
+      "correctAnswer": true,
+      "explanation": "git pull обновляет local ref (например feat/etl). Это операция, попадающая в reflog. `git reflog show feat/etl` покажет history: feat/etl@{0} = после force pull (новое состояние), feat/etl@{1} = до force pull (старое состояние с твоими commits). Восстановление: `git reset --hard feat/etl@{1}`. Это работает, если pull произошёл локально на твоей машине (попало в твой reflog). Если работа была только на remote (никогда не fetch-нул) — reflog не поможет, восстановление через remote backups.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

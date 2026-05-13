@@ -1,0 +1,396 @@
+---
+title: "Базовый rebase: что делает каждый шаг"
+description: "git rebase main по шагам: cherry-pick каждого коммита, новые SHA, что происходит с ветками"
+order: 2
+difficulty: "intermediate"
+estimatedTime: 18
+topics: ["Git", "rebase", "cherry-pick", "history"]
+---
+
+# Базовый rebase: что делает каждый шаг
+
+`git rebase main` на feature-ветке — звучит как одна команда, но под капотом Git проделывает несколько операций последовательно. Понимание этого механизма ключевое: оно объясняет, почему конфликты при rebase разрешаются по-другому, почему меняются SHA, и почему "потерянные" коммиты можно восстановить через reflog.
+
+В этом уроке разбираем механику базового rebase — без interactive (`-i`), без советских флагов, просто `git rebase <branch>`.
+
+---
+
+## Алгоритм по шагам
+
+Когда ты делаешь `git rebase main` на ветке `feature/x`, Git выполняет такую процедуру:
+
+<DiagramContainer title="Алгоритм rebase: 5 шагов" color="blue">
+  <FlowColumn className="p-4 gap-3">
+    <Tooltip content="Шаг 1: найти merge base — точку, где feature/x разошлась с main">
+      <FlowNode variant="input">1. Найти merge base</FlowNode>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="Шаг 2: собрать список коммитов feature/x с merge base до HEAD">
+      <FlowNode variant="default">2. Собрать коммиты feature/x</FlowNode>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="Шаг 3: переключиться на main (новая база) — detached HEAD">
+      <FlowNode variant="default">3. Reset на верхушку main</FlowNode>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="Шаг 4: для каждого коммита из списка — применить как патч (cherry-pick)">
+      <FlowNode variant="default">4. Применить коммиты по одному</FlowNode>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="Шаг 5: указатель feature/x теперь смотрит на верхний из применённых">
+      <FlowNode variant="output">5. Переместить feature/x на новый top</FlowNode>
+    </Tooltip>
+  </FlowColumn>
+</DiagramContainer>
+
+Распишем подробнее каждый шаг.
+
+---
+
+## Шаг 1: найти merge base
+
+Git ищет общего предка двух веток. Для нашего сценария: `feature/x` отошла от `main` неделю назад в коммите C0. Это merge base.
+
+Можно посмотреть руками:
+
+```bash
+$ git merge-base feature/x main
+c0c0c0c1b2a3...
+```
+
+---
+
+## Шаг 2: собрать коммиты feature/x
+
+Git собирает список коммитов в `feature/x`, которых нет в `main`:
+
+```bash
+$ git log --oneline main..feature/x
+abc1234 F3: tests
+def5678 F2: implementation
+9876543 F1: scaffold
+```
+
+Это **3 коммита**, которые надо перебазировать.
+
+---
+
+## Шаг 3: reset на верхушку main
+
+Git делает `git checkout` на HEAD ветки `main` — то есть переключает working tree на состояние M3. Внутренне это `detached HEAD`:
+
+```
+HEAD -> M3 (на main)
+feature/x -> пока остаётся на F3 (старая позиция, до неё мы дотянемся в конце)
+```
+
+---
+
+## Шаг 4: применить коммиты по одному
+
+Это сердце rebase. Git берёт первый коммит из списка (F1), применяет его на текущий HEAD как **cherry-pick**:
+
+```
+Применяет F1 на M3 -> создаёт F1' (новый SHA)
+HEAD -> F1'
+```
+
+Потом F2 поверх F1', потом F3 поверх F2':
+
+```
+HEAD -> F3' -> F2' -> F1' -> M3 -> M2 -> M1 -> C0
+```
+
+<DiagramContainer title="Cherry-pick каждого коммита на новую базу" color="green">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center items-center flex-wrap">
+      <Tooltip content="Начальная точка: HEAD на M3">
+        <DataBox label="step 1" className="border-zinc-500/30 w-44">
+          <div className="text-xs">HEAD = M3</div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Применили F1 -> создан F1', HEAD двинулся">
+        <DataBox label="step 2" className="border-zinc-500/30 w-44">
+          <div className="text-xs">HEAD = F1' (на M3)</div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Применили F2 на F1' -> создан F2'">
+        <DataBox label="step 3" className="border-zinc-500/30 w-44">
+          <div className="text-xs">HEAD = F2' (на F1')</div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Применили F3 на F2' -> создан F3'">
+        <DataBox label="step 4" className="border-green-500/30 w-44">
+          <div className="text-xs">HEAD = F3' (на F2')</div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Каждый коммит применяется как `git cherry-pick`. Это значит:
+
+- Берётся **diff коммита** (что он изменяет).
+- Diff применяется к текущему HEAD.
+- Создаётся **новый коммит** с тем же сообщением и автором, но с новым SHA, parent, и (если содержимое изменилось) tree.
+
+---
+
+## Шаг 5: переместить feature/x на новый top
+
+После того как все коммиты применены, Git двигает указатель `feature/x` с F3 на F3'. Старые F1, F2, F3 теперь "сироты" — не указывает на них ни одна ветка.
+
+```bash
+$ git log --oneline
+fff8888 F3' (HEAD -> feature/x)
+eee7777 F2'
+ddd6666 F1'
+m3m3m3m M3
+m2m2m2m M2
+m1m1m1m M1
+c0c0c0c init
+```
+
+История стала **линейной**. F1', F2', F3' — это твои изменения, но с новыми SHA, висящие после M3.
+
+---
+
+## Что значит "новые SHA"
+
+Каждый Git коммит — это объект, hash которого вычисляется из:
+
+- Tree (snapshot файлов).
+- Parent (родительский коммит).
+- Author / committer.
+- Message.
+- Timestamp.
+
+При rebase меняется **parent** (был C0, стал M3 или F1'/F2'). Этого достаточно, чтобы SHA полностью изменился. Даже если изменения в файлах остались идентичными, SHA — новый.
+
+```bash
+# Старый F1 (до rebase)
+9876543 F1: scaffold
+└── parent: c0c0c0c (C0)
+└── tree: <unchanged>
+
+# Новый F1' (после rebase)
+ddd6666 F1: scaffold
+└── parent: m3m3m3m (M3)   ← поменялся parent
+└── tree: <unchanged>      ← но содержимое то же
+```
+
+Если ты до rebase запушил ветку `feature/x` на сервер с SHA `9876543`, а после rebase сделал ещё `git push` — сервер ругнётся "non-fast-forward". Потому что локально у тебя `ddd6666`, а на сервере `9876543`, и они не связаны линейно. Решение — `git push --force-with-lease` (об этом в уроке "golden rule").
+
+---
+
+## Где старые коммиты
+
+Старые F1, F2, F3 **не удалены сразу**. Они остаются в `.git/objects/` без указателей. Git хранит их минимум 30 дней (или 90 — зависит от настройки `gc.reflogExpire`).
+
+Найти их можно через `reflog`:
+
+```bash
+$ git reflog feature/x
+ddd6666 (HEAD -> feature/x) feature/x@{0}: rebase (finish): returning to refs/heads/feature/x
+ddd6666 feature/x@{1}: rebase (pick): F1: scaffold
+m3m3m3m feature/x@{2}: rebase (start): checkout main
+abc1234 feature/x@{3}: commit: F3: tests       ← старый F3!
+def5678 feature/x@{4}: commit: F2: implementation
+9876543 feature/x@{5}: commit: F1: scaffold
+```
+
+Если ты испортил rebase, можно восстановить старое состояние:
+
+```bash
+git reset --hard feature/x@{3}    # вернёт к старому F3
+```
+
+Это спасательный круг. Подробно reflog в модуле 09 курса.
+
+---
+
+## Конфликты при rebase
+
+В отличие от merge, где конфликт возникает один раз для всего сводного результата, при rebase **конфликт может возникать для каждого коммита**. Git проигрывает коммиты по очереди, и если на коммите F2 возник конфликт — Git останавливается.
+
+```bash
+$ git rebase main
+Auto-merging src/etl.py
+CONFLICT (content): Merge conflict in src/etl.py
+error: could not apply def5678... F2: implementation
+hint: Resolve all conflicts manually, mark them as resolved with
+hint: "git add/rm <conflicted_files>", then run "git rebase --continue".
+hint: You can instead skip this commit: run "git rebase --skip".
+hint: To abort and get back to the state before "git rebase", run "git rebase --abort".
+```
+
+Что делать:
+
+1. **Разрешить конфликт** в файле (как мы учились в Module 06).
+2. **`git add <file>`** — отметить разрешённым.
+3. **`git rebase --continue`** — Git закроет F2', применит следующий коммит (F3).
+
+Если хочешь отменить весь rebase и вернуть всё как было:
+
+```bash
+git rebase --abort
+```
+
+Если хочешь пропустить проблемный коммит (потерять его):
+
+```bash
+git rebase --skip
+```
+
+<Callout type="warning">
+`git rebase --skip` — опасная команда. Она **выкидывает** текущий коммит из rebase. Только если ты на 100% уверен, что коммит больше не нужен (например, его изменения уже есть в новой базе). Иначе ты теряешь работу.
+</Callout>
+
+Конфликты по одному имеют плюс и минус. Плюс: каждый конфликт меньше по объёму, легче понять контекст. Минус: если у тебя 10 коммитов и в каждом конфликт — это 10 циклов резолва, дольше чем один большой merge.
+
+---
+
+## Полезные флаги rebase
+
+### `--onto`: новая база, другой источник
+
+Иногда нужно "пересадить" коммиты с одной ветки на другую без захвата лишних коммитов.
+
+Сценарий: ты сделал ветку `feature` от `develop`, потом feature от `feature` (то есть feature/sub). Хочешь, чтобы `feature/sub` основывалась прямо на `develop`, а не на `feature`.
+
+```bash
+git rebase --onto develop feature feature/sub
+```
+
+Читается так: "взять коммиты, которые есть в `feature/sub`, но не в `feature`, и переставить на `develop`".
+
+Это продвинутая операция, в быту нужна редко, но знай о ней.
+
+### `--rebase-merges`
+
+По дефолту rebase **сплющивает** merge commits — берёт только их diff и применяет как обычный коммит. Иногда хочется сохранить merge commits в перебазируемой ветке:
+
+```bash
+git rebase --rebase-merges main
+```
+
+В быту тоже редкость. Используется в очень структурированных репозиториях.
+
+### `-i` (interactive)
+
+Это отдельная история — следующий урок целиком посвящён interactive rebase.
+
+---
+
+## Стандартный workflow с базовым rebase
+
+Типичный день junior'а:
+
+```bash
+# Утром: подтянуть main
+git switch main
+git pull --rebase
+
+# Создать feature ветку
+git switch -c feature/add-spark-job
+
+# Работать, коммитить
+echo "code" > src/job.py
+git add . && git commit -m "feat: add spark job"
+
+# Ещё коммит
+echo "test" > tests/test_job.py
+git add . && git commit -m "test: add unit test"
+
+# Через час — коллеги напушили в main, хочу подтянуть
+git fetch origin
+git rebase origin/main
+# (возможно конфликты — разрешить)
+
+# Запушить ветку — первый раз с -u, потом просто push
+git push -u origin feature/add-spark-job
+
+# Перед PR — ещё раз rebase, чтобы поверх свежего main
+git fetch origin
+git rebase origin/main
+# Теперь нужен force-with-lease, потому что переписал history
+git push --force-with-lease
+```
+
+Это **идеальный** flow — линейная история, чистая ветка, удобный PR.
+
+---
+
+## Сравни: тот же сценарий через merge
+
+```bash
+git switch feature/add-spark-job
+git fetch origin
+git merge origin/main
+# (возможно конфликты — разрешить один раз)
+git push    # без force, потому что merge не переписывает history
+```
+
+Преимущества merge:
+
+- Не нужен force-push, проще для джуна.
+- Конфликты разрешаются один раз.
+
+Недостатки merge:
+
+- В feature-ветке появляются merge commits "Merge branch 'main' into feature/x".
+- История становится ёлкой, особенно если несколько раз так синхронизируешься.
+
+Многие команды решают: до открытия PR — rebase, после открытия PR — merge (чтобы не ломать review).
+
+---
+
+## Попробуй сам
+
+```bash
+mkdir basic-rebase-demo && cd basic-rebase-demo
+git init -b main
+
+# Базовый коммит
+echo "initial" > file.txt
+git add . && git commit -m "C0 init"
+
+# Симулируем работу в main
+for i in 1 2 3; do
+    echo "main line $i" >> file.txt
+    git commit -am "M$i"
+done
+
+# Делаем feature от C0
+git switch -c feature HEAD~3
+
+# Несколько коммитов в feature
+echo "feature 1" > feature.txt
+git add . && git commit -m "F1"
+echo "feature 2" >> feature.txt
+git commit -am "F2"
+echo "feature 3" >> feature.txt
+git commit -am "F3"
+
+# Посмотрим SHA F1 F2 F3 до rebase
+git log --oneline feature
+
+# Rebase
+git rebase main
+
+# Посмотрим SHA после — другие!
+git log --oneline feature
+
+# Посмотрим reflog — старые коммиты ещё там
+git reflog feature
+
+# Если бы хотели вернуться:
+# git reset --hard feature@{4}  ← но не будем
+```
+
+---
+
+<KnowledgeCheck
+  question="Ты сделал `git rebase main` на ветке feature, конфликт случился на втором из трёх коммитов. Ты разрешил конфликт, сделал `git add`, потом передумал и хочешь вернуть ветку в состояние до начала rebase. Что делать, и какие ошибки нужно избежать?"
+  answer="Простой ответ: **`git rebase --abort`** — это команда специально для этой ситуации. Она вернёт ветку точно в состояние до `git rebase main` начала. Все разрешённые конфликты будут отброшены, working tree восстановлен. Это безопасный 'undo'. Какие ошибки избежать: (1) **НЕ делать `git reset --hard`** во время неоконченного rebase — это запутает Git, ты можешь оказаться в неконсистентном состоянии. Сначала abort, потом reset, если ещё нужно. (2) **НЕ делать `git rebase --continue`** в надежде, что 'оно само разберётся' — это применит твои изменения (даже если ты передумал) и пойдёт дальше к третьему коммиту. (3) **НЕ удалять `.git/rebase-merge/` или `.git/rebase-apply/` руками** — эти директории Git использует во время rebase, ручное удаление сломает консистентность. Только через `--abort`. После `--abort`: проверь `git status` (должно быть 'nothing to commit' и обычное состояние ветки), `git log --oneline` (должен показать твои original F1, F2, F3 с старыми SHA), и `git branch -vv` (текущая ветка как была). Дополнительно: если ты случайно сделал `git rebase --continue` и завершил rebase, потом понял что что-то не так — старые коммиты ещё доступны через `git reflog`, можно восстановить через `git reset --hard feature@{N}`."
+/>

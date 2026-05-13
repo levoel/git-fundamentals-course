@@ -1,0 +1,63 @@
+{
+  "lessonSlug": "16-submodules-worktrees/04-worktrees",
+  "moduleId": "16-submodules-worktrees",
+  "_meta": {
+    "idPrefix": "git-m16-04",
+    "description": "Quiz for lesson 04 of module 16 — worktrees"
+  },
+  "questions": [
+    {
+      "id": "git-m16-04-q1",
+      "type": "multiple-choice",
+      "question": "Что такое git worktree и какая mental model?",
+      "options": [
+        { "id": "a", "text": "Второй clone репо в другой папке" },
+        { "id": "b", "text": "Множественные working trees (рабочие копии) из ОДНОГО Git репо. Один общий .git/ (objects, refs), но разные working tree директории — каждая на своей ветке. Главный worktree + дополнительные через `git worktree add <path> <branch>`. Все worktrees делят историю и объекты, но имеют независимые checkout-ы" },
+        { "id": "c", "text": "Виртуальная директория" },
+        { "id": "d", "text": "Backup репозитория" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Worktree mechanics: (1) Один основной репозиторий с своим .git/. (2) `git worktree add <path> <branch>` создаёт дополнительную working tree директорию в указанном path, с checkout указанной ветки. (3) В новой директории .git — это файл (не директория) с указанием 'gitdir: <main-repo>/.git/worktrees/<name>'. То есть указатель на shared .git. (4) Все worktrees делят: .git/objects/ (содержимое всех commits), .git/refs/, packed-refs, hooks. Это economical — не нужен disk space на полный clone. (5) Каждый worktree независим: свой HEAD, свой checkout branch, свой working tree, свой index (.git/worktrees/<name>/index). Можно одновременно работать в нескольких — открыть в разных окнах IDE, запускать тесты в одной пока пишешь код в другой. Restriction: одну branch нельзя checkout одновременно в двух worktrees (safety mechanism — иначе sync issues). Workaround: detached HEAD (`git checkout --detach <ref>`). Это другая концепция чем submodule (ссылка на чужой репо) — worktree это разные views ТВОЕГО репо. Use cases: PR review без stash, long-running tests с продолжением работы, parallel hotfix + feature, безопасный experimentation.",
+      "studyHint": "Повторите урок 04 — раздел 'Mental model: shared .git, разные working trees'",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m16-04-q2",
+      "type": "multiple-choice",
+      "question": "Какой killer use case worktree для PR review?",
+      "options": [
+        { "id": "a", "text": "Worktree не помогает в review" },
+        { "id": "b", "text": "Review PR коллеги БЕЗ stash твоей работы. Сценарий: пишешь сложный feature (много uncommitted), прилетает PR для review. С stash: рисково (stash conflict, потеря state), переключение branch ломает IDE state, pip install обновляет deps твоей venv. С worktree: `git fetch origin pull/<N>/head:pr-N && git worktree add ../parent-pr-N pr-N`, открываешь в новом окне VS Code с отдельной venv. Твой основной checkout intact. Review в parallel" },
+        { "id": "c", "text": "Worktree только для backup" },
+        { "id": "d", "text": "Worktree блокирует другие операции" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Killer feature worktree — PR review без disruption твоей работы. Без worktree: `git stash` (риск потерять unstaged, conflicts при pop), `git checkout pr-branch` (IDE state теряется — terminal cd, breakpoints, open tabs все changeable), `pip install` если PR обновил deps (испорчена твоя venv), review, обратное переключение, `git stash pop`. Все эти шаги имеют риск ошибок и тратят 20-30 минут на каждый PR. С worktree: (1) `git fetch origin pull/<N>/head:pr-N` — приносит PR как локальную ветку. (2) `git worktree add ../parent-pr-N pr-N` — создаёт новую папку с checkout PR в 2 секунды (shared .git, file copy). (3) `cd ../parent-pr-N && python -m venv .venv-review` — изолированная venv для review-зависимостей. (4) `pip install -r requirements.txt` — в review venv, твоя основная не трогается. (5) `code .` — открыть в НОВОМ окне VS Code (twoе основное окно с твоей работой остаётся). (6) Сделать review, запустить тесты — параллельно с твоей работой. (7) `cd ~/projects/parent && git worktree remove ../parent-pr-N` — очистка. Benefits: zero риск потерять работу, IDE state сохранён, deps изолированы, можно сравнивать файлы side-by-side из двух checkout. Особенно полезно когда review требует long-running операций (запустить ETL, integration tests). Time saved: 20-30 минут на каждом PR. Daily benefit для активной команды.",
+      "studyHint": "Повторите урок 04 — раздел 'Killer feature: review PR без stash'",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m16-04-q3",
+      "type": "multiple-choice",
+      "question": "Какие restrictions и gotchas worktree?",
+      "options": [
+        { "id": "a", "text": "Никаких restrictions" },
+        { "id": "b", "text": "(1) Одна ветка не может быть checked out в двух worktrees одновременно (safety mechanism). Workaround: detached HEAD. (2) .git внутри worktree — file (указатель), не директория. Старые инструменты могут иметь issues. (3) hooks shared между worktrees через main .git/hooks. (4) Не удалять worktree через rm -rf — оставляет orphan metadata, нужен git worktree remove или git worktree prune. (5) Submodules + worktrees — улучшилось в Git 2.30+, но всё ещё может иметь quirks" },
+        { "id": "c", "text": "Worktree всегда медленнее submodule" },
+        { "id": "d", "text": "Worktree не поддерживается на macOS" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Полный список gotchas worktree: (1) ONE BRANCH PER WORKTREE — Git enforces, что один branch не checked out в multiple worktrees одновременно. Это safety mechanism — иначе при коммите в одном worktree другой видел бы stale state. Workaround если очень нужно — detached HEAD (`git checkout --detach <ref>`), но без branch tracking. (2) .git AS FILE — внутри worktree .git это file (text 'gitdir: <path>'), не directory. Большинство modern tools (VS Code Git, JetBrains, GitHub Desktop) handle gitfile корректно, но некоторые older или scripts могут expect .git directory. (3) SHARED HOOKS — .git/hooks/ общая для всех worktrees. Plus: один config. Minus: нельзя per-worktree hooks (без core.hooksPath tricks). (4) DON'T rm -rf — если удалить worktree directory через rm, метаданные в .git/worktrees/<name>/ остаются (orphan). Это даёт 'prunable' в `git worktree list`. Очистить: `git worktree prune`. Правильно: всегда `git worktree remove <path>` — атомарно удаляет directory и metadata. (5) SUBMODULES — submodules + worktrees historically имели issues (Git до 2.30). Сейчас улучшилось, но если у тебя heavy submodule usage, тестируй extra carefully. Workflow: `git submodule update --init --recursive` после worktree add. (6) DISK SPACE — хоть worktrees делят .git/objects/, working tree файлы дублируются. Если repo 500MB файлов, 3 worktrees = 1.5GB. Не превращай worktrees в способ хранить все ветки одновременно.",
+      "studyHint": "Повторите урок 04 — раздел 'Worktree restrictions' и 'Production gotchas'",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m16-04-q4",
+      "type": "true-false",
+      "question": "Для DE с long-running тестами (например, integration tests на 30 минут) worktree позволяет запустить тесты в отдельной директории и продолжить работу в основной. Это спасает от выбора 'либо тестировать, либо работать'.",
+      "correctAnswer": true,
+      "explanation": "Точно. Сценарий: интеграционные тесты ETL pipeline занимают 30 минут — пишут в data/output/, спавнят docker-compose, обновляют test database. В основной директории это блокирует работу — twoе изменения файлов могут конфликтовать с тестами. С worktree: (1) `git worktree add ../parent-tests main` — создать worktree из main для тестов. (2) `cd ../parent-tests && python -m pytest tests/integration/` — запустить, идут 30 минут. (3) Параллельно `cd ~/projects/parent && vim src/etl.py` — продолжать refactor в основной директории. (4) Через 30 минут — результаты в `~/projects/parent-tests/`. Никакого выбора 'тестировать или работать' — оба одновременно. Дополнительная польза: можешь запускать на разных branches. Например: (1) Основная директория — feature/etl-rewrite (твоя активная работа). (2) Test worktree — main (baseline tests перед merge). (3) Eще один worktree для experimental branch — баг hunting. Все три одновременно, shared .git, разные working trees. Для DE это особенно ценно — heavy workflows (ML training, ETL backfills, integration tests) которые могут идти десятками минут. Без worktree выбор: либо block-aroch твоя работа, либо в отдельный clone (дорого по disk и времени синхронизации). Worktree даёт оба benefits: parallel execution + shared history. Setup time per worktree: 2-3 секунды. Time saved per long-running operation: 20-60 минут.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

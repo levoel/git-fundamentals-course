@@ -1,0 +1,257 @@
+---
+title: "git restore vs git reset — современный способ отменять изменения"
+description: "git restore (Git 2.23+) разделил функции старого git checkout: --worktree откатывает файл, --staged делает unstage, --source берёт версию из любого commit. git reset больше не нужен для файлов."
+order: 1
+difficulty: "beginner"
+estimatedTime: 25
+topics: ["restore", "reset", "checkout", "undo", "unstage", "working-tree"]
+---
+
+# git restore vs git reset — современный способ отменять изменения
+
+До Git 2.23 (август 2019) один и тот же `git checkout` делал три совершенно разные вещи: переключал ветки, откатывал файлы и делал ещё пару трюков, которые знали только те, кто читал man-page целиком. Это была классическая ошибка дизайна — одна команда с десятком взаимоисключающих режимов. Если ты junior DE и видишь в чужих туториалах `git checkout -- file.py` — это легаси-способ. С 2019 года для этого есть отдельная команда: `git restore`.
+
+В этом уроке разберёмся, как откатывать изменения файлов через `restore`, в каких случаях `git reset` всё-таки нужен (спойлер: для коммитов, не для файлов), и почему этот mental shift важен — особенно когда работаешь с DAG-файлами в Airflow или SQL-моделями в dbt, где случайно сохранённое изменение может уехать в проде.
+
+---
+
+## Зачем разделили команды
+
+Старый `git checkout` мог:
+
+1. Переключить ветку: `git checkout main`.
+2. Откатить файл к версии из HEAD: `git checkout -- file.py`.
+3. Достать файл из любого коммита: `git checkout abc1234 -- file.py`.
+4. Создать ветку: `git checkout -b feature`.
+5. Войти в detached HEAD: `git checkout abc1234`.
+
+Проблема: команда `git checkout file` в репозитории, где есть **ветка с именем file** — двусмысленна. Что делать — переключить ветку или откатить файл? Git выбирал поведение через эвристику, и иногда **молча уничтожал работу** в working tree.
+
+С Git 2.23 команда разделена на две:
+
+- `git switch` — для переключения веток (мы видели в модуле 04).
+- `git restore` — для отката файлов.
+
+Старый `git checkout` всё ещё работает (deprecation не планируется), но в новом коде использовать **только** `restore` и `switch`. Это явно, безопасно, читаемо.
+
+<Callout type="tip">
+Если ты видишь в туториале или Stack Overflow ответе команду `git checkout -- file`, мысленно переводи её в `git restore file`. Семантика та же, но новая форма безопаснее: нет двусмысленности с именем ветки.
+</Callout>
+
+---
+
+## Три области, которые трогает restore
+
+Чтобы понять `git restore`, нужно держать в голове три области (модуль 03 был именно про это):
+
+<DiagramContainer title="Три области и куда смотрит git restore">
+  <FlowRow>
+    <FlowNode tooltip="Файлы на диске, которые ты редактируешь в IDE">working tree</FlowNode>
+    <Arrow direction="right" />
+    <FlowNode tooltip="Snapshot, готовый к коммиту. Туда попадает то, что добавили через git add">index (staging)</FlowNode>
+    <Arrow direction="right" />
+    <FlowNode tooltip="Последний коммит на текущей ветке">HEAD (repository)</FlowNode>
+  </FlowRow>
+</DiagramContainer>
+
+`git restore` отвечает на вопрос: **«откуда взять файл и куда его положить»**. Два флага определяют это:
+
+| Флаг | Источник (откуда) | Назначение (куда) |
+|---|---|---|
+| `--worktree` (default) | по умолчанию index | working tree |
+| `--staged` | по умолчанию HEAD | index |
+| `--worktree --staged` | по умолчанию HEAD | и index, и working tree |
+| `--source=<ref>` | указанный commit/branch | туда же, что в флагах выше |
+
+Это вся ментальная модель. Дальше — конкретные сценарии.
+
+---
+
+## Сценарий 1: откатить изменения в working tree
+
+Самый частый случай. Ты редактировал `dags/etl_users.py`, понял что напортачил, хочешь вернуть как было в последнем коммите:
+
+```bash
+$ git status
+On branch feature/users-pipeline
+Changes not staged for commit:
+  modified:   dags/etl_users.py
+
+$ git restore dags/etl_users.py
+
+$ git status
+On branch feature/users-pipeline
+nothing to commit, working tree clean
+```
+
+Что произошло: Git взял файл `dags/etl_users.py` **из index** (а в index лежит то, что было в последнем `git add`, или, если ничего не добавляли — то что в HEAD) и **перезаписал файл на диске**.
+
+<Callout type="warning">
+`git restore` **необратим**. Изменения в working tree, которые не были закоммичены и не были в index, **уничтожаются навсегда**. Reflog тут не поможет — он отслеживает только commit-ы, не working tree. Прежде чем делать `git restore` на критичных изменениях, либо `git stash`, либо `git add` (чтобы попало в index — оттуда восстановить можно).
+</Callout>
+
+### Откатить все файлы сразу
+
+```bash
+$ git restore .
+```
+
+Точка — текущая директория рекурсивно. Удобно, когда экспериментировал в нескольких файлах и хочешь начать с чистого листа. Опасно — снова, **уничтожает все uncommitted изменения**.
+
+---
+
+## Сценарий 2: unstage — убрать файл из index
+
+Ты сделал `git add` слишком жадно — добавил `.env` с боевыми паролями вместе с легитимными изменениями. Закоммитить нельзя, надо убрать из index, но **не** трогать сам файл:
+
+```bash
+$ git add .
+$ git status
+Changes to be committed:
+  modified:   dags/etl_users.py
+  new file:   .env
+
+$ git restore --staged .env
+
+$ git status
+Changes to be committed:
+  modified:   dags/etl_users.py
+Untracked files:
+  .env
+```
+
+`--staged` сказал: «возьми версию из HEAD (которой для `.env` нет — это новый файл) и положи в index». Результат: `.env` пропал из index, остался на диске как untracked. Сам файл и его содержимое не трогали.
+
+Это **раньше делалось** через `git reset HEAD .env` или `git reset .env`. Новая форма читаемее: «restore the staged version».
+
+<DiagramContainer title="restore --staged vs restore (без флага)">
+  <FlowRow>
+    <FlowColumn>
+      <DataBox tooltip="git restore --staged file: HEAD -> index. Файл на диске не трогаем">restore --staged</DataBox>
+      <FlowNode tooltip="Версия из HEAD">HEAD</FlowNode>
+      <Arrow direction="down" />
+      <FlowNode tooltip="Перезаписали index">index</FlowNode>
+      <FlowNode tooltip="working tree не трогали">working tree (не трогаем)</FlowNode>
+    </FlowColumn>
+    <FlowColumn>
+      <DataBox tooltip="git restore file: index -> working tree. Index не трогаем">restore (default)</DataBox>
+      <FlowNode tooltip="Версия из index">index</FlowNode>
+      <Arrow direction="down" />
+      <FlowNode tooltip="Перезаписали файл на диске">working tree</FlowNode>
+      <FlowNode tooltip="index не трогали">index (не трогаем)</FlowNode>
+    </FlowColumn>
+  </FlowRow>
+</DiagramContainer>
+
+---
+
+## Сценарий 3: оба сразу — откатить и index, и working tree
+
+Хочешь чтобы файл вернулся точно как в HEAD — и в index пусто, и на диске старая версия:
+
+```bash
+$ git restore --staged --worktree dags/etl_users.py
+```
+
+Это полный rollback файла к HEAD состоянию. Эквивалент «как будто я этот файл не трогал с момента последнего коммита».
+
+---
+
+## Сценарий 4: достать файл из другого коммита
+
+Самая мощная фича `restore` — `--source`. Это «верни мне версию файла из коммита X». Например, ты случайно удалил `dags/etl_orders.py` три коммита назад и закоммитил без него:
+
+```bash
+$ git log --oneline
+abc1234 (HEAD -> main) Refactor users pipeline
+def5678 Add validation
+ghi9012 Remove orders pipeline    # вот тут удалили
+jkl3456 Initial pipelines
+
+# Достанем версию из коммита перед удалением
+$ git restore --source=jkl3456 dags/etl_orders.py
+
+$ git status
+Untracked files:
+  dags/etl_orders.py
+```
+
+`--source=jkl3456` сказал: возьми файл из этого коммита (или ветки, или тега) и положи в working tree. По умолчанию — в working tree, не в index. То есть файл появится на диске как untracked — дальше `git add && git commit`.
+
+Можно указать `--source=HEAD~3` (три коммита назад от HEAD), `--source=main` (из другой ветки), `--source=v1.0.0` (из тега).
+
+<Callout type="note">
+`--source` не делает merge. Это hard copy конкретной версии файла поверх текущей. Если файл сейчас в working tree модифицирован, изменения **затрутся**. Хочешь сохранить — `git stash` сначала.
+</Callout>
+
+---
+
+## А когда же тогда git reset для файлов?
+
+**Никогда** в новом коде. `git reset <file>` всё ещё работает (это alias для `git restore --staged <file>`), но это деприкейтнутый паттерн. Junior может видеть это в старых туториалах — переводи в голове в `git restore --staged`.
+
+Для **коммитов** `git reset` — основная команда: меняет где находится HEAD, может откатить index и working tree. Подробно — в следующем уроке.
+
+| Что хочу сделать | Команда |
+|---|---|
+| Откатить файл к последнему коммиту | `git restore <file>` |
+| Убрать файл из index (unstage) | `git restore --staged <file>` |
+| Откатить файл к версии из другого коммита | `git restore --source=<ref> <file>` |
+| Откатить HEAD на N коммитов назад | `git reset --soft/--mixed/--hard HEAD~N` |
+| Создать «отменяющий» коммит | `git revert <commit>` |
+
+---
+
+## Попробуй сам
+
+Создадим репо и проиграем все сценарии:
+
+```bash
+$ mkdir restore-demo && cd restore-demo
+$ git init
+$ echo "v1" > model.sql
+$ git add model.sql
+$ git commit -m "Initial model"
+
+# Сценарий 1: откатить working tree
+$ echo "v2 broken" > model.sql
+$ cat model.sql                              # v2 broken
+$ git restore model.sql
+$ cat model.sql                              # v1 (откатили)
+
+# Сценарий 2: unstage
+$ echo "secret_password=hunter2" > .env
+$ git add .env
+$ git status                                 # .env в staged
+$ git restore --staged .env
+$ git status                                 # .env untracked, файл на месте
+
+# Сценарий 4: достать из коммита
+$ echo "v2 good" > model.sql
+$ git commit -am "Update model"
+$ git restore --source=HEAD~1 model.sql
+$ cat model.sql                              # v1 (из предыдущего коммита)
+$ git status                                 # модифицированный файл в working tree
+```
+
+Это даёт мышечную память. Сделай 3-4 раза — и команды станут естественными.
+
+---
+
+## DE-контекст: где это реально пригодится
+
+1. **dbt-репо**: отредактировал `models/marts/customers.sql`, обнаружил что сломал тест. `git restore models/marts/customers.sql` — вернулся к рабочей версии за секунду, без отката всей ветки.
+
+2. **Airflow DAGs**: добавил `from dotenv import load_dotenv` и подставил пароли в код, успел `git add`. `git restore --staged dags/etl_secret.py` — убрал из index, пароли не уедут в коммит.
+
+3. **Конфиги pipeline**: сравниваешь, как был настроен Spark-job неделю назад. `git restore --source=v1.2.0 conf/spark-defaults.conf` — достал старую версию, посмотрел, потом `git checkout HEAD -- conf/spark-defaults.conf` вернул обратно.
+
+4. **Code review**: ревьюер просит откатить часть изменений в `airflow/plugins/custom_operator.py`. `git restore --source=main airflow/plugins/custom_operator.py` — взяли версию из main, потом ручками выбрали что оставить.
+
+---
+
+## Killer takeaway
+
+`git restore` — это однозначная, безопасная команда для отката файлов, появившаяся в 2019 году. Запомни три формы: `restore file` (откат working tree), `restore --staged file` (unstage), `restore --source=<ref> file` (достать из коммита). `git reset` оставь для коммитов. `git checkout -- file` забудь как страшный сон.
+
+<KnowledgeCheck quizSlug="09-undo-reflog/01-restore-vs-reset" />

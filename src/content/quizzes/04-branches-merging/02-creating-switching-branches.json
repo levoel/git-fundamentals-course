@@ -1,0 +1,74 @@
+{
+  "lessonSlug": "04-branches-merging/02-creating-switching-branches",
+  "moduleId": "04-branches-merging",
+  "_meta": {
+    "idPrefix": "git-m04-02",
+    "description": "Quiz for lesson 4.2 — Создание и переключение веток"
+  },
+  "questions": [
+    {
+      "id": "git-m04-02-q1",
+      "type": "multiple-choice",
+      "question": "Какая команда в современном Git создаёт новую ветку и сразу переключается на неё?",
+      "options": [
+        { "id": "a", "text": "git branch new-branch" },
+        { "id": "b", "text": "git switch -c new-branch (или legacy: git checkout -b new-branch)" },
+        { "id": "c", "text": "git new-branch" },
+        { "id": "d", "text": "git create new-branch" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "В современном Git (2.23+, 2019) — `git switch -c new-branch`. Флаг -c (--create) создаёт ветку и переключается. Legacy эквивалент — `git checkout -b new-branch`. Команда `git branch new-branch` создаёт ветку, но не переключается — нужно потом git switch new-branch. В 2026 году switch — рекомендуемая команда, checkout — legacy (но работает).",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m04-02-q2",
+      "type": "multiple-choice",
+      "question": "Почему в Git 2.23 (2019) появились команды git switch и git restore?",
+      "options": [
+        { "id": "a", "text": "Старый git checkout работал медленно" },
+        { "id": "b", "text": "Чтобы разделить перегруженный git checkout: switch — только переключение между ветками, restore — только восстановление файлов. Раньше одна команда checkout делала и то, и другое — что вызывало неоднозначность" },
+        { "id": "c", "text": "Из-за изменения SHA-1 на SHA-256" },
+        { "id": "d", "text": "Для совместимости с Mercurial" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "git checkout исторически делал десять разных вещей: переключение веток, восстановление файлов, detached HEAD, создание веток. Это вызывало путаницу: `git checkout main` могло означать «переключиться на ветку main» или «восстановить файл с именем main», в зависимости от контекста. С Git 2.23 две новые команды: switch (только переключение веток) и restore (только восстановление файлов). Семантика чёткая, неоднозначностей нет.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m04-02-q3",
+      "type": "multiple-choice",
+      "question": "Что делает команда `git switch -`?",
+      "options": [
+        { "id": "a", "text": "Удаляет текущую ветку" },
+        { "id": "b", "text": "Переключается на предыдущую ветку (toggle). Аналог `cd -` в shell. Удобно, когда часто прыгаете между двумя ветками" },
+        { "id": "c", "text": "Создаёт ветку с именем '-'" },
+        { "id": "d", "text": "Откатывается на предыдущий коммит" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "git switch - переключается на предыдущую ветку, ту, на которой вы были до текущей. Удобный shortcut по аналогии с `cd -`. Например: на main, делаете `git switch feature/x`, потом `git switch -` (= вернулись на main), ещё раз `git switch -` (= снова на feature/x). Полезно при работе одновременно над двумя задачами.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m04-02-q4",
+      "type": "multiple-choice",
+      "question": "Junior хочет переключиться на main, но `git switch main` выдаёт «error: Your local changes would be overwritten». Что делать?",
+      "options": [
+        { "id": "a", "text": "Удалить .git/" },
+        { "id": "b", "text": "Закоммитить незакоммиченные изменения (если хотите сохранить) или сделать git stash (отложить временно), или git restore . (отменить, если не нужны)" },
+        { "id": "c", "text": "Всегда использовать --force" },
+        { "id": "d", "text": "Переключиться на main можно только после git push" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Git отказывается переключаться, чтобы не потерять незакоммиченную работу. Варианты: 1) Закоммитить: `git add . && git commit -m 'WIP'`. 2) git stash — отложить временно, после переключения вернуть через `git stash pop`. 3) `git restore .` — отменить изменения (если они не нужны). 4) (опасно!) `git switch --discard-changes main` — переключиться, потеряв изменения. Junior в 95% случаев нужен вариант 2 (stash).",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m04-02-q5",
+      "type": "true-false",
+      "question": "Команда `git checkout` устарела и больше не работает в Git 2.54.",
+      "correctAnswer": false,
+      "explanation": "Это неправда. git checkout — рабочая команда, никуда не делась, продолжает работать в Git 2.54 и будет работать в обозримом будущем. Просто в Git 2.23 (2019) появились более чёткие команды git switch и git restore, которые рекомендуются для новых проектов и code review. checkout сохраняется для обратной совместимости и legacy-кодов. В новых обучающих материалах лучше использовать switch/restore — это «современный путь», но checkout — не deprecated.",
+      "bloomLevel": "conceptual"
+    }
+  ]
+}

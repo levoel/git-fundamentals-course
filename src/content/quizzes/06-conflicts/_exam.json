@@ -1,0 +1,88 @@
+{
+  "lessonSlug": "06-conflicts/_exam",
+  "moduleId": "06-conflicts",
+  "_meta": {
+    "idPrefix": "git-exam-m06",
+    "description": "Module 06 exam: 6 questions covering conflicts, markers, resolution, mergetools"
+  },
+  "questions": [
+    {
+      "id": "git-exam-m06-q1",
+      "type": "multiple-choice",
+      "question": "Three-way merge не может автоматически решить конфликт в каком случае?",
+      "options": [
+        { "id": "a", "text": "Когда одна сторона изменила файл, а другая — нет (Git берёт изменённую)" },
+        { "id": "b", "text": "Когда обе стороны изменили один и тот же файл, но в разных местах с достаточным контекстом" },
+        { "id": "c", "text": "Когда обе стороны изменили одни и те же строки относительно общего предка по-разному" },
+        { "id": "d", "text": "Когда добавлены файлы с разными именами" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "Three-way merge сравнивает BASE, OURS, THEIRS для каждой строки. Если строка в BASE и OURS одинакова, но изменена в THEIRS — берётся THEIRS. И наоборот. Если строка одинаково изменена с обеих сторон (convergent change) — берётся это значение. **Конфликт** случается только когда обе стороны изменили одни и те же строки по-разному относительно BASE — Git не может решить, какую версию оставить, и просит человека.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-exam-m06-q2",
+      "type": "multiple-choice",
+      "question": "Включение `merge.conflictStyle = zdiff3` даёт какое преимущество?",
+      "options": [
+        { "id": "a", "text": "Автоматически разрешает конфликты" },
+        { "id": "b", "text": "Показывает дополнительный блок BASE (общий предок) между OURS и THEIRS — видно, что было до изменений" },
+        { "id": "c", "text": "Создаёт backup файлы" },
+        { "id": "d", "text": "Ускоряет merge" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`zdiff3` (Git 2.35+) добавляет к стандартным маркерам OURS/THEIRS третий блок `||||||| merged common ancestors` с BASE — что было ДО того, как обе ветки разошлись. Видеть BASE радикально упрощает понимание конфликта: 'было X, мы поменяли на Y, они на Z, теперь решаю что делать'. Включи `git config --global merge.conflictStyle zdiff3` — без минусов, только плюсы.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-exam-m06-q3",
+      "type": "true-false",
+      "question": "При rebase OURS и THEIRS меняются местами относительно интуиции при merge: OURS = новая база, THEIRS = твой коммит из перебазируемой ветки.",
+      "correctAnswer": "true",
+      "explanation": "При rebase Git проигрывает коммиты твоей ветки по одному поверх новой базы. На каждой итерации HEAD временно установлен на новую базу (например, main), и твой коммит из feature накладывается как 'патч сверху'. Поэтому OURS (HEAD) = main, THEIRS = твой коммит. Это **наоборот** относительно merge, где HEAD — твоя ветка. Поэтому при rebase 'оставить свою версию' = `--theirs`, не `--ours`. Подсказка для ориентации: смотри на маркер `>>>>>>> abc1234 (commit msg)` — там видно, чей коммит в THEIRS.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-exam-m06-q4",
+      "type": "multiple-choice",
+      "question": "После merge с конфликтом ты разрешил все маркеры, готов коммитить. Какой best practice проверки ПЕРЕД `git commit`?",
+      "options": [
+        { "id": "a", "text": "Сразу делать git commit -m 'merge'" },
+        { "id": "b", "text": "git status (должно быть 'All conflicts fixed'), grep '<<<<<<<' . (не осталось маркеров), запустить тесты локально" },
+        { "id": "c", "text": "Перезапустить компьютер" },
+        { "id": "d", "text": "git push --force" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Чек-лист перед `git commit` после конфликта: (1) `git status` показывает 'All conflicts fixed but you are still merging' — значит все файлы в stage 0. (2) `grep -rn '<<<<<<<' .` (и `=======`, `>>>>>>>`, `|||||||`) — никаких остатков маркеров. (3) `git diff --staged` — визуальная проверка финального результата. (4) Запустить тесты или хотя бы линтер — поймать логические ошибки merge (например, ты случайно выбрал OURS, хотя нужна была комбинация). Если что-то не так — лучше `git merge --abort` и переделать, чем коммитить сломанное.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-exam-m06-q5",
+      "type": "multiple-choice",
+      "question": "У тебя на feature ветке конфликт в `requirements.txt` (текстовый, читаемый) и `poetry.lock` (огромный сгенерированный файл с хешами). Стратегии для каждого?",
+      "options": [
+        { "id": "a", "text": "Оба руками в редакторе" },
+        { "id": "b", "text": "requirements.txt — руками (видно версии пакетов, можно решить умом); poetry.lock — git checkout --theirs poetry.lock + poetry lock --no-update + git add (регенерация)" },
+        { "id": "c", "text": "Оба через git checkout --ours" },
+        { "id": "d", "text": "Удалить оба файла" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Разные файлы — разные стратегии: (1) **requirements.txt** — простой текст со списком пакетов и версий. Открой, объедини список руками. Если пакет в обеих ветках с разными версиями — решение по changelog (обычно более новая). (2) **poetry.lock** — автогенерируемый с криптохешами. Ручной merge практически невозможен правильно. Решение: взять одну из версий через `--theirs` (или `--ours`) как стартовую точку, потом запустить `poetry lock --no-update` для регенерации с актуальным manifest (`pyproject.toml`), потом `git add poetry.lock`. То же для package-lock.json (`npm install`), uv.lock (`uv lock`), Pipfile.lock.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-exam-m06-q6",
+      "type": "multiple-choice",
+      "question": "Команда в репо постоянно сталкивается с конфликтами на одном файле `src/config/settings.py`. Какое структурное решение лучшее в долгосрочной перспективе?",
+      "options": [
+        { "id": "a", "text": "Каждый разработчик копирует файл локально" },
+        { "id": "b", "text": "Разделить settings.py на доменные модули (db_settings.py, kafka_settings.py, airflow_settings.py) — конфликты резко падают, каждая команда правит свой файл" },
+        { "id": "c", "text": "Запретить менять settings.py" },
+        { "id": "d", "text": "Делать force-push в settings.py каждый день" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Конфликты на одном файле — обычно признак того, что файл слишком большой / multi-responsibility. Лучшее структурное решение: **декомпозиция по domain boundaries**. Если settings.py содержит DB, Kafka, Airflow, monitoring, auth — это violation of single responsibility. Разбить на отдельные модули -> каждая команда правит свой -> конфликты резко падают. Плюс: легче review (PR трогает только db_settings.py, не весь settings.py), легче тестировать (mock conкретного модуля). Дополнительно работают тактики: short cycle (PR < 1 day), ownership (один человек/команда — owner модуля), и `merge.conflictStyle = zdiff3` для быстрого resolve когда конфликт всё же случается.",
+      "bloomLevel": "analytical"
+    }
+  ]
+}

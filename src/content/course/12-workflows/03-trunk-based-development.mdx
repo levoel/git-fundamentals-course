@@ -1,0 +1,268 @@
+---
+title: "Trunk-Based Development — современный workflow с feature flags"
+description: "Все коммитят в main с feature flags. Short-lived branches (часы, не дни). Continuous integration, < 1 day cycles. Высокая зрелость, требует feature flag infra. Современный подход high-velocity team."
+order: 3
+difficulty: "advanced"
+estimatedTime: 25
+topics: ["trunk-based", "feature-flags", "continuous-integration", "high-velocity", "modern"]
+---
+
+# Trunk-Based Development — продвинутый workflow
+
+Если GitHub Flow — это «main всегда готов к деплою», то Trunk-Based Development (TBD) — это **«коммитим прямо в main, контролируем фичи через feature flags»**. Это **самый современный** workflow, используемый Google, Facebook, Amazon, Netflix.
+
+TBD требует **высокую зрелость**: feature flag infrastructure, comprehensive test coverage, монокультура CI/CD. Junior DE редко начинает в TBD-команде — но знать концепцию важно: тренд индустрии идёт сюда, и через 2-3 года multiple DE-команды могут перейти.
+
+В этом уроке: что такое TBD, зачем feature flags, как deal с unfinished code в main, и в каких командах TBD работает.
+
+---
+
+## Базовая модель TBD
+
+### Правило 1: все коммитят в main (trunk)
+
+Никаких длинных feature branches. Daily commits идут в main (или короткие feature branches длиной **часы**, max 1 day, merge в main same day).
+
+### Правило 2: main всегда деплоится
+
+Не «зелёный CI» (как в GitHub Flow), а **в любую секунду можно catнуть на прод и быть уверенным что не сломает**. Это требует:
+
+- Все тесты на каждый commit (CI на main).
+- Feature flags для незавершённой работы.
+- Automated rollback если deploy сломал что-то.
+
+### Правило 3: незавершённая работа — за feature flags
+
+Новая фича не готова, но код уже в main -> flag OFF в production:
+
+```python
+# config.py
+ENABLE_NEW_PIPELINE = os.getenv("ENABLE_NEW_PIPELINE", "false") == "true"
+
+# main.py
+if ENABLE_NEW_PIPELINE:
+    run_new_pipeline()
+else:
+    run_old_pipeline()
+```
+
+`ENABLE_NEW_PIPELINE` в production environment — false. Код в main, не активен. Когда готов — flag -> true в config server (без редеплоя!).
+
+### Правило 4: маленькие коммиты часто
+
+Не «PR на 1500 LOC раз в неделю». A «3 PR по 100 LOC в день». Continuous integration в полном смысле: main принимает изменения каждые несколько часов.
+
+---
+
+## Зачем это нужно
+
+### 1. Скорость
+
+Long-lived feature branches -> merge conflicts -> wasted time. TBD eliminates branches -> no conflicts -> faster.
+
+### 2. Smaller blast radius
+
+Каждый commit маленький -> если что-то сломалось, легко revert один commit. PR на 1500 LOC замержен -> если сломал прод, надо revert всё, может ломать другие фичи.
+
+### 3. Continuous integration в реальном смысле
+
+`continuous integration` буквально: каждый дев интегрирует свой код в main несколько раз в день. Это **не** «CI run-ит тесты на PR». TBD = тесты непрерывно гоняются на полностью integrated code.
+
+### 4. Поощряет качество
+
+Если каждый commit идёт сразу в main, дева сильно мотивирует писать тесты, проверять locally, не push мусор. Дисциплина по-умолчанию.
+
+---
+
+## Feature flags — критическая инфраструктура
+
+Без feature flags TBD не работает. Невозможно «закоммитить в main» новую фичу, которая может сломать прод. Flags решают: код в main, behavior в production controllable.
+
+### Простые toggle flags
+
+```python
+ENABLE_NEW_FEATURE = config.get("enable_new_feature", default=False)
+
+if ENABLE_NEW_FEATURE:
+    new_implementation()
+else:
+    legacy_implementation()
+```
+
+ON/OFF переключатель. Дёшево, ограниченные сценарии.
+
+### Targeting / percentage rollout
+
+```python
+flags = LaunchDarkly.client()
+
+if flags.variation("new-revenue-dag", user, default=False):
+    run_new_dag()
+```
+
+LaunchDarkly / Flagsmith / Statsig — flag-as-a-service. Можно:
+- Включить для конкретных users.
+- Включить на 5% трафика (canary).
+- A/B тесты — 50/50 split с metrics.
+- Включить только в dev environment.
+
+### Permanent flags (config switches)
+
+Не для new feature rollout, а для permanent config:
+
+```python
+USE_BIGQUERY_PROD = os.getenv("ENV") == "prod"
+```
+
+Это просто environment-based config, не «feature flag» в TBD-смысле. Но часто хранится в той же системе.
+
+### Тех долг flags
+
+Flag живёт ровно до полного rollout. После 100% trafic на новую фичу — **удалить flag** и old код. Иначе кодбаз превращается в lasagna of dead flag branches.
+
+<Callout type="warning">
+Самая частая ошибка в TBD команд — забывать удалять flags после rollout. Через год в кодбазе сотни флагов, никто не помнит зачем какой нужен, dead code накапливается. **Flag должен иметь expiry date** — после 100% rollout убрать его в течение недель.
+</Callout>
+
+---
+
+## Жизненный цикл feature в TBD
+
+Сценарий: добавить новый dbt модель `customer_ltv`.
+
+```bash
+# Day 1, 10:00
+$ git switch main && git pull
+$ git switch -c feat/customer-ltv-scaffold
+$ vim models/marts/customer_ltv.sql      # пустая модель: SELECT 1 AS placeholder
+$ vim config/feature_flags.py             # add ENABLE_CUSTOMER_LTV = False
+$ git commit -am "feat(marts): scaffold customer_ltv (flag OFF)"
+$ git push -u origin feat/customer-ltv-scaffold
+$ gh pr create --fill
+# CI: passes (placeholder code, не работает но не ломает)
+# Review: tech lead approves quickly
+$ gh pr merge --squash
+# 11:00 — main updated, prod не affected (flag OFF)
+
+# Day 1, 14:00
+$ git switch -c feat/customer-ltv-logic
+$ vim models/marts/customer_ltv.sql      # add real logic
+$ git commit -am "feat(marts): add LTV calculation logic"
+$ git push && gh pr create --fill
+# CI: passes
+# Review: approved
+$ gh pr merge --squash
+# 15:00 — code в main, flag всё ещё OFF в prod
+
+# Day 2, 10:00
+$ git switch -c feat/customer-ltv-tests
+$ vim tests/test_customer_ltv.yml
+$ git commit -am "test(marts): add LTV tests"
+$ gh pr create --fill
+$ gh pr merge --squash
+
+# Day 2, 14:00 — Включаем для 5% canary
+# Не через PR, через LaunchDarkly UI: customer_ltv -> 5% targeting
+
+# Day 3 — мониторинг metrics, всё OK
+# 100% rollout
+
+# Day 4 — PR на удаление flag
+$ git switch -c chore/remove-ltv-flag
+$ # удалить flag из config, удалить if checks из кода
+$ gh pr create --fill
+$ gh pr merge
+```
+
+4 дня, 5 PR, каждый маленький. Производство в каждом коммите stable. Feature постепенно rolled out с metrics-based decision.
+
+Сравни с GitHub Flow подходом: один PR на 500 LOC, висит 2 дня в review, merge -> instant 100% production. TBD безопаснее и granular.
+
+---
+
+## Что нужно для TBD
+
+### 1. Comprehensive test suite
+
+Если CI не находит баги — main быстро ломается. Каждый PR должен:
+- Unit tests.
+- Integration tests.
+- E2E tests (для critical paths).
+- Линтер, type-checker.
+- Время run < 10 минут (иначе циклы замедляются).
+
+### 2. Feature flag infrastructure
+
+Self-hosted (статичный config файл, env vars) или managed (LaunchDarkly, Statsig). Выбор зависит от sophistication.
+
+### 3. CI/CD pipeline зрелый
+
+Auto-deploy on merge to main. Auto-rollback на errors. Monitoring metrics.
+
+### 4. Команда дисциплинированная
+
+Все понимают «не сваливать большой PR», «использовать flags», «удалять flags после rollout». Это **культура**, не tooling.
+
+### 5. Test/staging environment
+
+Перед prod — staging с full data. Auto-deploy on main -> staging -> run smoke tests -> if pass -> prod.
+
+---
+
+## TBD в DE контексте
+
+### Подходит для
+
+- **Большие data platforms** с массой DE (Google internal, Netflix data team).
+- **High-velocity SaaS** с continuous deployment dbt / Airflow.
+- **Mature teams** с feature flag infra и monitoring.
+
+### НЕ подходит для
+
+- **Junior-heavy teams** без culture дисциплины — main быстро ломается.
+- **Маленькие команды** без CI investment — overhead не оправдан.
+- **Версионные products** (mobile apps, libraries) — GitFlow или hybrid.
+- **Регулируемые отрасли** где «когда что вошло в release» должно быть очевидно — лучше GitHub Flow с tagged releases.
+
+---
+
+## TBD vs GitHub Flow — ключевые различия
+
+| | GitHub Flow | Trunk-Based |
+|---|---|---|
+| Feature branch length | 1-3 дня | часы (max 1 день) |
+| PR size | 200-400 LOC | 50-200 LOC |
+| Branches concept | feature/X для review | минимум, часто direct commit |
+| Feature flags | optional (для больших) | **mandatory** |
+| Production safety | CI passes = OK | Flag OFF = OK |
+| Cycle time | hours-days | hours |
+| Maturity needed | medium | high |
+| Test coverage | good | excellent |
+| Team discipline | normal | high |
+
+TBD — это **evolution** GitHub Flow для very high velocity teams. Концептуально те же principles (continuous integration, fast deployment), но cranked up.
+
+---
+
+## DE-сценарий: Netflix data platform
+
+Netflix data team — известный TBD-евангелист. Тысячи DE коммитят ежедневно в монорепо. Каждый change через короткую (часы) ветку, PR, merge, deploy. Без feature flags невозможно — никто не контролирует «когда что у customers».
+
+Их workflow:
+
+1. DE начинает работу в 9:00, ветка `de-ivanov/exp-revenue-mart`.
+2. К обеду — PR, 2 reviewer-а, CI ~5 min.
+3. После lunch — merge to main, auto-deploy on staging.
+4. Smoke tests prod data.
+5. Vague flag rollout: 1% -> 10% -> 50% -> 100% через 48 часов с metrics monitoring.
+6. Через неделю — PR на удаление flag.
+
+3-4 PR в день per dev. Это **culturally driven**, не tooling.
+
+---
+
+## Killer takeaway
+
+Trunk-Based Development = direct commits в main + feature flags для незавершённого. Short-lived branches (часы), continuous integration в полном смысле. Требует mature infrastructure: comprehensive tests, feature flag service, CI/CD, monitoring. Самый современный workflow, используется Google/Netflix/Facebook. В DE — встречается в больших platform teams, mature SaaS. Junior обычно начинает с GitHub Flow; TBD — после года-двух опыта.
+
+<KnowledgeCheck quizSlug="12-workflows/03-trunk-based-development" />

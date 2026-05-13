@@ -1,0 +1,413 @@
+---
+title: "git init и устройство .git/"
+description: "Что появилось в .git/ после git init: HEAD, config, objects/, refs/heads/, hooks/. Walk-through без глубокого pack format"
+order: 2
+difficulty: "beginner"
+estimatedTime: 16
+topics: ["Git", ".git directory", "git init", "objects", "refs"]
+---
+
+# git init и устройство .git/
+
+`git init` — это команда, с которой начинается любой репозиторий. На первый взгляд она тривиальна: вы запустили её, и Git считает, что директория теперь под версионным контролем. На самом деле в этот момент происходит важное: Git создаёт **скрытую директорию `.git/`** со всей служебной инфраструктурой.
+
+В этом уроке откроем `.git/` и разберём, что там есть. Это даст вам интуицию: «вот эта команда меняет вот этот файл», и Git перестанет казаться магией. Не будем глубоко в pack format — это для продвинутых. Цель урока — увидеть структуру и понять, какой кусочек за что отвечает.
+
+---
+
+## git init: пять секунд драмы
+
+Создадим репозиторий:
+
+```bash
+mkdir -p ~/git-sandbox/lesson-03-init
+cd ~/git-sandbox/lesson-03-init
+
+git init
+# Initialized empty Git repository in /Users/.../lesson-03-init/.git/
+```
+
+После этого:
+
+```bash
+ls -la
+# .   ..   .git/
+```
+
+Появилась одна директория — `.git/`. Это **весь репозиторий**. Удалите `.git/` — и эта директория снова перестанет быть Git-репо. Скопируйте `.git/` в другое место — и там тоже будет репозиторий.
+
+<Callout type="warning">
+`.git/` — это весь репозиторий, включая ВСЮ историю. Никогда не удаляйте её случайно. Никогда не правьте файлы в ней руками, кроме конфига (мы делали это в уроке 02). Любая порча в objects/ может необратимо повредить репозиторий.
+</Callout>
+
+---
+
+## Что внутри .git/
+
+Посмотрим содержимое:
+
+```bash
+ls -la .git/
+```
+
+Вывод (на чистом репо после git init):
+
+```text
+HEAD
+config
+description
+hooks/
+info/
+objects/
+refs/
+```
+
+Разберём каждый.
+
+<DiagramContainer title="Структура .git/" color="indigo">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="HEAD" tooltip="Файл, указывающий на текущую ветку. После init: 'ref: refs/heads/main' (если default branch = main)">HEAD</DataBox>
+      <DataBox label="config" tooltip="Local-конфиг этого репозитория. INI-формат, как ~/.gitconfig. Перебивает global">config</DataBox>
+      <DataBox label="description" tooltip="Используется только GitWeb. Можно игнорировать, обычно неважно">description</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="hooks/" tooltip="Скрипты, которые Git вызывает при определённых событиях (pre-commit, post-commit, pre-push). После init — только примеры (*.sample), не активны. Подробно в модуле 15">hooks/</DataBox>
+      <DataBox label="info/" tooltip="info/exclude — локальный .gitignore только для этого репо (не коммитится, в отличие от .gitignore). Подробно в модуле 13">info/</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="objects/" variant="highlight" tooltip="Главная директория! Здесь хранятся ВСЕ объекты репозитория: blob, tree, commit, tag. После init — пустая (нет объектов)">objects/</DataBox>
+      <DataBox label="refs/" variant="highlight" tooltip="Указатели: refs/heads/ — ветки, refs/tags/ — теги, refs/remotes/ — отслеживающие ветки. После init — refs/heads/ пустая, потому что нет коммитов">refs/</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+### HEAD: что я сейчас редактирую
+
+```bash
+cat .git/HEAD
+# ref: refs/heads/main
+```
+
+HEAD — это **указатель на текущую ветку**. Только что после `git init` ветка ещё не создана (нет коммитов), но HEAD уже «целится» в неё. Когда мы сделаем первый коммит, файл `.git/refs/heads/main` будет создан, и HEAD будет на него ссылаться.
+
+<Callout type="note">
+HEAD — это «вы здесь» в карте репозитория. Когда вы на ветке main, HEAD говорит «main». Когда переключились на feature/x, HEAD говорит «feature/x». Когда сделали `git checkout <SHA>` напрямую — HEAD говорит сам SHA (это и есть «detached HEAD», урок 5).
+</Callout>
+
+### config: настройки этого репо
+
+```bash
+cat .git/config
+# [core]
+#     repositoryformatversion = 0
+#     filemode = true
+#     bare = false
+#     logallrefupdates = true
+#     ignorecase = true
+#     precomposeunicode = true
+```
+
+Это **local config**, перебивающий global. Когда мы делаем `git config --local user.email "...", запись добавится сюда. Опции (на пустом repo):
+
+- `repositoryformatversion = 0` — формат репозитория (для совместимости). 0 — classic, 1 — расширения (SHA-256, partial clones)
+- `filemode = true` — отслеживать ли права файлов. На macOS/Linux — true. На Windows — false (Windows-файловая система не имеет полного набора Unix-прав)
+- `bare = false` — это не bare-репозиторий (про bare — урок про remotes)
+- `logallrefupdates = true` — вести reflog (журнал изменений HEAD). Критично для восстановления — модуль 09
+- `ignorecase = true` — case-insensitive файловая система (типично для macOS HFS+/APFS)
+- `precomposeunicode = true` — на macOS обрабатывает Unicode нормализацию (для имён файлов с диакритикой)
+
+### hooks/: скрипты на события
+
+```bash
+ls .git/hooks/
+# applypatch-msg.sample
+# commit-msg.sample
+# fsmonitor-watchman.sample
+# post-update.sample
+# pre-applypatch.sample
+# pre-commit.sample
+# pre-merge-commit.sample
+# pre-push.sample
+# pre-rebase.sample
+# pre-receive.sample
+# prepare-commit-msg.sample
+# push-to-checkout.sample
+# update.sample
+```
+
+Это **примеры hook-скриптов**. Все они с расширением `.sample` — поэтому НЕ активны (Git ищет файлы без `.sample`). Если хотите активировать, например, pre-commit:
+
+```bash
+mv .git/hooks/pre-commit.sample .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+```
+
+После этого скрипт будет запускаться перед каждым коммитом. Подробно — модуль 15.
+
+### info/: локальные исключения
+
+```bash
+ls .git/info/
+# exclude
+cat .git/info/exclude
+# git ls-files --others --exclude-from=.git/info/exclude
+# Lines that start with '#' are comments.
+# For a project mostly in C, the following would be a good set of
+# exclusions (uncomment them if you want to use them):
+# *.[oa]
+# *.lib
+```
+
+Файл `exclude` — это **локальный .gitignore**, который НЕ коммитится. Удобно, когда вы хотите игнорировать что-то только у себя (например, IDE-файлы конкретно вашей машины), не засоряя `.gitignore` всего проекта. Подробно — модуль 13.
+
+### objects/: главное хранилище
+
+```bash
+ls .git/objects/
+# info/
+# pack/
+```
+
+На пустом репо objects/ почти пуста: только `info/` (метаданные) и `pack/` (для packfiles, оптимизированного хранения). Когда мы создадим первый коммит, тут появятся **директории с SHA-1 хешами** в качестве имён.
+
+Структура: для blob с SHA-1 `3b18e512dba79e4c8300dd08aeb37f8e728b8dad` путь будет:
+
+```text
+.git/objects/3b/18e512dba79e4c8300dd08aeb37f8e728b8dad
+```
+
+Первые 2 hex-символа — поддиректория, остальные 38 — имя файла. Это сделано для производительности файловой системы: если хешировать в одну директорию, при тысячах файлов будет медленно. Разбивка по первым 2 hex-символам даёт 256 поддиректорий — равномерное распределение.
+
+Содержимое файла — **сжатое gzip** содержимое объекта (blob, tree, commit или tag). Не читается напрямую. Чтобы посмотреть содержимое:
+
+```bash
+git cat-file -p <SHA>
+```
+
+Подробно про объекты — урок 5 этого модуля. Сейчас просто запомните: `objects/` — это сердце хранилища.
+
+### refs/: указатели
+
+```bash
+ls .git/refs/
+# heads/
+# tags/
+```
+
+Структура:
+
+- `refs/heads/` — локальные ветки
+- `refs/tags/` — теги
+- `refs/remotes/` — отслеживающие ветки удалённых репозиториев (появляется после `git fetch`)
+
+После `git init` refs/heads/ пуста. Когда мы создадим первый коммит на ветке main, появится файл `refs/heads/main` с одним SHA.
+
+<DiagramContainer title="refs/ — это указатели на коммиты" color="emerald">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="refs/heads/main" tooltip="Локальная ветка main. Содержит один SHA коммита: a1b2c3...\n. 41 байт.">main -> a1b2c3...</DataBox>
+      <DataBox label="refs/heads/feature/x" tooltip="Локальная ветка feature/x. Содержит один SHA. Файл по пути refs/heads/feature/x">feature/x -> e5f6g7...</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="refs/tags/v1.0" tooltip="Тег v1.0. Может содержать SHA коммита (lightweight tag) или SHA tag-объекта (annotated tag)">v1.0 -> t1u2v3...</DataBox>
+      <DataBox label="refs/remotes/origin/main" tooltip="Кеш состояния ветки origin/main после последнего fetch">origin/main -> a1b2c3...</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+---
+
+## Что появляется после первого коммита
+
+Сделаем первый коммит и посмотрим, что изменилось:
+
+```bash
+echo "hello" > hello.txt
+git add hello.txt
+git commit -m "First commit"
+# [main (root-commit) a1b2c3d] First commit
+#  1 file changed, 1 insertion(+)
+#  create mode 100644 hello.txt
+```
+
+Теперь посмотрите `.git/`:
+
+```bash
+find .git -type f | head -30
+```
+
+Появилось много нового:
+
+```text
+.git/HEAD
+.git/config
+.git/COMMIT_EDITMSG          ← последнее сообщение коммита
+.git/ORIG_HEAD               ← (может появиться после некоторых операций)
+.git/index                   ← бинарный файл индекса
+.git/logs/HEAD               ← reflog HEAD
+.git/logs/refs/heads/main    ← reflog ветки main
+.git/objects/2e/65efe2a145dda7ee51d1741299f848e5bf752e   ← blob "hello\n"
+.git/objects/3a/79be...                                  ← tree-объект
+.git/objects/a1/b2c3d...                                 ← commit-объект
+.git/refs/heads/main         ← указатель ветки main на commit
+```
+
+Разберём по порядку.
+
+### objects/: появились 3 файла
+
+```bash
+ls .git/objects/
+# 2e/  3a/  a1/  info/  pack/
+```
+
+Три новых директории с двумя hex-символами. Внутри каждой — один файл. Каждый файл — один объект.
+
+```bash
+# Blob (содержимое hello.txt)
+git cat-file -p 2e65efe2a145dda7ee51d1741299f848e5bf752e
+# hello
+
+git cat-file -t 2e65efe2a145dda7ee51d1741299f848e5bf752e
+# blob
+
+# Tree (snapshot директории, в которой только hello.txt)
+git cat-file -p 3a79be...
+# 100644 blob 2e65efe2...    hello.txt
+
+# Commit (метаданные + ссылка на tree)
+git cat-file -p a1b2c3d...
+# tree 3a79be...
+# author Ivan Petrov <ivan@example.com> 1715600000 +0300
+# committer Ivan Petrov <ivan@example.com> 1715600000 +0300
+#
+# First commit
+```
+
+Видите цепочку: commit -> tree -> blob. Об этом подробно — урок 5.
+
+### refs/heads/main: появился
+
+```bash
+cat .git/refs/heads/main
+# a1b2c3d4e5f6...
+```
+
+Один SHA — это коммит, на который теперь указывает main. HEAD по-прежнему `ref: refs/heads/main`, теперь эта ссылка не пустая.
+
+### index: бинарный файл
+
+```bash
+file .git/index
+# .git/index: Git index, version 2, 1 entries
+```
+
+Бинарный файл с записями о файлах в index. Можно посмотреть через `git ls-files --stage`:
+
+```bash
+git ls-files --stage
+# 100644 2e65efe2a145dda7ee51d1741299f848e5bf752e 0	hello.txt
+```
+
+Формат: `<mode> <blob SHA> <stage> <path>`. После коммита index == HEAD (синхронизированы).
+
+### logs/: reflog появился
+
+```bash
+cat .git/logs/HEAD
+# 0000000000000000000000000000000000000000 a1b2c3d4e5f6... Ivan Petrov <ivan@example.com> 1715600000 +0300	commit (initial): First commit
+```
+
+**Reflog** — журнал всех изменений HEAD. Очень важный для восстановления удалённых коммитов. Подробно — модуль 09.
+
+---
+
+## Что НЕ появляется без необходимости
+
+Некоторые директории создаются только когда есть нужда:
+
+- `refs/remotes/origin/` — после `git remote add origin ...` и `git fetch`
+- `refs/tags/` — после `git tag`
+- `objects/pack/` — после `git gc` (gargabe collection) или `git push`
+- `MERGE_HEAD`, `MERGE_MSG` — во время merge с конфликтом
+- `REBASE_HEAD`, `rebase-merge/`, `rebase-apply/` — во время rebase
+
+Все они появляются и исчезают по мере необходимости. Не пугайтесь, если в `.git/` вдруг появилась новая директория — это нормально.
+
+---
+
+## Bare vs не-bare репозиторий
+
+Маленькая, но важная деталь: репозиторий, который вы создали через `git init` в обычной директории, — **не bare**. У него есть **working tree**. Файлы лежат рядом с `.git/`.
+
+**Bare-репозиторий** — это репозиторий без working tree. Только `.git/` структура, причём расположенная не в директории `.git`, а прямо в корне. Используется на серверах (например, GitHub под капотом — bare-репо).
+
+Создаётся через:
+
+```bash
+git init --bare repo.git
+ls repo.git
+# HEAD  config  description  hooks/  info/  objects/  refs/
+# (нет .git/ — это сам .git/, развернутый в корне)
+```
+
+В bare-репо вы НЕ можете редактировать файлы. Они существуют только в виде commit/tree/blob объектов. Bare-репо нужны для:
+
+- Удалённых репозиториев (origin на сервере)
+- Git-серверов (GitLab self-hosted, Gitea, Forgejo)
+
+Junior работает с bare-репо опосредованно — через `git push` к ним. Подробно — модуль 05.
+
+---
+
+## Попробуй сам
+
+1. Создайте пустой репозиторий и посмотрите, что появилось:
+
+```bash
+mkdir -p ~/git-sandbox/lesson-03-init
+cd ~/git-sandbox/lesson-03-init
+git init
+find .git -maxdepth 1
+```
+
+2. Сделайте первый коммит и посмотрите изменения:
+
+```bash
+echo "test" > a.txt
+git add a.txt
+git commit -m "test"
+
+find .git -type f
+```
+
+3. Посмотрите содержимое HEAD, refs/heads/main и логов:
+
+```bash
+cat .git/HEAD
+cat .git/refs/heads/main
+cat .git/logs/HEAD
+```
+
+4. Найдите blob, tree, commit-объекты в objects/:
+
+```bash
+find .git/objects -type f
+```
+
+5. Для каждого — посмотрите тип и содержимое:
+
+```bash
+git cat-file -t <SHA>
+git cat-file -p <SHA>
+```
+
+Это упражнение даст вам пожизненную интуицию: «вот команда меняет вот этот файл». Дальше Git не сможет вас удивить.
+
+---
+
+<KnowledgeCheck
+  question="Если вы сделаете `cp -r .git/ ../my-backup-repo`, у вас получится полноценный репозиторий или только частичная копия?"
+  answer="Получится полноценный рабочий репозиторий со всеми коммитами, ветками, тегами. `.git/` — это весь репозиторий. Working tree (файлы рядом с `.git/`) — это просто рендеринг последнего коммита в файловую систему, его можно получить в любой момент через `git checkout HEAD .`. Но `.git/` содержит всю историю: objects/ (все commits/blobs/trees), refs/ (все ветки/теги), config (настройки), reflog. Если вы скопируете `.git/` в другое место (как bare-репо: `cp -r .git/ ../backup.git`), там получится bare-репо с полной историей. Это и есть смысл distributed-модели Git: клон = полный репозиторий. Именно поэтому `git clone url` под капотом — это (упрощённо) копирование `.git/` плюс checkout рабочей версии."
+/>

@@ -1,0 +1,260 @@
+---
+title: "Capstone overview: твой первый день DE — clone, ticket, PR cycle"
+description: "Сценарий: day 1 на DE-команде. Клонируешь airflow-dags-mock репо, получаешь Jira-style ticket: add new DAG для user_events. Реалистичный сценарий полного PR cycle — clone, branch, implement, push, PR, review, conflicts, merge."
+order: 1
+difficulty: "intermediate"
+estimatedTime: 30
+topics: ["capstone", "junior-de", "first-day", "pr-cycle", "real-world-workflow"]
+---
+
+# Capstone overview: твой первый день DE — clone, ticket, PR cycle
+
+Поздравляю — добрался до финального модуля. До сих пор каждый урок был «вот команда, вот концепция, попробуй». Capstone — другой формат. Это **реалистичный сценарий**, в котором ты должен **сам** применить всё, что узнал за курс.
+
+Сценарий следующий. Сегодня твой **первый день** в DE-команде. Тебя добавили в Slack `#data-engineering`. Tech lead Алиса пишет:
+
+> *Привет! Welcome aboard. Сегодня делаем onboarding. Прочитай README репозитория `analytics-dags`, посмотри пару DAG-ов чтобы понять стиль. Потом — JIRA ticket `DE-1234`: нужно добавить новый DAG, который грузит таблицу `user_events` из S3 в Snowflake. Detail в тикете. Я буду на standup в 10:00, готовь PR к 16:00. Если будут вопросы — пинг в DM.*
+
+Стандартный задачи junior DE day 1. Чтобы её сделать ты должен:
+
+1. **Clone репо** (модуль 05).
+2. **Создать feature branch** (модуль 04).
+3. **Реализовать DAG** — пиши код (Python для airflow), используя conventional commits (модуль 04, 12).
+4. **Push** ветки в remote, **открыть PR** через GitHub UI или `gh pr create` (модуль 11).
+5. **Пройти CI** (модуль 18) — green checks.
+6. **Получить code review**, обработать каждый comment (модуль 11, 12).
+7. Разрешить **конфликт** — пока ты работал, кто-то merged другой PR в main, твоя ветка stale (модуль 06, 07).
+8. **Merge** через выбранную стратегию (squash для clean main, модуль 12).
+9. **Cleanup**: удалить ветку, prune remote-tracking (модуль 05).
+10. **Hotfix sim**: tech lead просит срочно исправить typo в README — minimal hotfix flow.
+
+В этом уроке — overview всего сценария. В следующих 3 уроках — каждый этап step-by-step. И в `labs/LAB-04-capstone-de-workflow/` — практическая лабораторная с mock-репо.
+
+---
+
+## Сцена: что у тебя сейчас есть
+
+Утро понедельника, 09:30. Ты дома (или в офисе), на свежей машине только установил:
+
+- Git 2.54
+- Python 3.13
+- GitHub CLI (`gh`)
+- VS Code (или JetBrains)
+- SSH-key добавлен в GitHub (модуль 02)
+- `gh auth login` сделан
+
+JIRA ticket `DE-1234` открыт у тебя в браузере:
+
+```
+Title: Add user_events ingestion DAG
+Priority: P2
+Assignee: You
+
+Description:
+Marketing-команда хочет видеть user behavior events в Snowflake для построения 
+funnels и cohort анализов. Сейчас events лежат в S3 в формате Parquet, 
+партиционированы по date.
+
+Schema:
+  s3://company-events-bucket/user_events/year=2026/month=05/day=12/*.parquet
+
+Requirements:
+- Создай DAG в dags/user_events_dag.py
+- Schedule: daily at 04:00 UTC (после нашего main ETL)
+- Source: S3 bucket "company-events-bucket", path "user_events/year={{ ds }}/..."
+- Target: Snowflake table ANALYTICS.RAW.USER_EVENTS
+- Schema: использовать staging schema RAW
+- Idempotent: если DAG run перезапущен — данные должны не дублироваться
+- Tests: pytest для unit-теста transform функции (если есть)
+- Documentation: docstring в DAG, описание в README.md
+
+Acceptance criteria:
+- CI passes (ruff, mypy, pytest, gitleaks)
+- 1 review approval from tech lead
+- DAG visible in Airflow UI после deploy
+
+Estimate: 4-6 hours
+```
+
+Конкретно. Чёткие критерии. Твоя работа на следующие 5-6 часов.
+
+---
+
+## Полная карта capstone
+
+<DiagramContainer title="Полный flow capstone — твой day 1">
+  <FlowColumn>
+    <FlowNode tooltip="git clone, осмотр README, dags/, тестов">{'1. Clone & explore (15 min)'}</FlowNode>
+    <Arrow direction="down" />
+    <FlowNode tooltip="git switch -c feat/de-1234-user-events-dag">{'2. Create feature branch (1 min)'}</FlowNode>
+    <Arrow direction="down" />
+    <FlowNode tooltip="Пишешь DAG-файл, тесты, обновляешь README">{'3. Implement (2-4 hours)'}</FlowNode>
+    <Arrow direction="down" />
+    <FlowNode tooltip="Conventional commits: feat:, test:, docs:">{'4. Multiple small commits'}</FlowNode>
+    <Arrow direction="down" />
+    <FlowNode tooltip="git push -u origin feat/de-1234-user-events-dag">{'5. Push with --set-upstream (5 sec)'}</FlowNode>
+    <Arrow direction="down" />
+    <FlowNode tooltip="gh pr create или GitHub UI">{'6. Open PR (5 min)'}</FlowNode>
+    <Arrow direction="down" />
+    <FlowNode tooltip="Подожди зелёный CI. Если красный — исправь.">{'7. CI passes (10 min)'}</FlowNode>
+    <Arrow direction="down" />
+    <FlowNode tooltip="Tech lead оставляет 3-5 комментариев. Ты адресуешь каждый.">{'8. Code review iterations (1 hour)'}</FlowNode>
+    <Arrow direction="down" />
+    <FlowNode tooltip="В это время другой PR merged -> main продвинулся -> твоя ветка stale">{'9. Rebase on main (conflict resolution)'}</FlowNode>
+    <Arrow direction="down" />
+    <FlowNode tooltip="Approve -> Squash merge -> clean main">{'10. Merge (5 min)'}</FlowNode>
+    <Arrow direction="down" />
+    <FlowNode tooltip="git branch -d, git remote prune, удалить ветку на remote">{'11. Cleanup (2 min)'}</FlowNode>
+    <Arrow direction="down" />
+    <FlowNode tooltip="Срочно: typo в README. git switch -c hotfix/, fix, PR, merge — see trunk-based">{'12. Hotfix simulation (10 min)'}</FlowNode>
+  </FlowColumn>
+</DiagramContainer>
+
+Каждый шаг — несколько команд, которые ты уже видел в предыдущих модулях. В capstone — **ты сам** выбираешь когда использовать что. Это разрыв с предыдущим форматом «вот команда, вот expected output».
+
+---
+
+## Что узнаешь в Capstone
+
+**1. Real-world rhythm**: тикет -> ветка -> код -> PR -> review -> merge. Не «команда сначала, объяснение потом». А «у тебя задача, как её сделать?».
+
+**2. Decision making**: когда rebase, когда merge? Сколько commits в PR? Squash или regular merge? — это **твои** решения.
+
+**3. Conflict resolution в context-е**: не abstract «вот файл с маркерами», а «main продвинулся, твой код несовместим, что делать?».
+
+**4. Communication with review**: как читать code review comments, как responding, как push fix-up commit, когда `--force-with-lease`, когда не нужен.
+
+**5. Team workflow**: твои действия влияют на коллег. Force push в shared branch — катастрофа. Merge без CI — bad.
+
+---
+
+## Структура остальных уроков capstone
+
+**Урок 02 — Clone, branch, implement** (детальный walkthrough первых трёх шагов): как изучить новый репо за 15 минут, как назвать ветку, conventional commits на каждом этапе, push с upstream.
+
+**Урок 03 — Handling review & conflicts** (самый длинный): 5 типов code review comments (suggestion, nit, blocker, question, prause), как обрабатывать. Затем — rebase на updated main, разрешение конфликта в shared `dag_helpers.py`, force-push в feature branch.
+
+**Урок 04 — Merge & cleanup**: выбор merge strategy (squash почему default, когда regular merge, когда rebase merge). После merge — delete branch, prune remote, обновить local main. Hotfix sim: critical fix через trunk-based mini-flow.
+
+И **лабораторная** `labs/LAB-04-capstone-de-workflow/`:
+- `README.md` — 45-90 min, шаги один за другим.
+- `mock-repo/` — готовый Airflow DAGs mock-проект.
+- `expected-pr/` — пример как должен выглядеть финальный PR.
+
+---
+
+## Подготовка: что иметь на старте
+
+Перед началом capstone проверь:
+
+```bash
+# 1. Git настроен
+$ git config --get user.name
+Your Name
+
+$ git config --get user.email
+you@example.com
+
+# 2. SSH ключ в GitHub
+$ ssh -T git@github.com
+Hi <username>! You've successfully authenticated...
+
+# 3. GitHub CLI
+$ gh auth status
+[x] Logged in to github.com account <username>
+
+# 4. Python 3.13 + uv
+$ uv --version
+uv 0.5.0
+
+# 5. Pre-commit framework (опционально, для local hooks)
+$ pre-commit --version
+4.0.0
+```
+
+Если что-то не настроено — вернись в модуль 02 (Install & config), модуль 15 (hooks).
+
+---
+
+## Уровень realism в capstone
+
+Это **симуляция** — не реальная команда. Поэтому:
+
+| Реальный мир | Capstone |
+|---|---|
+| Real Airflow cluster | Mock DAG, не запускается на реальном S3 |
+| Real Snowflake table | Mock, не подключение к реальной DB |
+| Real code review от senior | Симулированные comments (preset в lab) |
+| Real CI с реальным dbt | Минимальный CI workflow в mock-репо |
+| Real conflict в shared file | Pre-prepared conflict в mock-репо |
+
+Но **поведенчески** — всё совпадает с реальной работой. Junior который успешно прошёл capstone — готов к first PR в real production team.
+
+---
+
+## Communication style: ответы reviewer-у
+
+В капстоуне ты будешь responding на code review comments. Стиль важен.
+
+**Хороший response**:
+
+> @reviewer Right, fixed in 7a8b9c0. I changed the connection_id to use `airflow_secrets_backend` instead of hardcoded, see updated dag.py L23.
+
+— acknowledged, конкретное commit SHA, конкретная line.
+
+**Плохой response**:
+
+> ok
+
+— что «ok»? Согласен? Сделал? Refused? Senior не знает.
+
+**Или другой плохой**:
+
+> I disagree, my way is better.
+
+— defensive, no reasoning. Этот стиль убивает team dynamics.
+
+**Лучший response при disagreement**:
+
+> @reviewer I considered using `connection_id` directly, but our team convention (link to docs) is to wrap it through `get_secret()` helper for centralized rotation handling. Happy to switch if there's a reason against it.
+
+— reasoning, link to existing convention, opening to discussion.
+
+В капстоуне — практикуй эти стили.
+
+---
+
+## Time budget
+
+Прохождение capstone (lab + 4 уроков):
+
+| Activity | Time |
+|---|---|
+| Прочитать урок 01 (этот) | 20 min |
+| Прочитать урок 02 (clone, branch, implement) | 30 min |
+| Прочитать урок 03 (review & conflicts) | 30 min |
+| Прочитать урок 04 (merge, cleanup, hotfix) | 30 min |
+| Сделать lab (LAB-04 capstone) | 60-90 min |
+| **Total** | **3-4 hours** |
+
+Не пытайся пройти за один присест. Сделай уроки 01-04 за день, lab — в отдельный сессион, когда у тебя 1-2 часа фокусированной работы.
+
+---
+
+## Что после capstone
+
+Тебя ждёт сертификация курса (если оформляешь) и… **реальный first PR**. Совет:
+
+1. Найди open-source DE-проект (dbt-package, Airflow provider). Открой `good first issue`.
+2. Применяй ровно то, что в capstone — clone, branch, implement, PR.
+3. Это сделать **бесплатно** — реальная команда даст реальный review. Лучший learning.
+
+После 5-10 такого PR-a — у тебя уже portfolio. Recruitment-tech-screens проходят сильно проще.
+
+---
+
+## Killer takeaway
+
+Capstone — реалистичный сценарий day 1 junior DE: тикет -> clone -> branch -> implement -> push -> PR -> CI -> review -> conflict resolution -> merge -> cleanup -> hotfix. Все навыки из предыдущих 19 модулей applied вместе. Decision-making важнее команды: когда rebase vs merge, какой commit message, как responding на review comment. После capstone сделай real PR в open-source проект — там real learning.
+
+<KnowledgeCheck quizSlug="20-capstone/01-capstone-overview" />

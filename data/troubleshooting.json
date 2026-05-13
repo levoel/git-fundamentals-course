@@ -1,0 +1,680 @@
+{
+  "issues": [
+    {
+      "id": "detached-head",
+      "title": "Detached HEAD — как попал и как выйти",
+      "category": "basics",
+      "symptoms": "После `git checkout <sha>`, `git checkout <tag>`, или клика по конкретному коммиту в IDE появляется сообщение: 'You are in detached HEAD state. You can look around, make experimental changes and commit them, and you can discard any commits you make in this state without impacting any branches by switching back to a branch.' `git status` показывает 'HEAD detached at <sha>'. `git branch` показывает * (no branch).",
+      "causes": [
+        "Сделали `git checkout <sha>` или `git checkout <tag>` напрямую",
+        "IDE (VSCode, JetBrains) кликом по старому коммиту переключили вас",
+        "После `git submodule update` — submodule всегда в detached HEAD",
+        "Скрипт CI делает checkout commit SHA вместо ветки",
+        "Сделали `git switch --detach <ref>` намеренно"
+      ],
+      "diagnosis": "git status                        # 'HEAD detached at...'\ngit branch                        # * (HEAD detached at 3a8c2f1)\ngit log --oneline -5              # где мы сейчас\ncat .git/HEAD                     # SHA, а не 'ref: refs/heads/...'",
+      "solutions": [
+        "Если НЕ делали изменений — просто `git switch main` (или нужная ветка), detached state исчезает",
+        "Если СДЕЛАЛИ commits и хотите их сохранить — создать ветку: `git switch -c rescue-branch`, затем merge в main",
+        "Если случайно сделали commits и НЕ хотите сохранять — просто `git switch main`, эти commits станут unreachable и через ~30 дней удалятся git gc",
+        "Найти потерянные commits через `git reflog`, если уже переключились без branch создания",
+        "Намеренный detached для эксперимента — это нормально, главное помнить вернуться через switch"
+      ],
+      "relatedLessons": [
+        { "title": "HEAD и detached HEAD", "slug": "04-branches-merging/03-head" },
+        { "title": "reflog как машина времени", "slug": "09-undo-reflog/05-reflog" }
+      ]
+    },
+    {
+      "id": "merge-conflict-markers",
+      "title": "Маркеры конфликта остались в файле (<<<<<<< HEAD)",
+      "category": "merging",
+      "symptoms": "При запуске тестов / линтера / даже просто `python file.py` — синтаксическая ошибка, в коде странные символы. Открываете файл — там блоки вида: `<<<<<<< HEAD`, `=======`, `>>>>>>> feature/etl`. Программа не работает, потому что в коде остался текст diff-markers.",
+      "causes": [
+        "После `git merge` или `git pull` был conflict, начали править, но сохранили файл, не удалив маркеры",
+        "Открыли файл в редакторе без поддержки git merge view, неправильно resolved",
+        "Сделали commit с маркерами (Git это разрешает!), pushed — теперь в репо broken файл",
+        "В rebase решали conflict, не до конца отредактировали"
+      ],
+      "diagnosis": "# Найти все файлы с маркерами\ngrep -rn '<<<<<<<' . --exclude-dir=.git\ngrep -rn '=======' . --exclude-dir=.git\ngrep -rn '>>>>>>>' . --exclude-dir=.git\n\n# Проверить unresolved conflicts\ngit diff --check\ngit status                        # 'both modified' если ещё в merge",
+      "solutions": [
+        "Открыть файл, удалить все три типа маркеров (<<<<<<<, =======, >>>>>>>) и оставить корректную версию кода",
+        "Использовать `git mergetool` (vimdiff, meld, VS Code) для guided resolve",
+        "После правки: `git add <file>` (помечает как resolved) и `git commit` (или `git rebase --continue`)",
+        "Если уже commit/push с маркерами — pre-commit hook должен ловить это: добавить `check-merge-conflict` от pre-commit",
+        "Откатить плохой commit через `git revert` и сделать заново корректно"
+      ],
+      "relatedLessons": [
+        { "title": "Anatomy конфликта", "slug": "06-conflicts/01-conflict-markers" },
+        { "title": "mergetool", "slug": "06-conflicts/03-mergetool" }
+      ]
+    },
+    {
+      "id": "push-rejected-non-ff",
+      "title": "git push rejected — non-fast-forward",
+      "category": "remote",
+      "symptoms": "Запускаете `git push` и получаете: `! [rejected] main -> main (non-fast-forward)`. `error: failed to push some refs to '...'`. Подсказка: `hint: Updates were rejected because the tip of your current branch is behind its remote counterpart. Integrate the remote changes (e.g. 'git pull ...') before pushing again.`",
+      "causes": [
+        "Кто-то другой запушил commits в эту ветку после вашего последнего fetch",
+        "Вы сделали `git reset --hard HEAD~3` локально и теперь local ветка короче remote",
+        "Вы сделали rebase или amend на commit, который уже был push (история переписана)",
+        "Сменили upstream branch и теперь push идёт не туда, куда вы думаете"
+      ],
+      "diagnosis": "git fetch origin\ngit status                            # ahead/behind\ngit log HEAD..origin/main --oneline   # что нового на remote\ngit log origin/main..HEAD --oneline   # что у нас локально\ngit log --oneline --graph --all -10",
+      "solutions": [
+        "Если на remote есть НУЖНЫЕ commits — `git pull --rebase` (или `git fetch && git rebase origin/main`), резолвить конфликты, потом push",
+        "Если делали rebase / amend намеренно и хотите перезаписать remote — `git push --force-with-lease` (БЕЗОПАСНЕЕ чем --force)",
+        "Если ветка shared с командой — ОБЯЗАТЕЛЬНО предупредить перед force push",
+        "В main / protected branch force push обычно запрещён branch protection — нужно делать через revert commit",
+        "Никогда `git push --force` в main / develop без согласования"
+      ],
+      "relatedLessons": [
+        { "title": "push, pull, fetch", "slug": "05-remotes/04-push-pull-fetch" },
+        { "title": "force push danger", "slug": "07-rebase/05-force-push" }
+      ]
+    },
+    {
+      "id": "pull-divergent-branches",
+      "title": "git pull пишет 'divergent branches'",
+      "category": "remote",
+      "symptoms": "С Git 2.27+ при `git pull` сообщение: `hint: You have divergent branches and need to specify how to reconcile them. ... git config pull.rebase false  # merge ... git config pull.rebase true  # rebase ... git config pull.ff only  # fast-forward only ... fatal: Need to specify how to reconcile divergent branches.`",
+      "causes": [
+        "У вас локальные коммиты в ветке, на remote тоже появились новые коммиты — ветки разошлись",
+        "Git 2.27+ перестал использовать merge как default — требует явный выбор",
+        "Не сделали `git config pull.rebase` / `pull.ff` после установки Git"
+      ],
+      "diagnosis": "git status\ngit fetch origin\ngit log --oneline --graph --all -10\ngit log HEAD..origin/main         # их commits\ngit log origin/main..HEAD         # ваши commits",
+      "solutions": [
+        "Установить глобальный default (recommended): `git config --global pull.rebase true` для линейной истории",
+        "Или: `git config --global pull.ff only` — pull только когда fast-forward возможен, иначе manual",
+        "Разовый pull с merge: `git pull --no-rebase`",
+        "Разовый pull с rebase: `git pull --rebase`",
+        "В большинстве DE-команд — pull.rebase = true (или вообще запрещают pull, требуют fetch + rebase explicitly)"
+      ],
+      "relatedLessons": [
+        { "title": "push, pull, fetch", "slug": "05-remotes/04-push-pull-fetch" },
+        { "title": "Конфигурация Git", "slug": "02-install-config/02-git-config" }
+      ]
+    },
+    {
+      "id": "accidental-commit-to-main",
+      "title": "Случайно сделал commit в main",
+      "category": "branches",
+      "symptoms": "Закончили задачу, делаете `git status` — на ветке main, а должны были на feature. Сделали `git commit`, теперь главная ветка содержит коммит, которому там не место. Worse — уже `git push` сделали (если main не protected).",
+      "causes": [
+        "Забыли `git switch -c feature/x` перед началом работы",
+        "Открыли IDE, она автоматически переключила на main после прошлой сессии",
+        "Скопировали репо или git pull привёл на main без вашего ведома"
+      ],
+      "diagnosis": "git status                        # на какой branch?\ngit log --oneline -5              # какие последние commits\ngit log origin/main..HEAD          # что лишнее в local main\ngit reflog -5                     # история движений HEAD",
+      "solutions": [
+        "Случай 1 (НЕ pushed): создать ветку с этими commits, потом откатить main\n  git switch -c feature/actual-place\n  git switch main\n  git reset --hard origin/main",
+        "Случай 2 (уже pushed в main, main protected): сделать revert commit:\n  git revert <bad-commit-sha>\n  git push\n  потом перенести изменения в feature branch через cherry-pick",
+        "Случай 3 (pushed, main НЕ protected, никто не pulled): force push (договорившись с командой):\n  git reset --hard origin/main~1\n  git push --force-with-lease\n  потом cherry-pick в feature",
+        "ВКЛЮЧИТЬ branch protection на main НЕМЕДЛЕННО — это первое, что делает любая адекватная DE-команда"
+      ],
+      "relatedLessons": [
+        { "title": "Branch protection", "slug": "18-ci-cd-github-actions/03-branch-protection" },
+        { "title": "git reset", "slug": "09-undo-reflog/01-git-reset" }
+      ]
+    },
+    {
+      "id": "pushed-env-with-secrets",
+      "title": "Запушил .env с секретами — playbook",
+      "category": "security",
+      "symptoms": "После очередного push осознали: в репо лежит `.env` с production API keys, DB passwords, AWS credentials. Файл уже на GitHub (даже если delete next commit — он в истории навсегда). Может прилететь email от GitHub Secret Scanning: 'A secret was detected in your repository...'",
+      "causes": [
+        "Забыли добавить `.env` в `.gitignore` ПЕРЕД первым `git add .env`",
+        "Скопировали `.env.example` в `.env`, заполнили секретами, сделали `git add .` — захватило новый файл",
+        "Hardcoded secret в коде (config.py), а не в env-файле",
+        "Нет pre-commit hook (gitleaks, detect-secrets) который ловит это"
+      ],
+      "diagnosis": "# Найти секреты в истории\ngit log --all --full-history -- .env\ngit log -p -S 'SECRET_TOKEN' --all\ngitleaks detect --source . --verbose\n\n# Что есть в репо прямо сейчас\ngit ls-files | grep -E '\\.env|secret|credentials'",
+      "solutions": [
+        "ШАГ 1 (немедленно): ROTATE все скомпрометированные secrets — изменить пароли, regenerate API keys, revoke tokens. Это самое важное — file нельзя 'отозвать' из internet",
+        "ШАГ 2: добавить `.env` в `.gitignore`, удалить из tracking: `git rm --cached .env && git commit -m 'chore: remove .env from tracking'`",
+        "ШАГ 3 (очистка истории): `git filter-repo --invert-paths --path .env` (или BFG). Это переписывает ВСЮ историю. Если pushed — force push: `git push origin --force --all && git push origin --force --tags`",
+        "ШАГ 4: уведомить команду — все должны заново clone репо (старые clones содержат secrets)",
+        "ШАГ 5: настроить prevention — pre-commit gitleaks/detect-secrets, GitHub Secret Scanning, ревью .gitignore до первого commit"
+      ],
+      "relatedLessons": [
+        { "title": "Что делать при leak", "slug": "17-secrets-security/07-leak-playbook" },
+        { "title": "gitleaks", "slug": "17-secrets-security/02-gitleaks" }
+      ]
+    },
+    {
+      "id": "not-a-git-repository",
+      "title": "fatal: not a git repository",
+      "category": "config",
+      "symptoms": "Любая git команда (`git status`, `git log`, `git pull`) выдаёт: `fatal: not a git repository (or any of the parent directories): .git`",
+      "causes": [
+        "Вы в каталоге, в котором нет `.git/` (и его нет ни в одном parent каталоге)",
+        "Сделали `cd` в неправильную папку",
+        "Случайно удалили `.git/` (например `rm -rf .git/`)",
+        "Распаковали zip с кодом — там нет `.git/`, нужно clone или init",
+        "Поломанный submodule — `.git` это файл, а не каталог, и ссылается на несуществующий путь"
+      ],
+      "diagnosis": "pwd                               # где мы\nls -la | grep .git                # есть ли .git/\ngit rev-parse --show-toplevel     # путь до root репо\nfind . -name '.git' -type d -maxdepth 3",
+      "solutions": [
+        "Перейти в правильный каталог: `cd path/to/repo`",
+        "Если нет `.git/` — это не git repo. Либо clone заново: `git clone <url>`, либо init если новый проект: `git init`",
+        "Если .git был удалён случайно — восстановить из backup или clone заново с remote",
+        "Для submodule — проверить `.git` файл, который содержит `gitdir: ../../.git/modules/...`",
+        "Если работаете внутри docker-volume mount — проверьте, что .git тоже примонтирован"
+      ],
+      "relatedLessons": [
+        { "title": "git init и .git/", "slug": "03-three-trees/01-git-init-internals" }
+      ]
+    },
+    {
+      "id": "unrelated-histories",
+      "title": "fatal: refusing to merge unrelated histories",
+      "category": "merging",
+      "symptoms": "При `git pull` или `git merge`: `fatal: refusing to merge unrelated histories`. Возникает когда Git видит две ветки/репо БЕЗ общего предка (нет merge base).",
+      "causes": [
+        "Сделали `git init` локально, потом добавили remote с уже существующим репо — две независимых истории",
+        "Merged два независимых репозитория (например, перенос проекта)",
+        "Случайно clone не тот репо, добавили remote с правильным — истории разошлись от Big Bang",
+        "Один из репо был `filter-repo` или `filter-branch`-ed — все SHA новые, общего предка с оригиналом нет"
+      ],
+      "diagnosis": "git log --oneline -3\ngit log --oneline origin/main -3\ngit merge-base HEAD origin/main      # если empty — нет общего предка\ngit log --all --oneline --graph -10",
+      "solutions": [
+        "Если намеренно объединяете два репо — использовать флаг: `git pull origin main --allow-unrelated-histories` или `git merge --allow-unrelated-histories`",
+        "Если это ошибка (вы clone не тот репо или сделали init вместо clone) — удалите local, clone правильный заново",
+        "При переносе содержимого нового проекта в существующее репо — используйте git subtree или просто скопируйте файлы вручную",
+        "Если был filter-repo на одной стороне — придётся принять unrelated histories или восстанавливать оригинал"
+      ],
+      "relatedLessons": [
+        { "title": "Merge base и unrelated histories", "slug": "04-branches-merging/08-edge-cases" }
+      ]
+    },
+    {
+      "id": "large-file-committed",
+      "title": "Закоммитил большой файл (.csv 500MB)",
+      "category": "history",
+      "symptoms": "После commit заметили долгий `git push`, repo на GitHub stale long time, или GitHub отказывает: 'remote: error: File data.csv is 521.45 MB; this exceeds GitHub's file size limit of 100.00 MB'. `du -sh .git/` показывает гигабайты.",
+      "causes": [
+        "Случайно `git add .` захватил большой dataset",
+        "Тестировали ETL на маленьких файлах, не настроили `.gitignore` для `data/`",
+        "Думали добавить через LFS, забыли `git lfs track` перед `git add`",
+        "Закоммитили build artifact (model.pkl, embeddings.npy)"
+      ],
+      "diagnosis": "du -sh .git/                          # размер репо\ngit ls-files --stage | wc -l\n# Найти большие blobs в истории\ngit rev-list --objects --all | \\\n  git cat-file --batch-check='%(objecttype) %(objectname) %(objectsize) %(rest)' | \\\n  awk '/^blob/ {print substr($0,index($0,$3))}' | \\\n  sort -k1 -n -r | head -20",
+      "solutions": [
+        "Случай 1 (НЕ pushed): просто удалить и amend: `git rm --cached data.csv && echo data.csv >> .gitignore && git commit --amend --no-edit`",
+        "Случай 2 (pushed, есть в истории): удалить из всей истории через git-filter-repo: `git filter-repo --invert-paths --path data.csv`, затем `git push --force-with-lease --all`",
+        "ИЛИ через BFG: `bfg --strip-blobs-bigger-than 50M`, потом `git reflog expire --expire=now --all && git gc --prune=now --aggressive`",
+        "Для будущего: настроить LFS — `git lfs install && git lfs track '*.csv' && git add .gitattributes`, или DVC для ML datasets",
+        "Добавить `data/`, `*.csv`, `*.parquet`, `*.pkl` в `.gitignore` и закоммитить",
+        "Команды должны re-clone после filter-repo — old clones содержат большой файл"
+      ],
+      "relatedLessons": [
+        { "title": "Git LFS basics", "slug": "14-lfs-big-data/01-git-lfs" },
+        { "title": "git-filter-repo", "slug": "17-secrets-security/05-filter-repo" }
+      ]
+    },
+    {
+      "id": "reflog-rescue-after-reset-hard",
+      "title": "Упустил коммит после git reset --hard (reflog rescue)",
+      "category": "recovery",
+      "symptoms": "Сделали `git reset --hard HEAD~5`, чтобы вернуться назад. Через час осознали — там был важный коммит, над которым работали час. `git log` его не показывает. Паника.",
+      "causes": [
+        "git reset --hard перемещает branch указатель назад, оставляя 'покинутые' commits unreachable",
+        "Похожее происходит при rebase --abort после многих rebase steps",
+        "После `git checkout -B` (форсированно создать ветку поверх существующей)",
+        "После `git push --force` без --force-with-lease — но это не помогает локально, только если был backup remote"
+      ],
+      "diagnosis": "git reflog                        # ВСЯ история движений HEAD\n# HEAD@{0} 5a8c reset: moving to HEAD~5\n# HEAD@{1} 3d4e commit: feat: ETL refactor   ← вот он!\n# HEAD@{2} ...\n\ngit log HEAD@{1} --oneline         # увидеть коммиты до reset\ngit show 3d4e                      # содержимое потерянного",
+      "solutions": [
+        "Восстановить через reflog: `git reset --hard HEAD@{1}` (или конкретный SHA из reflog)",
+        "Если работали в branch и сделали reset — можно `git branch rescue HEAD@{1}` создать ветку прямо там",
+        "Если reset был очень давно и `git gc` уже прошёл — restore может быть невозможен. Reflog default expire 90 дней (refs/heads), 30 дней (unreachable)",
+        "Поискать через `git fsck --unreachable --no-reflogs` — list of dangling commits",
+        "ПРАВИЛО: ВСЕГДА перед `git reset --hard` сделать backup ветку: `git branch backup-$(date +%s)`"
+      ],
+      "relatedLessons": [
+        { "title": "reflog как машина времени", "slug": "09-undo-reflog/05-reflog" },
+        { "title": "git reset", "slug": "09-undo-reflog/01-git-reset" }
+      ]
+    },
+    {
+      "id": "forgot-pull-conflict",
+      "title": "Забыл git pull перед работой — теперь конфликт",
+      "category": "remote",
+      "symptoms": "Утром начали работать, не сделав `git pull`. Закончили задачу, делаете `git push` — rejected, non-fast-forward. Pull/rebase приводит к конфликту в файле, который вы только что меняли (и коллега тоже его трогал).",
+      "causes": [
+        "Не выработана привычка: первое действие в начале дня — `git fetch && git status`",
+        "IDE не показывает behind-status автоматически",
+        "Работали в long-lived feature branch — не делали regular rebase на main",
+        "У команды нет conventions о синхронизации (например, daily rebase на main)"
+      ],
+      "diagnosis": "git status                        # ahead/behind\ngit fetch origin\ngit log HEAD..origin/main --oneline\ngit log origin/main..HEAD --oneline",
+      "solutions": [
+        "Делать `git pull --rebase` или `git fetch && git rebase origin/main` — резолвить конфликты",
+        "Перед rebase — закоммитить или stash свою работу",
+        "В IDE (VS Code, JetBrains) — включить auto-fetch каждые N минут чтобы видеть behind-status",
+        "Привычка: первое утром — `git pull --rebase` в main, потом в feature `git rebase main`",
+        "Для long-lived feature branches — делать regular rebase минимум раз в день",
+        "Договориться с командой о small / quickly-merged PRs — long-lived branches накапливают конфликты"
+      ],
+      "relatedLessons": [
+        { "title": "push, pull, fetch", "slug": "05-remotes/04-push-pull-fetch" },
+        { "title": "Anatomy конфликта", "slug": "06-conflicts/01-conflict-markers" }
+      ]
+    },
+    {
+      "id": "branch-ahead-by-n-commits",
+      "title": "Your branch is ahead of 'origin/main' by N commits",
+      "category": "remote",
+      "symptoms": "`git status` показывает: 'Your branch is ahead of 'origin/main' by 3 commits. (use \"git push\" to publish your local commits)'. Если на main — это иногда означает 'не туда коммитил', если на feature — нормально, надо push.",
+      "causes": [
+        "Сделали локальные коммиты, ещё не запушили — нормальная ситуация для feature branch",
+        "Если на main — закоммитили прямо в main (это другая проблема, см. accidental-commit-to-main)",
+        "После rebase локальная история переписана, ahead показывает новые SHA, behind — старые",
+        "Кто-то force-pushed на remote и теперь у вас «ahead» из-за расхождения SHA"
+      ],
+      "diagnosis": "git status\ngit log origin/main..HEAD --oneline       # ваши непушенные commits\ngit fetch origin\ngit status                                # ahead AND behind?",
+      "solutions": [
+        "Если это feature branch и всё ок — просто `git push` (с -u при первом push)",
+        "Если на main и не должны быть commits — см. troubleshooting 'accidental-commit-to-main'",
+        "Если показывает 'ahead by 3 and behind by 5' — расхождение, нужен rebase: `git pull --rebase`",
+        "Если после rebase 'ahead by N' где N = количество rebased commits — нормально, нужен `git push --force-with-lease`"
+      ],
+      "relatedLessons": [
+        { "title": "git status", "slug": "03-three-trees/03-add-commit-status" }
+      ]
+    },
+    {
+      "id": "ssh-permission-denied",
+      "title": "Permission denied (publickey) — SSH",
+      "category": "config",
+      "symptoms": "При `git clone`, `git pull`, `git push` через SSH: `git@github.com: Permission denied (publickey). fatal: Could not read from remote repository. Please make sure you have the correct access rights and the repository exists.`",
+      "causes": [
+        "SSH-ключ не сгенерирован",
+        "Public key не добавлен в GitHub/GitLab account",
+        "Используется wrong SSH-ключ (несколько identities)",
+        "ssh-agent не запущен или ключ не добавлен",
+        "Permissions на `~/.ssh/` или `id_ed25519` слишком открытые",
+        "URL HTTPS вместо SSH — публичный ключ для HTTPS не работает",
+        "Заблокирован порт 22 на корпоративной сети"
+      ],
+      "diagnosis": "# Тест соединения\nssh -T git@github.com\n# Должно вывести: 'Hi <user>! You've successfully authenticated...'\n\n# Verbose mode\nssh -vT git@github.com\n\n# Проверить ключи\nls -la ~/.ssh/\nssh-add -l                        # ключи в agent\ncat ~/.ssh/id_ed25519.pub          # public key\n\n# Проверить permissions\nstat -c '%a' ~/.ssh/id_ed25519     # должно 600\nstat -c '%a' ~/.ssh/               # должно 700",
+      "solutions": [
+        "Если нет ключа — сгенерировать: `ssh-keygen -t ed25519 -C 'you@email.com'`",
+        "Добавить public key в GitHub: Settings -> SSH and GPG keys -> New SSH key, вставить `cat ~/.ssh/id_ed25519.pub`",
+        "Запустить ssh-agent и добавить: `eval \"$(ssh-agent -s)\" && ssh-add ~/.ssh/id_ed25519`",
+        "Fix permissions: `chmod 700 ~/.ssh && chmod 600 ~/.ssh/id_ed25519 && chmod 644 ~/.ssh/id_ed25519.pub`",
+        "Если URL HTTPS — переключить на SSH: `git remote set-url origin git@github.com:user/repo.git`",
+        "Если порт 22 заблокирован — использовать SSH over HTTPS port 443: см. https://docs.github.com/en/authentication/troubleshooting-ssh/using-ssh-over-the-https-port",
+        "Несколько ключей? Настроить `~/.ssh/config` с Host-specific IdentityFile"
+      ],
+      "relatedLessons": [
+        { "title": "SSH keys для GitHub", "slug": "02-install-config/04-ssh-keys" }
+      ]
+    },
+    {
+      "id": "index-lock-exists",
+      "title": ".git/index.lock exists",
+      "category": "recovery",
+      "symptoms": "При git команде: `fatal: Unable to create '/path/to/repo/.git/index.lock': File exists. Another git process seems to be running in this repository, e.g. an editor opened by 'git commit'. Please make sure all processes are terminated then try again. If it still fails, a git process may have crashed in this repository earlier: remove the file manually to continue.`",
+      "causes": [
+        "Параллельно запущена другая git команда (IDE auto-fetch + manual command)",
+        "Предыдущая git команда crashed (Ctrl+C посередине, killed process)",
+        "Антивирус / Spotlight indexing открыли .git/index в момент write",
+        "VSCode/JetBrains git integration делает свою операцию",
+        "На сетевом drive (NFS) — lock не освободился"
+      ],
+      "diagnosis": "ls -la .git/*.lock\nps aux | grep git                 # активные git процессы\nlsof .git/index.lock 2>/dev/null  # кто держит lock\nstat .git/index.lock              # время создания",
+      "solutions": [
+        "Убедиться, что нет активных git процессов: `ps aux | grep git`",
+        "Закрыть IDE на минуту, проверить",
+        "Если lock висит давно (минут 5+) и нет процессов — удалить вручную: `rm .git/index.lock`",
+        "Также проверить другие locks: `rm -f .git/{HEAD.lock,refs/heads/main.lock,packed-refs.lock}`",
+        "Никогда не использовать `kill -9` для git процесса — оставляет locks. Use `kill` (SIGTERM)",
+        "Не хранить git репо на сетевом drive (NFS, SMB) — кучи проблем с lock"
+      ],
+      "relatedLessons": [
+        { "title": "Lock files в .git/", "slug": "19-recovery/02-lock-files" }
+      ]
+    },
+    {
+      "id": "submodule-modified-untracked",
+      "title": "modified content, untracked content в submodule",
+      "category": "config",
+      "symptoms": "`git status` в главном репо показывает: `modified:   path/to/submodule (modified content, untracked content)`. Не понимаете, что это значит — вы submodule не трогали. Push не помогает.",
+      "causes": [
+        "Внутри submodule есть изменения файлов (modified content)",
+        "Внутри submodule есть новые untracked файлы",
+        "Submodule на каком-то commit, который отличается от того, что записан в parent repo",
+        "Кто-то изменил submodule contents без commit/push в самом submodule",
+        "После `git submodule update --remote` submodule moved forward"
+      ],
+      "diagnosis": "cd path/to/submodule\ngit status                        # что внутри submodule\ngit log --oneline -5\ncd ../..\ngit submodule status              # SHA, который main repo ожидает\ngit submodule summary             # diff между ожидаемым и actual",
+      "solutions": [
+        "Если submodule намеренно обновлён — commit это в main repo: `git add path/to/submodule && git commit -m 'chore: bump submodule'`",
+        "Если submodule содержит unwanted changes — сбросить: `cd submodule && git reset --hard && git clean -fd`",
+        "Чтобы синхронизировать с записанным в main repo: `git submodule update --init --recursive`",
+        "Чтобы обновить до latest на remote: `git submodule update --remote --merge`",
+        "В .gitmodules можно указать branch вместо фиксированного commit для auto-tracking",
+        "Если submodule всё ещё путает — рассмотреть git subtree или git worktree как альтернативу"
+      ],
+      "relatedLessons": [
+        { "title": "Submodules basics", "slug": "16-submodules-worktrees/01-submodules" }
+      ]
+    },
+    {
+      "id": "wrong-author-in-commit",
+      "title": "Неправильный author в коммите — нужно переписать",
+      "category": "history",
+      "symptoms": "После `git log` видите, что коммиты сделаны с неправильным email (личный вместо рабочего, или наоборот). На GitHub ваши commits не показываются как ваш contribution (нет связи между email и аккаунтом).",
+      "causes": [
+        "Не настроили `user.email` / `user.name` после установки Git",
+        "Глобальный config с одним email, но для work репо нужен другой (или наоборот)",
+        "В config один email, а в системе $GIT_AUTHOR_EMAIL — другой",
+        "Скопировали репо с другой машины с прошлым config"
+      ],
+      "diagnosis": "git config --get user.name\ngit config --get user.email\ngit config --get --global user.email\n\n# Авторы последних коммитов\ngit log --format='%h %an <%ae>' -10\n\n# По email\ngit log --author='wrong@email' --oneline",
+      "solutions": [
+        "Установить правильный для текущего репо: `git config user.email work@company.com`",
+        "Для всех будущих репо: `git config --global user.email correct@email`",
+        "Per-folder config (Git 2.13+) — `~/.gitconfig` с `[includeIf \"gitdir:~/work/\"] path = ~/.gitconfig-work`",
+        "Переписать последний commit: `git commit --amend --author='Lev <l@e>' --no-edit`",
+        "Переписать несколько последних: `git rebase -i HEAD~3 --exec 'git commit --amend --author=\"Lev <l@e>\" --no-edit'`",
+        "ПЕРЕписать ВСЮ историю (опасно для shared repo): `git filter-repo --mailmap mailmap.txt`",
+        "Pre-commit hook, валидирующий author email по regex — для прода-репо"
+      ],
+      "relatedLessons": [
+        { "title": "Git config", "slug": "02-install-config/02-git-config" },
+        { "title": "git rebase -i", "slug": "07-rebase/03-interactive" }
+      ]
+    },
+    {
+      "id": "lfs-not-working",
+      "title": "Git LFS не работает / large file warning",
+      "category": "config",
+      "symptoms": "Файлы, которые должны быть в LFS, лежат как обычные blobs (`git lfs ls-files` пуст). `git push` ругается на размер. Или: после clone LFS файлы — это pointer files с текстом 'version https://git-lfs.github.com/spec/v1', а не реальное содержимое.",
+      "causes": [
+        "Не установлен git lfs: `git lfs install` не выполнен",
+        "`.gitattributes` не настроен (или настроен, но забыт после клонирования)",
+        "Сначала добавили файл, потом настроили LFS — файл уже в обычном объекте",
+        "После clone не сделали `git lfs pull` — есть только pointers",
+        "На server (self-hosted GitLab) LFS не включён",
+        "Quota на LFS storage исчерпана (GitHub limits)"
+      ],
+      "diagnosis": "git lfs version\ngit lfs ls-files                  # tracked LFS файлы\ncat .gitattributes | grep lfs\ngit lfs status                    # текущий state\nfile data.parquet                 # тип файла\nhead -2 data.parquet              # если это pointer — увидите 'version https://...'",
+      "solutions": [
+        "Установить и инициализировать: `git lfs install` (one-time per user)",
+        "После clone подтянуть актуальные файлы: `git lfs pull`",
+        "Track patterns в .gitattributes ДО добавления файла: `git lfs track '*.parquet' && git add .gitattributes`",
+        "Если файл уже как обычный blob — migrate в LFS: `git lfs migrate import --include='*.parquet'` (переписывает историю!)",
+        "После migrate force push: `git push --force-with-lease --all`",
+        "Проверить LFS quota на GitHub Settings -> Billing -> Git LFS",
+        "Для DE often лучше DVC чем LFS — особенно для часто меняющихся datasets"
+      ],
+      "relatedLessons": [
+        { "title": "Git LFS basics", "slug": "14-lfs-big-data/01-git-lfs" }
+      ]
+    },
+    {
+      "id": "pre-commit-hook-blocks",
+      "title": "pre-commit hook падает и блокирует commit",
+      "category": "config",
+      "symptoms": "При `git commit` — ошибка от pre-commit hook (ruff/black/isort/sqlfluff/mypy/etc), commit не создаётся. Сообщения вида: 'ruff....................................................................Failed' с details. Или: 'detect-secrets...........Failed - Hook would create a new file'.",
+      "causes": [
+        "Реальная проблема в коде (linter нашёл issue) — pre-commit делает что должно",
+        "Auto-fixer (ruff-format, black) исправил файл, но не закоммитил — нужен повторный add",
+        "Версия hook в конфиге устарела, что-то изменилось",
+        "Hook требует tool (например ruff) — не установлен в venv",
+        "False positive — secret-detector нашёл что-то, что не secret",
+        ".pre-commit-config.yaml broken — невалидный YAML"
+      ],
+      "diagnosis": "pre-commit run --all-files        # запустить все hooks вручную\npre-commit run <hook-id>          # один hook\n\n# Подробнее\npre-commit run --verbose <hook-id>\n\n# Проверить конфиг\ncat .pre-commit-config.yaml\npre-commit autoupdate --dry-run",
+      "solutions": [
+        "Прочитать output и исправить реальные проблемы в коде",
+        "После auto-fix — `git add <fixed-files> && git commit` снова",
+        "Если hook упал на legitimate code — добавить exclusion: `exclude: ^(tests|legacy)/` в config",
+        "Update hooks: `pre-commit autoupdate`",
+        "Скипнуть конкретный hook одноразово: `SKIP=ruff git commit -m 'msg'`",
+        "Скипнуть все hooks (плохая практика, не делать regularly): `git commit --no-verify`",
+        "Для detect-secrets baseline: `detect-secrets scan --baseline .secrets.baseline`",
+        "Установить инструменты в venv: `pip install ruff black isort` и `pre-commit install --install-hooks`"
+      ],
+      "relatedLessons": [
+        { "title": "pre-commit framework", "slug": "15-hooks-automation/02-pre-commit-framework" }
+      ]
+    },
+    {
+      "id": "cyrillic-filenames-broken",
+      "title": "Кириллица в именах файлов сломалась",
+      "category": "config",
+      "symptoms": "После `git pull` или clone на другой машине: имена файлов выглядят как `\\320\\224\\320\\260\\320\\275\\320\\275\\321\\213\\320\\265.csv` или похожий каракули вместо `Данные.csv`. `git status` показывает странные кодировки.",
+      "causes": [
+        "core.quotePath = true (default) — Git escape non-ASCII в выводе",
+        "Разные кодировки имён файлов на разных OS (macOS NFD vs Linux NFC vs Windows)",
+        "Терминал не настроен на UTF-8 (особенно cmd.exe на Windows)",
+        "Локаль системы не UTF-8 (LANG=C вместо LANG=en_US.UTF-8)",
+        "Файл создан на Windows с CP1251 в имени"
+      ],
+      "diagnosis": "git config --get core.quotePath\necho $LANG                        # на UNIX\nlocale\nls -la                            # как ОС видит файлы\ngit ls-files | hexdump -C | head  # raw bytes имён",
+      "solutions": [
+        "Отключить escape в Git: `git config --global core.quotePath false`",
+        "Установить UTF-8 локаль (Linux): `export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8`",
+        "На macOS — Terminal preferences -> Profiles -> Advanced -> Text encoding: Unicode (UTF-8)",
+        "На Windows — Git Bash работает лучше, чем cmd.exe; для PowerShell: `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8`",
+        "Избегать кириллицы в именах файлов в production проектах (de-facto convention)",
+        "Если уже есть кириллица — `git mv old.csv new.csv` чтобы переименовать в ASCII (или транслит)",
+        "core.precomposeUnicode = true для macOS чтобы избежать NFD/NFC проблем"
+      ],
+      "relatedLessons": [
+        { "title": "Git config: encoding", "slug": "02-install-config/03-config-deepdive" }
+      ]
+    },
+    {
+      "id": "line-endings-crlf-lf",
+      "title": "Line endings: CRLF vs LF",
+      "category": "config",
+      "symptoms": "После clone или pull `git status` показывает: `Warning: LF will be replaced by CRLF in file.py. The file will have its original line endings in your working directory`. Или: коллега на Windows запушил файлы с \\r\\n, на Linux они выглядят сломанными в shell-скриптах. Тесты падают на cross-platform CI.",
+      "causes": [
+        "На Windows default line ending — CRLF (\\r\\n), на Linux/macOS — LF (\\n)",
+        "core.autocrlf настроен по-разному на машинах команды",
+        "Нет `.gitattributes` — Git гадает, как обработать",
+        "shell-скрипт (.sh) с CRLF не работает на Linux: `bash: ./script.sh: /bin/bash^M: bad interpreter`",
+        "Файл создан в Notepad (CRLF) и закоммичен — теперь в репо смесь"
+      ],
+      "diagnosis": "git config --get core.autocrlf\ngit ls-files --eol               # show eol info per file\nfile script.sh                   # 'ASCII text, with CRLF line terminators'\ncat -A script.sh | head           # ^M$ означает CRLF",
+      "solutions": [
+        "Настроить `.gitattributes` (recommended, per-project): `* text=auto eol=lf` и `*.sh text eol=lf` для shell scripts",
+        "Глобально на dev машине Linux/macOS: `git config --global core.autocrlf input`",
+        "На Windows: `git config --global core.autocrlf true` (CRLF в working tree, LF в repo)",
+        "Исправить уже закоммиченные файлы: `git add --renormalize .` после установки .gitattributes",
+        "Конвертировать существующий файл: `dos2unix script.sh` или `tr -d '\\r' < in > out`",
+        "В IDE (VS Code) настроить default eol = LF",
+        "На pre-commit добавить hook `mixed-line-ending --fix=lf`"
+      ],
+      "relatedLessons": [
+        { "title": ".gitattributes и line endings", "slug": "13-gitignore-attributes/02-gitattributes" }
+      ]
+    },
+    {
+      "id": "rebase-broken-branch",
+      "title": "Rebase сломал ветку — как восстановить",
+      "category": "recovery",
+      "symptoms": "Делали `git rebase main` на feature ветке, во время conflict resolution что-то пошло не так: `git rebase --continue` дал странные ошибки, или сделали `git rebase --abort` и потеряли часть commits, или после rebase коммиты выглядят как чужие — не те, что вы написали.",
+      "causes": [
+        "Conflict resolved неправильно — сделали `git add` и `--continue` с broken merge",
+        "Пропустили часть кода при resolving — он потерялся",
+        "В interactive rebase случайно отметили коммит как `drop` или `squash` (вместо pick)",
+        "`--abort` после серии resolved conflicts — все resolutions потеряны",
+        "Rebase на wrong base — например на origin/feature вместо main"
+      ],
+      "diagnosis": "git status                        # in progress?\nls .git/ | grep rebase            # rebase-merge/ или rebase-apply/\ngit reflog -20                    # история движений HEAD\ngit log --oneline -10\n# Найти SHA до начала rebase\ngit reflog | grep 'rebase (start)'",
+      "solutions": [
+        "Спасение через reflog: найти SHA до rebase (обычно `HEAD@{N}` перед 'rebase (start)') и `git reset --hard HEAD@{N}`",
+        "Если rebase ещё в процессе — `git rebase --abort` возвращает к начальному состоянию",
+        "Создать ветку перед rebase КАЖДЫЙ раз — backup: `git branch backup-before-rebase`. Тогда если что — `git reset --hard backup-before-rebase`",
+        "Если потеряли изменения в файле — `git fsck --lost-found` может найти orphaned blobs",
+        "Не делать rebase шибко больших ranges (>20 commits) — разбейте на несколько мелких",
+        "Для shared branches НЕ делать rebase вообще — только merge"
+      ],
+      "relatedLessons": [
+        { "title": "Interactive rebase", "slug": "07-rebase/03-interactive" },
+        { "title": "reflog как машина времени", "slug": "09-undo-reflog/05-reflog" }
+      ]
+    },
+    {
+      "id": "ambiguous-argument",
+      "title": "fatal: ambiguous argument",
+      "category": "basics",
+      "symptoms": "Команда вроде `git log master` или `git diff main feature` падает с: `fatal: ambiguous argument 'main': unknown revision or path not in the working tree. Use '--' to separate paths from revisions, like this: 'git <command> [<revision>...] -- [<file>...]'`",
+      "causes": [
+        "Указан не существующий branch / commit / tag",
+        "Опечатка в имени ref (`mian` вместо `main`)",
+        "Branch local — но указан как remote (нужно origin/main вместо main)",
+        "Default branch переименован (master -> main), скрипт ссылается на старое имя",
+        "Файл с тем же именем что и ветка — Git не знает, что вы имели в виду",
+        "После filter-repo / fresh clone — local refs из старой истории отсутствуют"
+      ],
+      "diagnosis": "git branch -a                     # все ветки local + remote\ngit tag -l                        # все теги\ngit log --all --oneline | head\ngit rev-parse <ref>               # пытается resolve\n\n# Конкретно проверить ref\ngit show-ref <name>",
+      "solutions": [
+        "Проверить правильное имя ветки/тега — `git branch -a` показывает все",
+        "Если ветка remote — добавить `origin/`: `git diff origin/main feature`",
+        "Если master -> main rename: `git branch -m master main && git fetch && git branch -u origin/main main`",
+        "Если конфликт с файлом — использовать `--`: `git log -- main` (главой считать main как файл) или `git log main --` (как ref)",
+        "После clone с пустыми branches — `git fetch --all` подтянет remote refs",
+        "При работе со скриптами всегда use full refs: `refs/heads/main`, `refs/remotes/origin/main`, `refs/tags/v1.0`"
+      ],
+      "relatedLessons": [
+        { "title": "Refs и .git/refs/", "slug": "04-branches-merging/02-refs-internals" }
+      ]
+    },
+    {
+      "id": "accidental-binary-commit-repo-bloat",
+      "title": "Случайный commit бинарника — репо весит 2GB",
+      "category": "history",
+      "symptoms": "Раньше `git clone` был быстрый, теперь 5-10 минут. `du -sh .git/` показывает 2GB+. На GitHub репо выглядит маленьким (limit 1GB Soft, 5GB Hard), но clone забирает все packs. Возможна ошибка от GitHub: 'Yowza, that's a lot of git data.'",
+      "causes": [
+        "Когда-то закоммитили большой бинарник (model.pkl, dataset.parquet, video.mp4)",
+        "Даже если удалили в новом commit — он в истории навсегда",
+        "Случайно `git add .` забрал build directory, dist/, node_modules/",
+        "Закоммитили IDE индексы (.idea/, .vscode/cache/)",
+        "В CI artifact пушится в репо вместо artifact storage",
+        "Поколение docker images или ML models versioned в git"
+      ],
+      "diagnosis": "du -sh .git/\ngit count-objects -vH\n\n# Топ больших blobs в истории\ngit rev-list --objects --all | \\\n  git cat-file --batch-check='%(objecttype) %(objectname) %(objectsize) %(rest)' | \\\n  awk '/^blob/ {print substr($0,index($0,$3))}' | \\\n  sort -k1 -n -r | head -20\n\n# или через git-filter-repo\ngit filter-repo --analyze",
+      "solutions": [
+        "Удалить большие файлы из истории через `git filter-repo --strip-blobs-bigger-than 10M`",
+        "Или конкретный путь: `git filter-repo --invert-paths --path data/large.parquet --path models/`",
+        "Альтернатива BFG: `bfg --strip-blobs-bigger-than 50M repo.git`",
+        "После filter-repo: `git reflog expire --expire=now --all && git gc --prune=now --aggressive`",
+        "Force push: `git push --force --all && git push --force --tags` (TEAM должна re-clone!)",
+        "Для будущего — настроить LFS для бинарников ИЛИ DVC для datasets/models",
+        "Pre-commit hook check-added-large-files (от pre-commit framework) — блокирует commits с файлами > N MB"
+      ],
+      "relatedLessons": [
+        { "title": "git-filter-repo", "slug": "17-secrets-security/05-filter-repo" },
+        { "title": "Git LFS basics", "slug": "14-lfs-big-data/01-git-lfs" }
+      ]
+    },
+    {
+      "id": "bad-object",
+      "title": "fatal: bad object",
+      "category": "recovery",
+      "symptoms": "Любая git операция падает: `fatal: bad object HEAD` или `error: object file .git/objects/3a/8c... is empty`, `fatal: loose object 3a8c... (stored in .git/objects/3a/8c2f1...) is corrupt`.",
+      "causes": [
+        "Физическое повреждение диска (bad sectors, недоописанные блоки)",
+        "Принудительное выключение / kill процесса git во время write",
+        "Антивирус scan и quarantine .git/ файлов",
+        "Manual edit (или удаление) файлов в .git/objects/",
+        "Файловая система проблемы (NFS / SMB hung writes)",
+        "Сбой при `git gc` или packfile corruption"
+      ],
+      "diagnosis": "git fsck --full                   # выявит corrupt objects\ngit fsck --no-reflogs --no-dangling\ngit count-objects -v\n\n# Проверить конкретный object\nls -la .git/objects/3a/8c2f1...\ngit cat-file -t <sha>\n\n# Целостность packfile\nfor p in .git/objects/pack/*.pack; do\n  git verify-pack -v $p > /dev/null || echo \"BROKEN: $p\"\ndone",
+      "solutions": [
+        "Если есть remote — clone заново в другой каталог и работать оттуда (самое простое решение)",
+        "Если local важен — попытаться восстановить отсутствующий объект из remote: `git fetch origin --depth 1` и потом полный fetch",
+        "Удалить broken object и пересохранить: `rm .git/objects/3a/8c2f1...; git fetch --all`",
+        "Восстановить из reflog: `git fsck --lost-found && git reflog`",
+        "Если pack повреждён — `git unpack-objects < broken.pack` экстрагирует целые objects",
+        "Профилактика: backups, не kill -9 git процессов, регулярный `git fsck`"
+      ],
+      "relatedLessons": [
+        { "title": "git fsck и recovery", "slug": "19-recovery/04-fsck" }
+      ]
+    },
+    {
+      "id": "merge-committed-but-wrong",
+      "title": "Merge закоммитил, но потом понял что не надо",
+      "category": "merging",
+      "symptoms": "Сделали `git merge feature/x`, conflicts resolved, merge commit создан. Через час понимаете — merged не туда / не то / преждевременно. `git log` показывает merge commit. Не push'ed ещё.",
+      "causes": [
+        "Merged в неправильную ветку (feature -> develop, а нужно было feature -> main)",
+        "Merged не готовую ветку (без CI green, без code review)",
+        "Случайно скриптом сделали merge вместо namespace-level rebase",
+        "Auto-merged через `gh pr merge` в спешке"
+      ],
+      "diagnosis": "git log --oneline --merges -5     # последние merge commits\ngit show HEAD                     # содержимое merge\ngit log --first-parent -5         # main branch history без feature commits\ngit reflog -10",
+      "solutions": [
+        "Если НЕ pushed — `git reset --hard HEAD~1` отменяет merge commit полностью",
+        "Если pushed и safe — `git reset --hard HEAD~1 && git push --force-with-lease` (опасно для team)",
+        "Если pushed и main protected (правильный setup) — нельзя reset. Используйте `git revert -m 1 <merge-sha>` чтобы создать revert commit",
+        "Revert merge через `-m 1` указывает 'parent 1' (то есть main branch line) как сторону, которую сохранить",
+        "ВАЖНО: после revert merge, повторный merge той же feature ветки НЕ применит изменения снова. Чтобы 'разморозить' — нужен revert revert или новая feature ветка",
+        "В будущем — настроить branch protection требующее approve + CI status check"
+      ],
+      "relatedLessons": [
+        { "title": "Revert merge commit", "slug": "09-undo-reflog/04-revert-merge" }
+      ]
+    },
+    {
+      "id": "could-not-resolve-host",
+      "title": "Could not resolve host: github.com",
+      "category": "config",
+      "symptoms": "`git clone`, `pull`, `push` падают: `fatal: unable to access 'https://github.com/...': Could not resolve host: github.com`. Или: `ssh: Could not resolve hostname github.com: nodename nor servname provided`.",
+      "causes": [
+        "Нет интернета / DNS проблемы",
+        "Корпоративный proxy без правильного config",
+        "VPN режет/блокирует github.com",
+        "ISP блокирует git domains (в РФ периодически случается)",
+        "`/etc/hosts` имеет неправильную запись github.com",
+        "DNS server даёт outdated / cached IP"
+      ],
+      "diagnosis": "ping github.com                   # доступен ли host\nnslookup github.com               # DNS resolve\ncurl -v https://github.com         # HTTP connection\n\n# Через SSH\nssh -vvv git@github.com\n\n# Proxy?\nenv | grep -i proxy\ngit config --get http.proxy",
+      "solutions": [
+        "Проверить интернет / VPN — открыть https://github.com в браузере",
+        "Настроить Git proxy: `git config --global http.proxy http://proxy:8080`",
+        "Если SSH блокирован — попробовать HTTPS вариант (можно изменить remote URL): `git remote set-url origin https://github.com/user/repo.git`",
+        "Если HTTPS блокирован — SSH over port 443: добавить в `~/.ssh/config`: `Host github.com\\n    Hostname ssh.github.com\\n    Port 443\\n    User git`",
+        "Использовать VPN, если есть geo-blocking",
+        "Если внутри docker container — проверить network config контейнера (host networking может помочь)"
+      ],
+      "relatedLessons": [
+        { "title": "Что такое remote", "slug": "05-remotes/01-remote-concept" }
+      ]
+    },
+    {
+      "id": "wrong-branch-checkout-lose-work",
+      "title": "Переключился на другую ветку и потерял незакоммиченные изменения",
+      "category": "recovery",
+      "symptoms": "Работали над файлами, не закоммитили. Сделали `git switch main`. Git позволил (если изменения не конфликтовали с main). Теперь файлы на main — без ваших правок. Возвращаетесь обратно в feature — там тоже нет правок. Изменения 'испарились'.",
+      "causes": [
+        "git switch переносит uncommitted changes между ветками, если они не конфликтуют — это feature, не bug",
+        "Изменения, не закоммиченные и не stashed, существуют только в working tree",
+        "Если потом пришли изменения с pull/rebase/checkout — working tree перезаписался",
+        "Файл был untracked, не staged — Git его не отслеживает вообще"
+      ],
+      "diagnosis": "git reflog -10                    # движения HEAD\ngit fsck --lost-found             # orphaned objects\nls .git/lost-found/               # если fsck нашёл что-то\n\n# В working tree остались?\ngit status\ngit diff",
+      "solutions": [
+        "Если файлы были untracked и просто переключение НЕ удалило их — должны быть на месте, проверить `git status`",
+        "Если staged — `git fsck --lost-found` ищет blobs, не attached к коммитам. Найденные blob можно открыть: `git cat-file -p <blob-sha>`",
+        "Если был auto-stash при switch (Git 2.27+ feature на некоторых config) — `git stash list`",
+        "Если файлы перезаписались — recovery ОЧЕНЬ ограниченно. IDE local history (VS Code, JetBrains) — последняя надежда",
+        "ПРАВИЛО: ВСЕГДА `git stash` или `git commit` перед switch, если есть незакоммиченные изменения",
+        "Современный workflow: `git switch -m <branch>` (merge mode) ИЛИ enable `--autostash` для switch"
+      ],
+      "relatedLessons": [
+        { "title": "git stash", "slug": "10-stash-tags-cherry-pick/01-stash" },
+        { "title": "git switch vs checkout", "slug": "04-branches-merging/07-switch-restore" }
+      ]
+    }
+  ]
+}

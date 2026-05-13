@@ -1,0 +1,74 @@
+{
+  "lessonSlug": "04-branches-merging/05-head-detached-head",
+  "moduleId": "04-branches-merging",
+  "_meta": {
+    "idPrefix": "git-m04-05",
+    "description": "Quiz for lesson 4.5 — HEAD и detached HEAD"
+  },
+  "questions": [
+    {
+      "id": "git-m04-05-q1",
+      "type": "multiple-choice",
+      "question": "Что такое detached HEAD состояние?",
+      "options": [
+        { "id": "a", "text": "Это когда репозиторий повреждён" },
+        { "id": "b", "text": "Это когда HEAD указывает напрямую на коммит (SHA в .git/HEAD), а не через ссылку на ветку (ref: refs/heads/...). Случается при git checkout <SHA>, checkout на тег, или checkout на origin/<branch>" },
+        { "id": "c", "text": "Это когда вы случайно удалили все ветки" },
+        { "id": "d", "text": "Это когда .git/HEAD пустой" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Detached HEAD — это особое состояние, в котором HEAD указывает на конкретный коммит, не через ветку. В .git/HEAD вместо 'ref: refs/heads/main' будет SHA напрямую. Это нормальное состояние, не баг. Случается: git checkout <SHA>, git switch --detach, checkout на tag (git checkout v1.0), checkout на remote tracking (git checkout origin/main), и автоматически во время rebase.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m04-05-q2",
+      "type": "multiple-choice",
+      "question": "В чём главная опасность detached HEAD?",
+      "options": [
+        { "id": "a", "text": "Нельзя смотреть содержимое файлов" },
+        { "id": "b", "text": "Коммиты, сделанные в detached HEAD, не принадлежат никакой ветке. Если переключиться куда-то БЕЗ создания ветки — эти коммиты станут unreachable (доступны только через reflog ~30 дней, потом исчезнут при git gc)" },
+        { "id": "c", "text": "Git перестаёт работать совсем" },
+        { "id": "d", "text": "Все ветки удаляются" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Коммиты в detached HEAD «висят» на HEAD, без привязки к ветке. Пока вы в этом состоянии — всё нормально, можете коммитить. Но если переключиться куда-то без `git switch -c <branch>`, новые коммиты становятся unreachable: никакая ветка/тег на них не указывает. Reflog держит ссылки ~30 дней, потом git gc удаляет физически. Поэтому правило: если хотите сохранить коммиты, сделанные в detached HEAD — `git switch -c <name>` ДО переключения.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m04-05-q3",
+      "type": "multiple-choice",
+      "question": "Junior сделал `git checkout v1.0` (lightweight tag) для просмотра старой версии. Это нормально или опасно?",
+      "options": [
+        { "id": "a", "text": "Опасно, нужно избегать" },
+        { "id": "b", "text": "Нормально для просмотра — пока не делать коммитов. Тэги — это просто указатели на коммиты, checkout на тег = detached HEAD. Если только смотрите файлы и потом git switch - — всё безопасно" },
+        { "id": "c", "text": "Опасно, теряет историю" },
+        { "id": "d", "text": "Это удаляет тег v1.0" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Checkout на тег попадает в detached HEAD — это by design. Тэги — указатели на коммиты, не ветки. Если вы только просматриваете (как было в v1.0?) — безопасно: вернётесь обратно через git switch - или git switch main. Если же решили сделать изменения от v1.0 — сначала создайте ветку: `git switch -c experiment/from-v1`. Это сохранит работу.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m04-05-q4",
+      "type": "multiple-choice",
+      "question": "Junior случайно сделал три коммита в detached HEAD, потом сделал `git switch main`. Коммиты не видны. Как восстановить?",
+      "options": [
+        { "id": "a", "text": "Никак, коммиты потеряны навсегда" },
+        { "id": "b", "text": "Нужно переустановить Git" },
+        { "id": "c", "text": "Через git reflog найти SHA detached-коммита, потом `git switch -c rescue-branch <SHA>` создаст ветку прямо на этом коммите, и вся цепочка станет доступна" },
+        { "id": "d", "text": "Запустить git fsck --reset" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "Detached-коммиты физически в .git/objects/ (Git не удаляет объекты сразу). 1) `git reflog` — журнал движений HEAD. Найдите запись вида «HEAD@{1}: commit: my detached work». 2) Запомните SHA. 3) `git switch -c rescue-branch <SHA>` — создаёт ветку прямо на этом коммите, цепочка parent-ов восстанавливается. Reflog хранит данные ~30 дней по умолчанию, потом git gc удаляет unreachable objects. До тех пор всё восстановимо. Модуль 09 разбирает reflog подробно.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m04-05-q5",
+      "type": "true-false",
+      "question": "Detached HEAD — это ошибка, которую нужно немедленно исправить.",
+      "correctAnswer": false,
+      "explanation": "Нет. Detached HEAD — это нормальное состояние, не баг. Используется: при просмотре старых коммитов (git checkout <SHA>), при работе с тегами (checkout v1.0), внутри submodules (там HEAD detached by design), во время rebase. Опасно только если делать коммиты в detached HEAD и забыть создать ветку перед уходом. Сам по себе detached HEAD не требует «исправления».",
+      "bloomLevel": "conceptual"
+    }
+  ]
+}

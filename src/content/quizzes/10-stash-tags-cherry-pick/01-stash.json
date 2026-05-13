@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "10-stash-tags-cherry-pick/01-stash",
+  "moduleId": "10-stash-tags-cherry-pick",
+  "_meta": { "idPrefix": "git-m10-01" },
+  "questions": [
+    {
+      "id": "git-m10-01-q1",
+      "type": "multiple-choice",
+      "question": "Чем `git stash push` отличается от `git stash push -u`?",
+      "options": [
+        { "id": "a", "text": "-u означает 'undo'" },
+        { "id": "b", "text": "Без -u stash включает только tracked файлы (modified или staged). С -u (--include-untracked) включает и НЕ-tracked файлы (новые, не git add-нутые). Без -u они остаются на диске и переходят на любую ветку при git switch" },
+        { "id": "c", "text": "Это эквивалентные команды" },
+        { "id": "d", "text": "-u включает ignored файлы" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "По умолчанию stash работает только с tracked файлами. Это часто sorpresa для junior: 'я сделал stash, переключился на main, а мои новые файлы из feature тут как тут!' Это потому что untracked файлы НЕ tracked Git'ом, и stash их не видит. -u (--include-untracked) включает untracked. -a (--all) включает untracked + ignored. Правило: при context switch со 'свежими' новыми файлами всегда -u.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m10-01-q2",
+      "type": "multiple-choice",
+      "question": "Разница между `git stash pop` и `git stash apply`?",
+      "options": [
+        { "id": "a", "text": "Pop быстрее" },
+        { "id": "b", "text": "pop = apply + drop в одну команду (применить и удалить из стека). apply применяет, но оставляет stash в стеке — можно apply ещё раз или на другой ветке. При конфликте обе команды оставляют stash. Для junior рекомендуется apply + drop вручную (explicit, не теряешь работу)" },
+        { "id": "c", "text": "Apply применяет на удалённой ветке" },
+        { "id": "d", "text": "Они эквивалентны" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Семантика: pop = «достать и забыть», apply = «достать но оставить». Удобство pop: одна команда. Безопасность apply: если применилось не туда (другая ветка) — можно abort и попробовать ещё раз без потерь. Конфликт: обе команды НЕ удаляют stash (защитное поведение Git). Best practice для junior — apply + посмотреть результат + drop вручную.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m10-01-q3",
+      "type": "multiple-choice",
+      "question": "Когда stash — НЕправильный инструмент и нужна ветка?",
+      "options": [
+        { "id": "a", "text": "Никогда — stash всегда лучше" },
+        { "id": "b", "text": "Когда WIP длительный (дни/недели), когда нужно поделиться с коллегой (stash локальный), когда важна история работы (stash имеет только 'WIP' message), когда хранится >5 стэшей. Ветка надёжнее: видна в git log, пушится на remote, не удаляется git stash clear" },
+        { "id": "c", "text": "Только для production" },
+        { "id": "d", "text": "Stash подходит для всех сценариев" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Stash — для быстрой (минуты-часы) переключки контекста. Длительный WIP требует ветки: `git switch -c wip/feature && git commit -m 'WIP'`. Преимущества ветки: видна в git log с timestamp/message, пушится на remote (backup), не теряется при stash clear или GC. Stash может быть удалён garbage collection через ~30 дней если потеряет reachability. Ветка живёт пока её не удалишь.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m10-01-q4",
+      "type": "multiple-choice",
+      "question": "Хочешь посмотреть, что точно в stash@{1}, перед тем как apply. Команда?",
+      "options": [
+        { "id": "a", "text": "git stash log stash@{1}" },
+        { "id": "b", "text": "git stash show -p stash@{1} (или короче 'git stash show -p 1'). Показывает полный diff содержимого stash. Без -p (только stat: какие файлы изменены, сколько строк +/-). Полезно перед apply чтобы понять что вернётся" },
+        { "id": "c", "text": "git log stash@{1}" },
+        { "id": "d", "text": "git diff stash" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Stash хранится как набор спец-коммитов в namespace refs/stash. git stash show — специальная команда для просмотра. По умолчанию показывает stat (краткая статистика файлов). С -p — полный patch (diff). Можно использовать любой ref-нотацию: stash@{0}, stash@{1}, или короче '0', '1'. Перед opasной apply (например, после долго не возвращался к stash) — это must check.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m10-01-q5",
+      "type": "true-false",
+      "question": "git stash сохраняет состояние на удалённом сервере для backup.",
+      "correctAnswer": false,
+      "explanation": "Нет, stash полностью локальный. Хранится в .git/refs/stash и .git/logs/refs/stash на твоей машине. Не пушится автоматически через git push. Если стереть .git/ или потерять компьютер — stash потерян. Для backup используй ветку: git switch -c backup/my-work && git commit -am 'WIP' && git push origin backup/my-work. Ветка пушится, видна в команде, можно вернуть с любой машины.",
+      "bloomLevel": "conceptual"
+    }
+  ]
+}

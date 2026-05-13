@@ -1,0 +1,59 @@
+{
+  "lessonSlug": "18-ci-cd-github-actions/02-github-actions-anatomy",
+  "moduleId": "18-ci-cd-github-actions",
+  "_meta": {
+    "idPrefix": "git-m18-02"
+  },
+  "questions": [
+    {
+      "id": "git-m18-02-q1",
+      "type": "multiple-choice",
+      "question": "В чём разница между jobs и steps в GitHub Actions?",
+      "options": [
+        {"id": "a", "text": "Это синонимы"},
+        {"id": "b", "text": "Jobs — параллельные unit-ы исполнения, каждый на своей VM, не делят state. Steps — последовательные команды внутри одного job, делят файловую систему"},
+        {"id": "c", "text": "Steps — параллельные, jobs — последовательные"},
+        {"id": "d", "text": "Jobs пишутся на Python, steps — на YAML"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Jobs — независимые execution units. Каждый job получает свежий runner (VM), параллельно с другими jobs по умолчанию. Между jobs ничего не shared. Чтобы сделать sequential — `needs:` создаёт зависимости. Steps — последовательные команды внутри одного job, выполняются на одном runner, share файловую систему. Если step упал — следующие обычно не запускаются (если нет `if: always()`).",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m18-02-q2",
+      "type": "multiple-choice",
+      "question": "Какой триггер запустит workflow только при push в ветки release/X.Y и НЕ запустит на изменения в docs/?",
+      "options": [
+        {"id": "a", "text": "on: push: branches: [release/*]"},
+        {"id": "b", "text": "on: push: branches: [release/*] paths-ignore: ['docs/**']"},
+        {"id": "c", "text": "on: push: tags: [v*]"},
+        {"id": "d", "text": "on: pull_request"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Combination filter: branches фильтрует по ветке (release/* — glob pattern для release/1.0, release/2.5, etc), paths-ignore исключает push, которые трогают только указанные paths. Если в одном push изменения и в docs/, и в src/ — paths-ignore НЕ блокирует, потому что есть не-docs изменения. branches: [release/*] без paths-ignore — запустит CI и на pure docs changes. tags для tag-events, не branch push. pull_request — другой триггер.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m18-02-q3",
+      "type": "multiple-choice",
+      "question": "Matrix workflow с `matrix: { python: ['3.11', '3.12', '3.13'], os: [ubuntu, macos] }` создаст сколько runs?",
+      "options": [
+        {"id": "a", "text": "1 run (matrix объединяется)"},
+        {"id": "b", "text": "5 runs (3 + 2)"},
+        {"id": "c", "text": "6 runs — Cartesian product 3 × 2"},
+        {"id": "d", "text": "Зависит от размера репо"}
+      ],
+      "correctAnswer": "c",
+      "explanation": "Matrix — это декартово произведение. 3 python versions × 2 OS = 6 параллельных runs. Один такой run = {python: '3.11', os: 'ubuntu'}, другой = {python: '3.11', os: 'macos'}, и т.д. Можно reduce через `exclude:` (специфичные комбинации не запускать) или `include:` (добавить специфичные дополнительно). fail-fast: true (default) — если один упал, остальные cancel. fail-fast: false — все до конца.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m18-02-q4",
+      "type": "true-false",
+      "question": "Use `actions/checkout@main` вместо `actions/checkout@v4` — это плохая практика в production workflow, потому что behaviour может неожиданно измениться при каждом push в main ветку action-репо.",
+      "correctAnswer": true,
+      "explanation": "`@main` означает 'последний commit на main branch action-репо'. Каждый push в main мог изменить поведение — твой workflow может сломаться без твоих изменений. `@v4` означает stable tag — maintainer обновляет minor versions (v4.0 -> v4.1) с backward compat. Самый paranoid вариант: `@<sha>` — immutable, никогда не меняется (Dependabot будет открывать PR с updates). Best practice: для official actions от GitHub — `@v4`; для community actions — `@<sha>` + Dependabot для auto-update PRs.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

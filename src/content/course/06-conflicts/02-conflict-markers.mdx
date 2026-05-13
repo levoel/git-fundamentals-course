@@ -1,0 +1,380 @@
+---
+title: "Анатомия конфликтных маркеров"
+description: "Что значат маркеры HEAD/branch разделителя в файлах при merge — и почему zdiff3 удобнее"
+order: 2
+difficulty: "beginner"
+estimatedTime: 18
+topics: ["Git", "conflicts", "merge", "zdiff3"]
+---
+
+# Анатомия конфликтных маркеров
+
+Когда Git встречает конфликт, он не падает и не отменяет операцию. Вместо этого Git **переписывает файл**, вставляя в него обе версии с разделителями. Эти разделители называются **conflict markers** — те самые ≪≪≪≪≪≪≪ и ≫≫≫≫≫≫≫, которые ты увидишь в "конфликтных" файлах.
+
+В этом уроке мы разбираем, что значит каждый маркер, как читать конфликт, и почему включение `merge.conflictStyle = zdiff3` — лучшая микро-настройка, которую ты можешь сделать сегодня.
+
+---
+
+## Дефолтный вид конфликта
+
+Когда `git merge` упёрся в конфликт на строке, Git вставляет в файл блок такого вида (показываем внутри bash-блока, чтобы MDX не сошёл с ума):
+
+```bash
+def fetch():
+<<<<<<< HEAD
+    return "v2-from-main"
+=======
+    return "v3-from-feature"
+>>>>>>> feature
+```
+
+Три маркера:
+
+- `≪≪≪≪≪≪≪ HEAD` — начало "наших" изменений (текущая ветка, OURS).
+- `=======` — разделитель.
+- `≫≫≫≫≫≫≫ feature` — конец "их" изменений (мерджимая ветка, THEIRS).
+
+То есть структура такая:
+
+```bash
+<<<<<<< HEAD
+[OURS — что у меня в текущей ветке]
+=======
+[THEIRS — что в мерджимой ветке]
+>>>>>>> feature
+```
+
+Эти маркеры — **просто текст в файле**. Никакой магии: Git вставил их и сохранил файл. Питон, конечно, не сможет такой файл выполнить — там синтаксис сломан. Но для Git это просто строки. Когда ты их удаляешь и оставляешь нужный код, файл снова рабочий.
+
+<Callout type="warning">
+Никогда не коммить файл с не разрешёнными маркерами. Это означает "запушить заведомо нерабочий код". Linter и pre-commit hooks обычно ловят это, но привычка — каждый раз перед `git add` визуально проверить, что маркеров не осталось.
+</Callout>
+
+---
+
+## Что значит "HEAD" и имя ветки в маркерах
+
+После `≪≪≪≪≪≪≪ ` Git пишет имя коммита или ветки, чтобы ты не запутался, кто есть кто.
+
+- `≪≪≪≪≪≪≪ HEAD` — типично для `git merge`. HEAD = текущая ветка, в которую ты мерджишь.
+- `≪≪≪≪≪≪≪ feature` — может встретиться, например, при rebase, где "OURS" и "THEIRS" меняются местами относительно интуиции.
+
+Запомни правило: **OURS — это куда мерджишь, THEIRS — что мерджишь**. При merge ты обычно стоишь на `main` и мерджишь `feature` — значит OURS = main, THEIRS = feature.
+
+### Подвох с rebase
+
+При rebase интуиция переворачивается. `git rebase main` на ветке `feature` означает: "возьми коммиты `feature` и переставь их поверх `main`". Технически Git проигрывает каждый коммит `feature` поверх `main`, и для каждого создаёт мини-мердж. В этом мини-мердже:
+
+- OURS = `main` (новая база).
+- THEIRS = коммит из `feature`.
+
+То есть **наоборот** относительно `git merge`! Поэтому в конфликте при rebase ты увидишь:
+
+```bash
+<<<<<<< HEAD
+[содержимое из main]
+=======
+[содержимое из твоего коммита feature]
+>>>>>>> abc1234 (your commit message)
+```
+
+И сначала это путает. Помни: при rebase HEAD — это "временная база", а THEIRS — твои перебазируемые коммиты.
+
+---
+
+## `merge.conflictStyle = zdiff3`: показать BASE
+
+Дефолтные маркеры показывают только OURS и THEIRS. Но Git знает и третью версию — **BASE** (общий предок). Если её показать, понимать конфликт становится в разы легче.
+
+Включи `zdiff3`:
+
+```bash
+git config --global merge.conflictStyle zdiff3
+```
+
+Теперь тот же конфликт выглядит так:
+
+```bash
+def fetch():
+<<<<<<< HEAD
+    return "v2-from-main"
+||||||| merged common ancestors
+    return "v1"
+=======
+    return "v3-from-feature"
+>>>>>>> feature
+```
+
+Дополнительные маркеры:
+
+- `||||||| merged common ancestors` — открывает блок BASE.
+- `=======` — закрывает BASE, открывает THEIRS.
+
+Теперь ты видишь **три** версии:
+
+- BASE = `v1` (что было).
+- OURS = `v2-from-main` (как поменяла наша ветка).
+- THEIRS = `v3-from-feature` (как поменяла их ветка).
+
+<DiagramContainer title="zdiff3 показывает все три версии" color="purple">
+  <FlowColumn className="p-4 gap-3">
+    <Tooltip content="Стандартный diff2: видно только OURS и THEIRS — что было раньше неясно">
+      <DataBox label="default (diff2)" className="border-zinc-500/30 w-96 mx-auto">
+        <div className="text-xs font-mono space-y-0.5">
+          <div>{'<<<<<<< HEAD'}</div>
+          <div className="pl-3">v2-from-main</div>
+          <div>{'======='}</div>
+          <div className="pl-3">v3-from-feature</div>
+          <div>{'>>>>>>> feature'}</div>
+        </div>
+      </DataBox>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="zdiff3: добавлен BASE — видно ОТКУДА разошлись обе стороны">
+      <DataBox label="zdiff3" className="border-purple-500/30 w-96 mx-auto">
+        <div className="text-xs font-mono space-y-0.5">
+          <div>{'<<<<<<< HEAD'}</div>
+          <div className="pl-3">v2-from-main</div>
+          <div>{'||||||| common ancestor'}</div>
+          <div className="pl-3 text-zinc-400">v1 (BASE)</div>
+          <div>{'======='}</div>
+          <div className="pl-3">v3-from-feature</div>
+          <div>{'>>>>>>> feature'}</div>
+        </div>
+      </DataBox>
+    </Tooltip>
+  </FlowColumn>
+</DiagramContainer>
+
+### Чем `zdiff3` лучше старого `diff3`
+
+`diff3` тоже показывает BASE, но есть нюанс: иногда BASE содержит куски, которые **обе** стороны изменили на одно и то же. `diff3` всё равно их показывает в BASE-блоке — раздувает конфликт.
+
+`zdiff3` ("zealous diff3") эту дубликацию убирает: если OURS и THEIRS одинаково изменили строку, она не попадает в конфликт. Это сильно чище.
+
+`zdiff3` доступен с Git 2.35 (январь 2022). К 2026 году это стандарт. Установи и забудь.
+
+---
+
+## Сценарии: чтение реального конфликта
+
+### Сценарий 1: обе стороны правят одну строку
+
+```bash
+DB_HOST = "prod.db.example.com"
+DB_TIMEOUT = 30
+<<<<<<< HEAD
+DB_POOL_SIZE = 50
+||||||| merged common ancestors
+DB_POOL_SIZE = 10
+=======
+DB_POOL_SIZE = 25
+>>>>>>> feature/perf-tuning
+```
+
+Читай: было `DB_POOL_SIZE = 10`. Наша ветка повысила до 50 (агрессивно). Feature-ветка — до 25 (умеренно).
+
+Решение зависит от ситуации:
+
+- Если 50 было результатом перфоманс-теста, оставляй 50.
+- Если 25 — компромисс с какими-то ограничениями, бери 25.
+- Может быть и третий вариант — 35, среднее.
+
+Удаляешь все маркеры, оставляешь финальную строку:
+
+```python
+DB_POOL_SIZE = 35  # компромисс между OURS и THEIRS
+```
+
+### Сценарий 2: одна сторона добавила импорт, другая — модифицировала функцию
+
+Иногда конфликт shows непересекающиеся изменения, которые Git сгруппировал в один блок. Это означает, что строки рядом, но обе стороны их трогали.
+
+```bash
+<<<<<<< HEAD
+from datetime import datetime
+import logging
+
+def process(data):
+    logger = logging.getLogger(__name__)
+    logger.info("start")
+    return [x.upper() for x in data]
+||||||| merged common ancestors
+from datetime import datetime
+
+def process(data):
+    return [x for x in data]
+=======
+from datetime import datetime, timezone
+
+def process(data):
+    return [x.upper() for x in data if x]
+>>>>>>> feature
+```
+
+Читай:
+- BASE: импорт datetime, простая функция.
+- OURS (HEAD): добавил импорт logging, добавил logging в функцию.
+- THEIRS (feature): добавил импорт timezone, добавил фильтрацию `if x` и `.upper()`.
+
+Оба изменения нужны. Правильный мердж:
+
+```python
+from datetime import datetime, timezone
+import logging
+
+def process(data):
+    logger = logging.getLogger(__name__)
+    logger.info("start")
+    return [x.upper() for x in data if x]
+```
+
+Это типичный случай "не выбирай OURS/THEIRS — слей оба умом".
+
+### Сценарий 3: structurally конфликтные изменения
+
+Бывает, что оба изменения логически конфликтуют, не только текстуально.
+
+```bash
+def calculate_tax(amount):
+<<<<<<< HEAD
+    return amount * 0.20  # VAT повышен до 20%
+||||||| merged common ancestors
+    return amount * 0.18
+=======
+    return amount * 0.18 + 100  # фиксированный сбор
+>>>>>>> feature/fixed-fee
+```
+
+OURS повысил процент. THEIRS добавил фиксированный сбор. Это не "выбери один" — нужно обсуждение с автором обеих веток: "коллега, ты добавил fee, я повысил процент, как это должно работать вместе?".
+
+Не разрешай такие конфликты в одиночку — спроси команду.
+
+<Callout type="tip">
+В реальной работе, если ты не понимаешь, что значит чужое изменение в конфликте — открой `git log -p <file>` на их ветке, посмотри коммит-сообщение, узнай контекст. Иногда полезно дописать в Slack: "Эй, у меня конфликт на твоей строке, можем созвониться?".
+</Callout>
+
+---
+
+## Как Git отмечает конфликтные файлы
+
+`git status` показывает конфликты явно:
+
+```bash
+$ git status
+On branch main
+You have unmerged paths.
+  (fix conflicts and run "git commit")
+  (use "git merge --abort" to abort the merge)
+
+Unmerged paths:
+  (use "git add <file>..." to mark resolution)
+        both modified:   src/etl.py
+        both modified:   src/config.py
+        deleted by them: src/old.py
+
+no changes added to commit (use "git add" and/or "git commit -a")
+```
+
+Категории:
+
+- **both modified** — обе стороны изменили (классический конфликт). Внутри файла есть маркеры.
+- **deleted by them** — ты изменил, они удалили. Решение: `git rm` (согласен удалить) или `git add` (восстанавливаешь).
+- **deleted by us** — ты удалил, они изменили. Аналогично.
+- **both added** — обе ветки создали файл с этим именем (с разным содержимым).
+- **added by them / us** — один из видов above.
+
+Команда для списка только конфликтных файлов:
+
+```bash
+$ git diff --name-only --diff-filter=U
+src/etl.py
+src/config.py
+```
+
+Полезно для скриптов и в IDE.
+
+---
+
+## Index в состоянии конфликта
+
+Под капотом Git хранит конфликтные файлы в **index** в трёх "ступенях" (stages):
+
+- Stage 1 = BASE
+- Stage 2 = OURS
+- Stage 3 = THEIRS
+
+Команда `git ls-files -u` это показывает:
+
+```bash
+$ git ls-files -u
+100644 a1b2c3d... 1  src/etl.py     # BASE
+100644 f4e5d6c... 2  src/etl.py     # OURS (HEAD)
+100644 9876543... 3  src/etl.py     # THEIRS (feature)
+```
+
+После того, как ты сделаешь `git add src/etl.py`, все три stage схлопываются в один (stage 0), и Git понимает: конфликт разрешён.
+
+Это знание не нужно в быту, но полезно знать: можно явно достать любую из версий через `git checkout-index --stage=N -- <file>`.
+
+---
+
+## Включи zdiff3 прямо сейчас
+
+```bash
+git config --global merge.conflictStyle zdiff3
+
+# Проверь
+git config --global merge.conflictStyle
+# zdiff3
+```
+
+Это применится ко всем будущим конфликтам во всех твоих репозиториях. Никаких минусов нет, только плюсы — больше контекста при чтении.
+
+---
+
+## Попробуй сам
+
+```bash
+# 1. Включи zdiff3 (если ещё не)
+git config --global merge.conflictStyle zdiff3
+
+# 2. Создай тестовый репо
+mkdir markers-demo && cd markers-demo
+git init
+cat > config.py <<EOF
+DB_HOST = "localhost"
+DB_PORT = 5432
+DB_TIMEOUT = 10
+EOF
+git add . && git commit -m "init"
+
+# 3. Создай два конфликтующих изменения
+git switch -c feature
+sed -i.bak 's/DB_TIMEOUT = 10/DB_TIMEOUT = 60/' config.py && rm config.py.bak
+git commit -am "feature: increase timeout to 60"
+
+git switch main
+sed -i.bak 's/DB_TIMEOUT = 10/DB_TIMEOUT = 30/' config.py && rm config.py.bak
+git commit -am "main: increase timeout to 30"
+
+# 4. Попробуй смерджить — будет конфликт
+git merge feature
+
+# 5. Посмотри файл — увидишь маркеры с BASE
+cat config.py
+
+# 6. Если зачем-то надо переключить style временно:
+git config merge.conflictStyle diff2
+# Сделай merge --abort и снова merge — увидишь старый формат
+git merge --abort
+git merge feature
+cat config.py
+```
+
+---
+
+<KnowledgeCheck
+  question="Ты сделал `git rebase main` на своей ветке `feature`. Видишь конфликт в файле, начинается с `≪≪≪≪≪≪≪ HEAD`. Интуитивно думаешь: 'HEAD — это моя ветка feature'. Почему это неправильно при rebase, и как разобраться, где OURS, а где THEIRS?"
+  answer="При rebase Git перебирает коммиты ветки `feature` и применяет их по одному поверх `main`. На каждой итерации **HEAD временно установлен на новую базу (main)**, а ваш коммит из feature накладывается как 'патч сверху'. Поэтому при rebase: OURS (HEAD) = `main` (новая база), THEIRS = ваш коммит из feature. Это **наоборот** относительно `git merge`, где HEAD — текущая ветка. Как разобраться: (1) Посмотреть на нижний маркер `>>>>>>> abc1234 (feature commit message)` — там видно, чьи именно изменения в THEIRS-блоке. (2) Проверить `git status` — он покажет `interactive rebase in progress` или `rebase in progress`, и список применённых/оставшихся коммитов. (3) Если используешь `zdiff3`, в BASE-блоке увидишь оригинал из `main` до твоих изменений — это помогает ориентироваться. (4) Самое простое правило: при rebase **THEIRS — это ВСЕГДА твои изменения**, потому что ты их 'наносишь' поверх чужой базы. Поэтому когда хочется 'оставить свою версию' при rebase, выбирай THEIRS, а не OURS."
+/>

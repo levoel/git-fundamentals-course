@@ -1,0 +1,413 @@
+---
+title: "CI vs CD: что увидит junior DE в первую неделю"
+description: "CI = каждый push/PR запускает автотесты, lint, type-check. CD = каждый merge в main делает auto-deploy. Junior увидит status checks 1/3 passed, dbt CI runs compile + test --select state:modified, ruff/mypy/pytest на каждом PR. Конкретные real-world сценарии."
+order: 1
+difficulty: "beginner"
+estimatedTime: 25
+topics: ["ci", "cd", "automation", "github-actions", "dbt-ci", "airflow-ci", "status-checks"]
+---
+
+# CI vs CD: что увидит junior DE в первую неделю
+
+Ты открыл свой первый Pull Request на новой работе — небольшое изменение в `dags/etl_users.py`. Через 10 секунд под PR появляется:
+
+```
+Some checks haven't completed yet
+  Lint / ruff               in progress (15s)
+  Type check / mypy         queued
+  Unit tests / pytest       queued
+  dbt compile               queued
+  Branch protection ─ Required check
+```
+
+Через минуту:
+
+```
+Some checks were not successful
+  Lint / ruff               passed (38s)
+  Type check / mypy         failed (1m 12s)
+  Unit tests / pytest       passed (1m 45s)
+  dbt compile               passed (52s)
+```
+
+Merge кнопка серая, написано «1 failing check». Что это всё? Это **CI**, и понимание его — критическая часть работы junior DE в 2026.
+
+В этом уроке разберём: чем CI отличается от CD, что junior увидит на типичном DE-проекте, и почему «зелёный CI» — это **обязательный** ритуал перед merge.
+
+---
+
+## CI: Continuous Integration
+
+**CI** = continuous integration. Идея простая: каждый раз когда кто-то pushes код, **автоматически запускаются проверки** — тесты, lint, type-check, security scan. Если что-то падает, разработчик узнаёт сразу, не через неделю в production.
+
+Базовый цикл:
+
+<DiagramContainer title="Workflow PR с CI">
+  <SequenceDiagram>
+    <Actor name="DE" />
+    <Actor name="GitHub" />
+    <Actor name="CI runner" />
+    <Actor name="Reviewer" />
+    <Lifeline />
+    <Message from="DE" to="GitHub" label="git push origin feat/new-dag" />
+    <Message from="GitHub" to="GitHub" label="git push triggers PR creation" />
+    <Message from="GitHub" to="CI runner" label="trigger workflow (.github/workflows/ci.yml)" />
+    <Message from="CI runner" to="CI runner" label="checkout, install, lint, test, build" />
+    <Message from="CI runner" to="GitHub" label="status: success / failure" />
+    <Message from="GitHub" to="DE" label="UI: check passed / failed" />
+    <Message from="Reviewer" to="GitHub" label="reviews code (если CI зелёный)" />
+    <Message from="Reviewer" to="GitHub" label="approve + merge" />
+  </SequenceDiagram>
+</DiagramContainer>
+
+### Что обычно делает CI в DE-проекте
+
+Стандартный набор checks для Python DE-проекта (Airflow / dbt / pandas):
+
+| Check | Что делает | Сколько занимает |
+|---|---|---|
+| **ruff** | Lint Python: ловит unused imports, неправильный стиль, баги | 5-30 sec |
+| **mypy** | Type check: ловит несовпадение типов до запуска | 30 sec – 2 min |
+| **pytest** | Unit tests: запускает тесты на конкретные функции | 1-10 min |
+| **dbt compile** | Парсит SQL шаблоны, ловит ошибки в Jinja | 30 sec – 2 min |
+| **dbt test --select state:modified** | Запускает тесты на изменённые модели | 2-15 min |
+| **gitleaks** | Сканирует на утечку секретов (модуль 17) | 5-20 sec |
+| **airflow dag-test** | Проверяет, что DAG-файлы валидны (не упадут при импорте) | 30 sec – 2 min |
+| **terraform validate** | Если есть IaC: проверка синтаксиса | 10-30 sec |
+
+Время на средний DE-проект: 5-20 минут общего CI. Если меньше — повезло, если больше — pipeline нужно оптимизировать (matrix, caching).
+
+### Какие триггеры CI
+
+Самые частые в `.github/workflows/*.yml`:
+
+```yaml
+on:
+  pull_request:           # на каждый PR (создание + push в ветку PR)
+    branches: [main]
+  push:
+    branches: [main]      # после merge в main
+  schedule:
+    - cron: '0 6 * * *'   # ежедневно для cron-аналитики (data freshness)
+  workflow_dispatch:      # ручной запуск через UI
+```
+
+Junior на feature-ветке делает push -> CI запускается **только если** ветка имеет открытый PR в main, ИЛИ если в `on:` указан `push: branches: [feat/*]`. Это важно: пока PR не открыт, CI обычно не бежит, экономит quota.
+
+### Status check = блокировка merge
+
+В GitHub `Required status checks` — это правило, что merge **запрещён**, пока определённые checks не зелёные. Настраивается в Settings -> Branches -> Branch protection rules:
+
+```
+[x] Require status checks to pass before merging
+   Required:
+   [x] Lint / ruff
+   [x] Type check / mypy
+   [x] Unit tests / pytest
+   [x] dbt compile
+   [x] Secret scan / gitleaks
+```
+
+Junior нажимает «Merge pull request» — серая кнопка, говорит «Required status checks must pass». Идёт чинить tests, делает push, CI перезапускается, через 5 минут — checks зелёные, кнопка становится зелёной.
+
+Подробно про branch protection — в уроке 04 этого модуля.
+
+---
+
+## CD: Continuous Delivery / Deployment
+
+**CD** = continuous deployment (или delivery, разница ниже). Идея: после успешного merge в main, **автоматически деплоить** изменения в production (или staging).
+
+| Term | Что делает |
+|---|---|
+| **Continuous Delivery** | Auto-build artifact, auto-deploy в staging. Production deploy — ручной trigger (по button). |
+| **Continuous Deployment** | Auto-deploy в production без human-approval. Только для очень mature pipelines. |
+
+Большинство DE-команд в 2026 году делают **Continuous Delivery**: merge -> staging auto, production — manual approval.
+
+### Что CD выглядит для DE
+
+```yaml
+# .github/workflows/deploy.yml
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy-airflow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sync DAGs to S3
+        run: aws s3 sync dags/ s3://airflow-dags-prod/dags/
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+  deploy-dbt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run dbt build in prod
+        run: dbt build --target prod
+        env:
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+```
+
+После merge — DAGs синкаются в S3 (откуда Airflow читает), dbt-моделей запускается production build. Через 5-10 минут — изменения live.
+
+### Production deployment patterns
+
+Не все CD одинаковы. Типовые подходы для DE:
+
+**1. Airflow MWAA / Astro / Cloud Composer**:
+- Pipeline синкает `dags/` в S3 (или Git-Sync в Kubernetes).
+- Airflow scheduler автоматически подхватывает новые версии.
+- Rollback = revert commit, который вернёт старую версию в S3.
+
+**2. dbt Cloud / dbt Core с scheduler**:
+- Merge в main -> dbt Cloud auto-deploy nightly schedule.
+- Или GitHub Actions запускает `dbt build` в cron.
+
+**3. Spark jobs на EMR / Databricks**:
+- Build Python wheel / Docker image.
+- Push в S3 / DockerHub / ECR.
+- EMR/Databricks job обновляет ссылку на новый artifact.
+
+**4. Streaming pipelines (Flink, Kafka Streams)**:
+- Сложнее: stateful apps требуют savepoint при upgrade.
+- Обычно — CD до build/test, deploy — manual через ArgoCD / Spinnaker.
+
+---
+
+## Real-world: dbt CI на каждый PR
+
+Один из самых распространённых CI patterns для DE: **dbt CI на изменённые модели**. Когда junior меняет одну `.sql` модель в `models/marts/customers.sql`, CI должен:
+
+1. Скомпилировать модель (Jinja -> SQL).
+2. Запустить **только эту модель** в isolated dev schema.
+3. Запустить **только тесты этой модели** и зависящих от неё.
+4. Сравнить результат с prod (data quality).
+
+```yaml
+# .github/workflows/dbt-ci.yml
+name: dbt CI
+
+on:
+  pull_request:
+    paths:
+      - 'models/**'
+      - 'macros/**'
+      - 'tests/**'
+      - 'dbt_project.yml'
+
+jobs:
+  dbt-ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # нужно для state comparison
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dbt
+        run: pip install dbt-snowflake==1.9.0
+
+      - name: Download prod manifest (для state:modified)
+        run: |
+          aws s3 cp s3://dbt-prod-state/manifest.json ./prod-state/manifest.json
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET }}
+
+      - name: dbt compile
+        run: dbt compile
+        env:
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+
+      - name: dbt build modified only
+        run: |
+          dbt build \
+            --select state:modified+ \
+            --state ./prod-state \
+            --target ci \
+            --vars '{"ci_schema": "ci_pr_${{ github.event.pull_request.number }}"}'
+        env:
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+
+      - name: Cleanup CI schema after PR closed
+        if: always()
+        run: |
+          # Удалить временную схему ci_pr_123 после CI
+          echo "DROP SCHEMA IF EXISTS analytics.ci_pr_${{ github.event.pull_request.number }} CASCADE;" \
+            | snowsql -q -
+```
+
+Что делает `state:modified+`:
+- `state:modified` — модели, которые отличаются от prod manifest.
+- `+` после — все downstream модели (которые ссылаются на изменённые).
+
+То есть если junior изменил `stg_users.sql`, и от него зависит `int_users_enriched.sql` и `customers.sql` — все три собираются и тестируются. Прочие 500 моделей в проекте — не трогаются. Это экономит warehouse-compute (Snowflake credits) и время.
+
+<Callout type="tip">
+`dbt build --select state:modified+` — golden pattern dbt CI. Если новый DE-проект не использует state, он либо тратит warehouse-credits зря (запускает все модели), либо вообще не тестирует изменения. На interview спроси «как у вас устроен dbt CI» — ответ должен включать state.
+</Callout>
+
+---
+
+## Real-world: Airflow CI
+
+Airflow CI обычно проще, но критичнее: один сломанный DAG-файл может **сломать парсинг всех DAG-ов** (если import error на module level).
+
+```yaml
+# .github/workflows/airflow-ci.yml
+name: Airflow CI
+
+on:
+  pull_request:
+    paths:
+      - 'dags/**'
+      - 'plugins/**'
+      - 'requirements.txt'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: airflow
+        ports: ['5432:5432']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Airflow
+        run: pip install apache-airflow[postgres]==2.10.0
+
+      - name: Init Airflow DB
+        run: airflow db init
+        env:
+          AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql://postgres:airflow@localhost/postgres
+
+      - name: Test DAG imports (smoke test)
+        run: |
+          for dag in dags/*.py; do
+              python -c "import importlib.util; spec=importlib.util.spec_from_file_location('m', '$dag'); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)"
+              if [ $? -ne 0 ]; then
+                  echo "Failed to import $dag"
+                  exit 1
+              fi
+          done
+
+      - name: Validate DAG cycles
+        run: airflow dags list-import-errors
+
+      - name: Ruff lint
+        run: ruff check dags/ plugins/
+
+      - name: Mypy type check
+        run: mypy dags/ plugins/ --strict
+```
+
+Smoke test «можешь ли просто импортировать DAG-файл без ошибок?» — ловит 80% problems. Остальное — unit-тесты с моками.
+
+<Callout type="warning">
+DAG import errors — самое раздражающее для DE. Один `from import_that_doesnt_exist` -> Airflow scheduler не может загрузить любой DAG, ВЕСЬ ETL встал. CI с smoke test предотвращает это в 99% случаев.
+</Callout>
+
+---
+
+## Зачем junior должен любить CI
+
+Бывает первая реакция: «CI замедляет работу, постоянно red, надо опять что-то чинить». Это **immature view**. Зрелый взгляд:
+
+1. **CI ловит баги до production**. Лучше fail PR за 5 минут, чем production incident в 3:00 AM с пейджером.
+2. **CI — это документация процесса**. `.github/workflows/ci.yml` показывает, **как** код должен пройти валидацию. Junior сразу видит «что нужно сделать локально перед push».
+3. **CI — это уверенность для review**. Reviewer не должен думать «а не сломан ли syntax?» — CI уже проверил. Review фокусируется на логике.
+4. **CI — это carrer skill**. Уметь читать workflow, fixsать failing checks, добавлять новые — это **обязательное умение** middle DE в 2026.
+
+### Anti-pattern: skip CI
+
+```bash
+$ git commit -m "Quick fix [skip ci]"
+```
+
+`[skip ci]` или `[ci skip]` в commit message — GitHub Actions **не запустит** workflow для этого commit. Это escape hatch для:
+
+- Документации без кода: `docs: fix typo [skip ci]`.
+- README обновлений.
+- Меняем comment в YAML.
+
+**Не используй** для:
+- Production кода — даже маленький patch может сломать.
+- Когда CI «тормозит» — это сигнал чинить CI, не обходить.
+- В feature ветки с активным review.
+
+В команде часто настраивают **обязательный CI** через branch protection — `[skip ci]` физически не пропустит merge.
+
+---
+
+## Cost of CI: GitHub Actions minutes
+
+GitHub Actions считает минуты:
+
+| Tier | Free minutes/month | Включает |
+|---|---|---|
+| Free | 2,000 | для private repo (public — unlimited) |
+| Team | 3,000 |  |
+| Enterprise | 50,000 |  |
+
+После limit — $0.008 / minute на ubuntu-latest. Звучит дёшево, но на матричных билдах **набегает**:
+
+```yaml
+strategy:
+  matrix:
+    python: ['3.11', '3.12', '3.13']
+    os: [ubuntu-latest, macos-latest]
+```
+
+= 6 параллельных runs на каждый PR. 100 PR в неделю × 5 min = 500 min × 6 matrix = 3000 min/week = 12k/month. Уже выходит за Team plan.
+
+DE-команды оптимизируют:
+- Caching (см. урок 03): venv не пересобирается каждый раз.
+- Path filters: запускать dbt-ci только если `models/**` менялся.
+- `if: github.event.pull_request.draft == false` — не гонять CI на draft PR.
+
+---
+
+## Попробуй сам
+
+Открой свой существующий GitHub репо, посмотри Actions:
+
+```bash
+$ gh run list --limit 10
+# вывод: последние 10 workflow runs, их статусы
+
+$ gh run view <run-id>
+# детали конкретного run
+
+$ gh workflow list
+# все workflow в репо
+
+$ gh workflow view <workflow-name>
+# YAML текущего workflow
+```
+
+Если у тебя ещё нет CI — в следующем уроке сделаем минимальный с нуля.
+
+---
+
+## Killer takeaway
+
+CI = автоматические проверки на каждый PR (ruff, mypy, pytest, dbt compile, gitleaks). CD = автоматический deploy после merge в main. Junior DE будет видеть status checks под каждым PR — **зелёный — обязательный ритуал перед merge**. dbt CI с `state:modified+` тестирует только изменённые модели и downstream — это standard pattern. Airflow CI ловит DAG import errors через smoke test. `[skip ci]` — escape hatch только для docs/typo, не для production кода. CI это не enemy, а safety net — middle DE без CI знаний в 2026 не существует.
+
+<KnowledgeCheck quizSlug="18-ci-cd-github-actions/01-ci-cd-concept" />

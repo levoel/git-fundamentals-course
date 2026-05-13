@@ -1,0 +1,74 @@
+{
+  "lessonSlug": "02-install-config/03-ssh-keys",
+  "moduleId": "02-install-config",
+  "_meta": {
+    "idPrefix": "git-m02-03",
+    "description": "Quiz for lesson 2.3 — SSH-ключи"
+  },
+  "questions": [
+    {
+      "id": "git-m02-03-q1",
+      "type": "multiple-choice",
+      "question": "Какой тип SSH-ключа рекомендуется в 2026 году для GitHub?",
+      "options": [
+        { "id": "a", "text": "RSA 1024 — быстрый и надёжный" },
+        { "id": "b", "text": "RSA 2048 — индустриальный стандарт" },
+        { "id": "c", "text": "ed25519 — современный алгоритм на эллиптических кривых, быстрее и безопаснее RSA" },
+        { "id": "d", "text": "DSA — классический выбор" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "ed25519 — современный алгоритм, стандарт с 2014 года. Размер ключа ~256 бит, эквивалент безопасности RSA-3000+, в 5-10 раз быстрее RSA-4096. Поддерживается GitHub, GitLab, всеми основными SSH-серверами с 2017-2018 годов. RSA 2048 устарел, RSA 4096 ещё работает, но избыточен. DSA небезопасен и удалён из современных OpenSSH.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m02-03-q2",
+      "type": "multiple-choice",
+      "question": "Какая команда генерирует SSH-ключ типа ed25519?",
+      "options": [
+        { "id": "a", "text": "ssh-keygen -t rsa -b 4096 -C \"email\"" },
+        { "id": "b", "text": "ssh-keygen -t ed25519 -C \"email\"" },
+        { "id": "c", "text": "git keygen" },
+        { "id": "d", "text": "openssl genrsa -out key.pem 4096" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Команда: `ssh-keygen -t ed25519 -C \"your.email@example.com\"`. Флаг -t указывает тип ключа, -C — комментарий (обычно email). Команда создаст два файла в ~/.ssh/: id_ed25519 (приватный — никогда не показывайте) и id_ed25519.pub (публичный — добавляйте на GitHub).",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m02-03-q3",
+      "type": "multiple-choice",
+      "question": "Что такое ssh-agent и зачем он нужен?",
+      "options": [
+        { "id": "a", "text": "Это GUI-программа для управления SSH-ключами" },
+        { "id": "b", "text": "Фоновый процесс, который держит расшифрованный приватный ключ в памяти, чтобы не вводить passphrase при каждом подключении" },
+        { "id": "c", "text": "Сервер аутентификации между клиентом и GitHub" },
+        { "id": "d", "text": "Утилита для конвертации ключей между форматами" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "ssh-agent — это фоновая программа, которая запускается при логине и держит ваши приватные ключи в расшифрованной форме в памяти. Без agent при каждом git push нужно вводить passphrase. С agent — passphrase вводится один раз, дальше agent подписывает запросы автоматически. На macOS интегрируется с Keychain (passphrase запоминается до перезагрузки/выхода).",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m02-03-q4",
+      "type": "multiple-choice",
+      "question": "Какая команда проверяет, работает ли SSH-подключение к GitHub?",
+      "options": [
+        { "id": "a", "text": "git test github" },
+        { "id": "b", "text": "ping github.com" },
+        { "id": "c", "text": "ssh -T git@github.com — если получите «Hi username!», аутентификация работает" },
+        { "id": "d", "text": "curl https://github.com" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "Команда `ssh -T git@github.com` пытается открыть SSH-сессию к GitHub. Флаг -T отключает запрос pseudo-TTY (так как GitHub shell не предоставляет). При успехе вы увидите «Hi username! You've successfully authenticated, but GitHub does not provide shell access». Это означает: SSH работает, аутентификация прошла, можете делать git push.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m02-03-q5",
+      "type": "true-false",
+      "question": "Публичный ключ (id_ed25519.pub) можно безопасно показывать другим людям, выкладывать на GitHub и отправлять по email. Приватный ключ (id_ed25519) — нет.",
+      "correctAnswer": true,
+      "explanation": "Это математическое свойство асимметричной криптографии. Из публичного ключа нельзя восстановить приватный (за разумное время — для ed25519 миллиарды лет с современными компьютерами). Публичный ключ нужен серверу для проверки подписи. Приватный ключ нужен ВАМ для создания подписи. Если приватный утечёт — любой сможет притвориться вами. Поэтому: публичный — share свободно, приватный — храните строго в ~/.ssh/ с правами 600.",
+      "bloomLevel": "conceptual"
+    }
+  ]
+}

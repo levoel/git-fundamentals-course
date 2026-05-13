@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "11-pull-requests/04-merge-strategies",
+  "moduleId": "11-pull-requests",
+  "_meta": { "idPrefix": "git-m11-04" },
+  "questions": [
+    {
+      "id": "git-m11-04-q1",
+      "type": "multiple-choice",
+      "question": "Что точно происходит при 'Squash and merge' на GitHub?",
+      "options": [
+        { "id": "a", "text": "Merge commit с двумя родителями" },
+        { "id": "b", "text": "Все коммиты feature (F1-F5) сплющиваются в ОДИН новый коммит на main, содержащий все изменения одним патчем. F1-F5 как отдельные коммиты на main исчезают (остаются на feature ветке пока её не удалят). Main история: A -> B -> C -> S (один squashed commit per PR)" },
+        { "id": "c", "text": "Создаётся 5 коммитов на main" },
+        { "id": "d", "text": "Делается rebase feature на main" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Squash = collapse все feature commits в один. GitHub под капотом: git merge --squash feature + git commit -m '<title> (#PR)' + commit body со списком original commit messages. Главное: на main появляется один новый коммит с total diff из feature. Original F1-F5 не существуют на main — нельзя git log какой именно WIP коммит ввёл что. Это trade-off: clean main log vs detailed history.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m11-04-q2",
+      "type": "multiple-choice",
+      "question": "Какая merge strategy наиболее популярна в DE-командах SaaS?",
+      "options": [
+        { "id": "a", "text": "Rebase merge" },
+        { "id": "b", "text": "Squash and merge. ~70% DE teams. Преимущества: чистая main log (один коммит = одна фича), не нужна commit hygiene на feature (можно WIP commits — squash их склеит), простой revert (один git revert <squash-commit> отменяет всю фичу). Trade-off: теряется детальная история разработки feature" },
+        { "id": "c", "text": "Merge commit (no-ff)" },
+        { "id": "d", "text": "Manual merge через terminal" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Squash доминирует в DE SaaS по простой причине: чистая main = легко navigate, легко revert, легко bisect. Locally можно messy WIP commits, squash их склеит в один чистый коммит на main. Это лучшее из двух миров: гибкость разработки + дисциплина main. ~25% юзают merge commit (сохранение детальной истории), ~5% rebase merge. Junior должен спросить tech lead 'какой у нас merge strategy?'.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m11-04-q3",
+      "type": "multiple-choice",
+      "question": "Когда подходит 'Merge commit' (no-ff) стратегия?",
+      "options": [
+        { "id": "a", "text": "Никогда — squash лучше" },
+        { "id": "b", "text": "Когда феche была разработана с careful commit hygiene (каждый коммит атомарный, conventional commits messages, тесты проходят на каждом). Сохраняет detailed history, видно как author шёл к финалу. Простой revert (один merge commit). Подходит для большие фичи где история разработки важна, open-source с traceability requirements" },
+        { "id": "c", "text": "Только в Linux kernel" },
+        { "id": "d", "text": "Для всех PR любого размера" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Merge commit preserves full history feature ветки с двумя parents в merge node. Полезно когда команда дисциплинирована (каждый коммит атомарный, не мусорные WIP), история разработки имеет value для понимания feature evolution. Минус: шумный git log --oneline (видны и feature commits, и merge commits). Apache Spark, многие open-source projects используют этот pattern. В DE SaaS реже — там main log читаемость важнее.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m11-04-q4",
+      "type": "multiple-choice",
+      "question": "Почему 'Rebase and merge' редко используется в DE SaaS?",
+      "options": [
+        { "id": "a", "text": "Слишком сложно технически" },
+        { "id": "b", "text": "Каждый rebased коммит F1'-F5' получает новый SHA (исчезают original hashes). Это ломает: (1) PR-комментарии которые ссылаются на конкретные коммиты; (2) review request могут требовать что каждый промежуточный коммит проходит CI; (3) сложнее revert (нужен range, не один коммит). Без strong commit hygiene rebase merge порождает grief. Squash проще для большинства команд" },
+        { "id": "c", "text": "Не поддерживается GitHub" },
+        { "id": "d", "text": "Только в open source" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Rebase merge линеаризирует историю (нет merge commits), но переписывает SHA. Требует строгий commit hygiene на feature: каждый коммит должен быть атомарным, тесты проходят. Минусы: revert множественных коммитов сложнее, lost PR comment context, CI on every commit требование. В open-source с traceability culture (Linux kernel, Postgres) — стандарт. В DE SaaS большинство teams ценят squash simplicity + ability to make messy WIP commits на feature.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m11-04-q5",
+      "type": "true-false",
+      "question": "Если в команде разрешён только Squash merge, нужно делать git rebase локально перед PR merge.",
+      "correctAnswer": false,
+      "explanation": "Нет, наоборот — это anti-pattern. Если merge strategy = Squash, GitHub при нажатии Merge button сделает squash автоматически из всех твоих коммитов. Local rebase перед squash — двойная работа без бенефита. Хуже того: если делать rebase + force-push, отменяешь review comments которые ссылались на конкретные коммиты. Pattern для squash: коммить локально часто и messy (WIP, fix typo, more tests), GitHub squash склеит в один чистый коммит на main. Best of both worlds.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

@@ -1,0 +1,273 @@
+---
+title: "PR / MR — концепция и workflow"
+description: "Pull Request (GitHub) = Merge Request (GitLab) — не Git-фича, а features платформ. Workflow: fork OR branch -> push -> open PR -> review -> merge. Зачем нужен code review."
+order: 1
+difficulty: "beginner"
+estimatedTime: 20
+topics: ["pull-request", "merge-request", "github", "gitlab", "code-review", "workflow"]
+---
+
+# Pull Request — концепция и workflow
+
+Если ты только начинаешь работать в команде разработки, скоро столкнёшься с фразой «открой PR». Pull Request — это центральный артефакт совместной работы в современных DE командах. Через PR делают code review, гоняют CI, обсуждают изменения, мержат в main. Без PR никакая серьёзная feature не должна попасть в production.
+
+Важный момент: **PR — это не часть Git**. Это feature платформы (GitHub, GitLab, Bitbucket, Gitea). В чистом Git нет команды `git pull-request` — есть только `git push` и `git merge`. PR — это удобная **обёртка над merge** с встроенным review-процессом.
+
+В этом уроке: что такое PR концептуально, чем GitHub PR отличается от GitLab MR, и базовый workflow от ветки до merge.
+
+---
+
+## Зачем нужен Pull Request
+
+Представь команду из 5 DE без PR-процесса. Каждый коммитит прямо в main. Что может пойти не так:
+
+1. **Никто не ревьюит код**. Алиса добавила DAG с hardcoded паролем — никто не заметил, через неделю утёк секрет.
+2. **Никто не тестит**. Боб добавил dbt-модель с syntax error — main падает на следующем CI run.
+3. **Конфликты слияний без обсуждения**. Charlie и Diana меняли тот же файл — кто-то перезаписал работу другого.
+4. **Нет истории решений**. Через 3 месяца Eve смотрит на странный код, спрашивает «почему так?» — никто не помнит.
+
+PR решает все четыре проблемы:
+
+1. **Code review** — другой человек смотрит твой код перед merge.
+2. **CI checks** — автоматические тесты запускаются на каждый PR.
+3. **Discussion** — комментарии в одном месте, видны всем.
+4. **Audit trail** — PR в GitHub живёт навсегда: кто review-ил, что обсуждали, когда замержено.
+
+Это **минимум**, без которого современная разработка не делается. Даже в команде из 2 человек.
+
+---
+
+## Это не Git-фича
+
+В консоли Git'а нет понятия Pull Request. Есть только:
+
+- `git push origin feature/foo` — отправить ветку на сервер.
+- `git merge feature/foo` — соединить ветку с текущей.
+- `git pull` — то же что `git fetch + git merge`.
+
+Pull Request — это **layer поверх Git** от GitHub/GitLab. Когда ты «создаёшь PR», происходит:
+
+1. На GitHub создаётся запись с метаданными: какая ветка -> в какую, кто автор, описание, состояние.
+2. GitHub UI показывает diff между ветками.
+3. Запускается CI (если настроен).
+4. Можно оставлять комментарии, requesting changes, approve.
+5. При нажатии **Merge** GitHub под капотом делает `git merge` (или squash/rebase) на main, через свой git-сервер.
+
+В Git'е после merge всё выглядит обычно: твоя ветка слилась с main, появился merge-коммит (или squashed коммит). История чистая. Pull Request как UI/UX layer добавляет процесс **до** этого `git merge`.
+
+<DiagramContainer title="PR как layer поверх Git">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox tooltip="Чистый Git: push + merge без обёртки">Без PR</DataBox>
+      <FlowNode tooltip="">git push origin feature</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="Прямой merge в main">git merge feature</FlowNode>
+    </FlowRow>
+    <FlowRow>
+      <DataBox tooltip="С PR — добавлен review-процесс">С PR (GitHub/GitLab)</DataBox>
+      <FlowNode tooltip="">git push origin feature</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="GitHub создаёт PR-запись с metadata">PR opens</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="Reviewer комментирует, CI запускается">Review + CI</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="После approve кнопка Merge -> внутренне делает git merge">Merge button</FlowNode>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+---
+
+## PR vs MR — терминология
+
+| Платформа | Термин |
+|---|---|
+| GitHub | Pull Request (PR) |
+| GitLab | Merge Request (MR) |
+| Bitbucket | Pull Request (PR) |
+| Gitea | Pull Request (PR) |
+| Azure DevOps | Pull Request (PR) |
+
+Разница только в названии. **Концептуально и функционально это одно и то же**. GitLab выбрал «Merge Request» как более точный термин (ты просишь замержить, а не «вытянуть»). GitHub стартовал с «Pull» (из эры email-workflow Linux — «pull my branch into yours»). Но в индустрии PR / MR используют как синонимы.
+
+В этом курсе будем писать **PR**, потому что GitHub доминирует в DE-мире (большинство open-source DE-инструментов — Airflow, dbt, Spark, Kafka — на GitHub).
+
+---
+
+## Базовый workflow: branch -> push -> PR -> review -> merge
+
+Стандартный жизненный цикл feature от идеи до production:
+
+```bash
+# 1. Создаём ветку от main
+$ git switch -c feature/add-users-pipeline main
+
+# 2. Работаем — несколько коммитов
+$ vim dags/etl_users.py
+$ git commit -am "feat: add users ETL"
+$ vim tests/test_users.py
+$ git commit -am "test: add users tests"
+
+# 3. Push ветки на remote
+$ git push -u origin feature/add-users-pipeline
+
+# 4. Открываем PR через CLI
+$ gh pr create --title "Add users ETL pipeline" \
+    --body "Implements user data ETL from PostgreSQL to warehouse. Closes #123."
+
+# Или через GitHub UI: появляется кнопка «Compare & pull request»
+```
+
+После открытия PR начинается **review цикл**:
+
+1. **CI запускается** — линтер, тесты, format checks. Должен пройти.
+2. **Reviewer назначен** — обычно автоматически по CODEOWNERS или вручную.
+3. **Reviewer комментирует** — inline-комментарии на конкретные строки кода.
+4. **Author отвечает** — либо «fix-ит» (новый коммит), либо «обсуждает» (объясняет почему так).
+5. **Iterate** — пока reviewer не approve.
+6. **Merge** — кнопка в UI; обычно через squash или regular merge.
+7. **Branch deleted** — обычно автоматически после merge.
+
+---
+
+## Два способа: fork vs branch
+
+В git mire два сценария совместной работы:
+
+### Branch-based (внутри одного репо)
+
+Большинство **внутрикорпоративных** команд: все имеют push доступ в один репо, создают ветки `feature/X`.
+
+```
+github.com/company/data-warehouse.git
+├── main
+├── feature/users-pipeline (Алиса)
+├── feature/revenue-model (Боб)
+└── hotfix/dag-crash (Charlie)
+```
+
+Все коммитят и пушат в один origin. PR — между ветками одного репо.
+
+### Fork-based (внешние контрибьюторы)
+
+Стандарт для **open-source**: внешний контрибьютор делает **fork** репозитория (своя копия), пушает в fork, открывает PR из fork в основной репо.
+
+```
+github.com/apache/airflow.git              ← main репо (нет push access)
+github.com/ivanov/airflow.git              ← твой fork (есть push)
+
+Workflow:
+1. Fork github.com/apache/airflow -> ivanov/airflow
+2. git clone https://github.com/ivanov/airflow
+3. git switch -c fix/dag-bug
+4. push в свой fork
+5. PR из ivanov/airflow:fix/dag-bug -> apache/airflow:main
+```
+
+Для junior DE в продуктовой команде — почти всегда **branch-based** (ты в команде, имеешь push). Fork — для contribution в external open-source.
+
+---
+
+## Что должно быть в PR
+
+Минимальные элементы хорошего PR (детали в уроке 02):
+
+1. **Title** — короткий, описательный. Часто в формате [Conventional Commits](https://www.conventionalcommits.org/): `feat: add users ETL pipeline`.
+
+2. **Description** — что меняем, зачем, как тестировать, ссылка на issue.
+
+3. **Linked issue** — `Closes #123` или `Fixes #456` — автоматически закроет issue после merge.
+
+4. **Reviewers** — кого назначаем для review (обычно tech lead + 1 peer).
+
+5. **Labels** — `bug`, `feature`, `documentation`, `breaking-change`.
+
+6. **CI passes** — все checks зелёные (тесты, линтер, type-check).
+
+---
+
+## GitHub CLI: gh pr create / view / merge
+
+Терминал быстрее UI для большинства PR-операций:
+
+```bash
+$ gh pr create                           # interactive создание
+$ gh pr create --fill                    # авто-fill из коммитов
+$ gh pr list                             # список открытых PR
+$ gh pr view 234                         # детали PR #234
+$ gh pr view --web                       # открыть в браузере
+$ gh pr checkout 234                     # переключиться на ветку PR
+$ gh pr merge 234 --squash               # замержить через squash
+$ gh pr close 234                        # закрыть без merge
+$ gh pr review 234 --approve             # approve
+$ gh pr review 234 --request-changes -b "Please fix X"
+```
+
+Junior рекомендую сразу освоить `gh`. Это reduces friction tremendously — вместо 5 кликов в UI один-два терминальных команд. Подробнее в уроке 05.
+
+---
+
+## DE-сценарий: типичный PR в dbt репо
+
+Команда работает с dbt repo, deploys через CI на BigQuery.
+
+```bash
+$ git switch -c feature/add-customer-ltv main
+$ vim models/marts/customer_ltv.sql
+$ vim tests/test_customer_ltv.yml
+$ git commit -am "feat(marts): add customer_ltv model"
+$ git push -u origin feature/add-customer-ltv
+
+$ gh pr create --title "feat(marts): add customer_ltv" \
+    --body "## Summary
+- Adds customer_ltv mart model
+- Calculates LTV as sum of revenue per customer
+
+## Test plan
+- [x] dbt run --select customer_ltv passes
+- [x] dbt test --select customer_ltv passes
+- [x] BigQuery query inspection — matches manual calculation
+
+Closes #456" \
+    --reviewer tech-lead --label feature
+```
+
+PR открыт. CI запускает:
+- `dbt parse` (синтаксис)
+- `dbt run --select state:modified+` (test модели и downstream)
+- `dbt test --select state:modified+`
+- SQL linter (sqlfluff)
+
+После прохождения CI и approve — `gh pr merge --squash`. Deploy на prod warehouse автоматически от tag `v*`.
+
+---
+
+## Анти-pattern: коммит прямо в main
+
+В normal teams **main защищён** через GitHub branch protection rules:
+
+- Require pull request before merging.
+- Require status checks to pass.
+- Require N approvals.
+- Restrict who can push.
+
+Попытка `git push origin main` без PR -> отказ:
+
+```
+remote: error: GH006: Protected branch update failed
+remote: error: At least 1 approving review is required by reviewers with write access.
+```
+
+Это нормально. Если ты junior и main не защищена — обсуди с tech lead. Незащищённая main — security/quality risk.
+
+<Callout type="warning">
+В нормальной DE команде junior **никогда** не пушит прямо в main. Все изменения через PR с review. Даже tech lead обычно тоже идёт через PR (минимум один approval от другого DE). Это disciplined practice, которая спасает прод от случайных ошибок.
+</Callout>
+
+---
+
+## Killer takeaway
+
+PR — это **обёртка над git merge** с встроенным review-процессом, предоставляемая GitHub/GitLab. Не часть Git, а feature платформы. Workflow: branch -> push -> open PR -> CI + review -> merge -> delete branch. Junior DE 100% времени работает через PR — прямой push в main запрещён branch protection. Освой gh CLI с первого дня — экономит часы каждую неделю.
+
+<KnowledgeCheck quizSlug="11-pull-requests/01-pr-mr-concept" />

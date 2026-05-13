@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "09-undo-reflog/04-reflog-time-machine",
+  "moduleId": "09-undo-reflog",
+  "_meta": { "idPrefix": "git-m09-04" },
+  "questions": [
+    {
+      "id": "git-m09-04-q1",
+      "type": "multiple-choice",
+      "question": "Что точно отслеживает git reflog?",
+      "options": [
+        { "id": "a", "text": "Все изменения в working tree" },
+        { "id": "b", "text": "Локальный журнал движений HEAD (и каждой ветки): каждый commit, reset, checkout, merge, rebase оставляет запись в .git/logs/. Записи живут ~90 дней (reachable) / 30 дней (orphan). Локально, не пушится на сервер" },
+        { "id": "c", "text": "Историю коммитов всех контрибьюторов" },
+        { "id": "d", "text": "Untracked файлы и stash-и" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Reflog — журнал движений ref-ов (HEAD и веток). Каждый акт перемещения указателя оставляет запись: timestamp, prev hash, new hash, action (commit/reset/rebase/...), description. Только указатели — не working tree, не untracked. Локальный — у тебя свой reflog, у коллеги свой; не пушится. Срок жизни 90/30 дней (reachable/unreachable) — после gc уходит вместе с unreachable objects.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m09-04-q2",
+      "type": "multiple-choice",
+      "question": "В чём разница между HEAD~1 и HEAD@{1}?",
+      "options": [
+        { "id": "a", "text": "Они эквивалентны" },
+        { "id": "b", "text": "HEAD~1 — родительский коммит по графу истории (commit parent). HEAD@{1} — где HEAD был ДО последнего движения, по reflog. После reset --hard HEAD~3, HEAD@{1} указывает на pre-reset состояние (3 коммита вперёд), HEAD~1 — на коммит-родитель текущего HEAD" },
+        { "id": "c", "text": "@{1} только для веток, ~1 для коммитов" },
+        { "id": "d", "text": "Это синтаксические алиасы" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Разные axes навигации. ~N — по parent edges графа: HEAD~1 = parent, HEAD~2 = grandparent. @{N} — по событиям reflog: HEAD@{0} = текущий, HEAD@{1} = before last action, и т.д. Часто после reset --hard HEAD~5: HEAD~1 = на 6 коммитов от текущего (parent нового HEAD), HEAD@{1} = pre-reset (был на 5 commitов вперёд по графу). Время vs топология — независимые координаты.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m09-04-q3",
+      "type": "multiple-choice",
+      "question": "Случайно сделал reset --hard HEAD~5 и потерял 5 коммитов работы. Восстановление?",
+      "options": [
+        { "id": "a", "text": "Без бэкапа потеряно навсегда" },
+        { "id": "b", "text": "git reflog -> найти HEAD@{1} (это состояние до reset) или скопировать хэш коммита-кончика -> git reset --hard <hash> или git reset --hard HEAD@{1}. Восстановишь за секунды. Reflog хранит ~90 дней" },
+        { "id": "c", "text": "git pull origin восстановит" },
+        { "id": "d", "text": "git fsck без аргументов" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Стандартный recovery. Reflog показывает: HEAD@{0} = после reset, HEAD@{1} = коммит до reset (=кончик потерянной цепочки). git reset --hard HEAD@{1} вернёт ветку на этот коммит — все 5 коммитов снова reachable. Альтернатива: скопировать хэш из reflog (например ccc3333) и git reset --hard ccc3333. После этого можно прибраться: git branch backup-current HEAD (на всякий) и продолжать. Reflog работает до GC (90 дней reachable).",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m09-04-q4",
+      "type": "multiple-choice",
+      "question": "Что такое ORIG_HEAD и зачем он полезен?",
+      "options": [
+        { "id": "a", "text": "Это первый коммит репозитория" },
+        { "id": "b", "text": "Auto-bookmark, который Git устанавливает перед каждой 'опасной' операцией (rebase, merge, reset). Указывает на состояние HEAD до операции. Удобный shortcut: git reset --hard ORIG_HEAD = откат к pre-operation состоянию без поиска в reflog" },
+        { "id": "c", "text": "Указатель на изначальный fork upstream" },
+        { "id": "d", "text": "Origin/HEAD на сервере" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "ORIG_HEAD — auto-set 'safety net' reference. Перед rebase/merge/reset Git сохраняет туда HEAD. Если результат не понравился, git reset --hard ORIG_HEAD откатывает к pre-operation состоянию. Проще чем git reflog -> grep -> reset. Только последняя 'опасная' операция (перезаписывается каждый раз). Не пушится, локальный механизм.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m09-04-q5",
+      "type": "true-false",
+      "question": "Reflog поможет восстановить uncommitted изменения в working tree после reset --hard.",
+      "correctAnswer": false,
+      "explanation": "Нет. Reflog отслеживает движения указателей (HEAD, веток) — это commit-уровень. Uncommitted изменения в working tree — это файлы на диске, которые никогда не были snapshot-нуты Git'ом (не было git add, не было commit). Reflog их не знает, не помнит, не восстанавливает. Они уничтожены навсегда после reset --hard. Спасение: перед опасной операцией git stash (создаёт commit-snapshot в stash namespace, тогда reflog stash поможет) или git add (попадёт в index, оттуда восстановимо через объекты).",
+      "bloomLevel": "analytical"
+    }
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "lessonSlug": "19-recovery/03-corrupted-repo",
+  "moduleId": "19-recovery",
+  "_meta": {
+    "idPrefix": "git-m19-03"
+  },
+  "questions": [
+    {
+      "id": "git-m19-03-q1",
+      "type": "multiple-choice",
+      "question": "Junior запускает `git commit` и получает: `fatal: Unable to create '.git/index.lock': File exists`. Что делать?",
+      "options": [
+        {"id": "a", "text": "Сразу re-clone репо"},
+        {"id": "b", "text": "Проверить ps aux | grep git — нет ли активного git процесса. Если нет — безопасно rm .git/index.lock"},
+        {"id": "c", "text": "Удалить весь .git/"},
+        {"id": "d", "text": "Перезапустить компьютер"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Index.lock — обычная файловая блокировка. Git создаёт её перед операциями с index, удаляет после. Если git процесс был убит mid-operation (kill -9, краш IDE, OOM) — lock остаётся, новые git операции блокируются. Решение: (1) убедиться что нет активного git процесса (ps + grep, исключая сам grep); (2) `rm -f .git/index.lock`; (3) повторить операцию. Безопасно, если нет конкурентного процесса. Аналогично: HEAD.lock, refs/heads/main.lock — все можно удалить (с проверкой).",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m19-03-q2",
+      "type": "multiple-choice",
+      "question": "`git status` выдаёт `fatal: index file corrupt`. Безопасное лечение?",
+      "options": [
+        {"id": "a", "text": "rm .git/index && git reset — пересоздаёт index из HEAD, файлы на диске не трогаются"},
+        {"id": "b", "text": "rm -rf .git/ && git init"},
+        {"id": "c", "text": "git reset --hard"},
+        {"id": "d", "text": "Удалить все файлы и сделать новый commit"}
+      ],
+      "correctAnswer": "a",
+      "explanation": "Index — binary файл со staging area. Может corrupt из-за disk fail, killed process, fs issue. Решение: (1) backup .git на всякий: cp -r .git .git.backup; (2) rm .git/index — удалить corrupt файл; (3) git reset (без --hard, без аргументов) — пересоздаёт index из HEAD. Файлы на диске НЕ трогаются — uncommitted изменения сохраняются (видны как unstaged). git reset --hard — стёр бы uncommitted работу. rm -rf .git — стёр бы всю историю.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m19-03-q3",
+      "type": "multiple-choice",
+      "question": "`git fsck` выдаёт множественные `error: bad object` и `loose object corrupt`. Какой PRACTICAL подход?",
+      "options": [
+        {"id": "a", "text": "Тратить часы на chirurgical fix каждого corrupted object"},
+        {"id": "b", "text": "Re-clone репо с remote. (1) backup uncommitted работу — git diff > /tmp/changes.patch или просто копия файлов; (2) cd ..; mv repo repo.dead; git clone <remote>; (3) apply patch. 5 минут vs hours of debug"},
+        {"id": "c", "text": "Это нерешаемо, бросать проект"},
+        {"id": "d", "text": "Отправлять ticket в GitHub Support"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Re-clone — самое pragmatic решение в 80% случаев corrupted repo. Senior делает то же самое. Шаги: (1) save uncommitted (git diff > patch или manual copy) — это локальная работа, не в Git; (2) re-clone от remote — заведомо good copy всей истории; (3) apply uncommitted поверх. 5-10 минут полного цикла. Альтернатива: hours of debugging специфической corruption (которая может быть в pack-файле, лекарство сложное и не гарантированное). Junior — не стесняйся re-clone, senior работают именно так. Главное — push regular чтобы не было uncommitted work.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m19-03-q4",
+      "type": "true-false",
+      "question": "`git maintenance start` (Git 2.30+) регистрирует фоновые задачи (через systemd / launchd / cron на macOS/Linux/Windows): commit-graph cache, prefetch, loose-object packing, weekly gc. Это автоматически держит репо здоровым без manual intervention.",
+      "correctAnswer": true,
+      "explanation": "git maintenance — modern way держать репо в форме. После `git maintenance start` Git регистрирует tasks: hourly (commit-graph, prefetch, loose-objects), daily (incremental-repack), weekly (gc, pack-refs). Каждый task — auto-trigger через OS scheduler. Repo growth не превращается в performance problem постепенно. `--global` флаг делает то же для всех репо пользователя. `git maintenance status` показывает зарегистрированные задачи. `git maintenance stop` отменяет. Это recommended для любой long-living DE-репо.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

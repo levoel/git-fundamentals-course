@@ -1,0 +1,324 @@
+---
+title: "Когда возникают конфликты"
+description: "Конфликт как ситуация, в которой Git не может авто-смерджить — анатомия и причины"
+order: 1
+difficulty: "beginner"
+estimatedTime: 18
+topics: ["Git", "merge", "conflicts", "diff3"]
+---
+
+# Когда возникают конфликты
+
+Конфликт слияния — самая страшилка для джуна. На самом деле конфликты — это не ошибки и не баги Git. Это **штатная ситуация**: Git честно говорит "я не знаю, какую версию оставить, реши ты, человек". В этом уроке мы разбираемся, когда конфликты случаются, когда — нет, и почему алгоритм three-way merge иногда сдаётся.
+
+---
+
+## Когда конфликт ТОЧНО случится
+
+Конфликт возникает, когда **две ветки изменили одни и те же строки одного файла по-разному**, и Git не может однозначно решить, какую версию оставить.
+
+<DiagramContainer title="Классический конфликт: один и тот же файл, одна и та же строка" color="orange">
+  <FlowColumn className="p-4 gap-3">
+    <Tooltip content="Общий предок — точка, от которой обе ветки разошлись">
+      <DataBox label="merge base (C0)" className="border-zinc-500/30 w-72 mx-auto">
+        <div className="text-xs font-mono">{'def fetch(): return "v1"'}</div>
+      </DataBox>
+    </Tooltip>
+    <Arrow direction="down" />
+    <FlowRow className="gap-6 justify-center">
+      <Tooltip content="На ветке main кто-то поменял возвращаемое значение на v2">
+        <DataBox label="main (C1)" className="border-blue-500/30 w-56">
+          <div className="text-xs font-mono">{'def fetch(): return "v2"'}</div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="На ветке feature другой человек поменял ту же строку на v3">
+        <DataBox label="feature (C2)" className="border-purple-500/30 w-56">
+          <div className="text-xs font-mono">{'def fetch(): return "v3"'}</div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+    <Arrow direction="down" />
+    <Tooltip content="При попытке merge Git не знает: v2 или v3 правильный — это конфликт">
+      <FlowNode variant="output">git merge feature -> CONFLICT</FlowNode>
+    </Tooltip>
+  </FlowColumn>
+</DiagramContainer>
+
+Пример:
+
+```bash
+# Стартовая ситуация
+$ cat src/etl.py
+def fetch():
+    return "v1"
+
+$ git switch main
+$ sed -i '' 's/v1/v2/' src/etl.py
+$ git add . && git commit -m "main: v2"
+
+$ git switch feature
+$ sed -i '' 's/v1/v3/' src/etl.py
+$ git add . && git commit -m "feature: v3"
+
+$ git switch main
+$ git merge feature
+Auto-merging src/etl.py
+CONFLICT (content): Merge conflict in src/etl.py
+Automatic merge failed; fix conflicts and then commit the result.
+```
+
+Git показывает файл с маркерами конфликта (об этом в следующем уроке) и предлагает тебе разобраться.
+
+---
+
+## Когда конфликта НЕ будет
+
+Не всякое изменение в обеих ветках вызывает конфликт. Часто Git мерджит автоматически.
+
+### 1. Изменения в разные файлы
+
+Очевидный случай. Ветка `feature-a` поменяла `src/etl.py`, ветка `feature-b` — `src/loader.py`. Merge пройдёт без вопросов, Git просто возьмёт обе версии.
+
+### 2. Изменения в одном файле, но в разных местах
+
+Если изменения **не пересекаются** по строкам, и между ними есть достаточно "контекста" неизменных строк, Git их сольёт автоматически.
+
+<DiagramContainer title="Изменения в разных местах файла — merge OK" color="green">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-6 justify-center">
+      <DataBox label="main: добавил функцию в начале" className="border-blue-500/30 w-72">
+        <div className="text-xs font-mono space-y-0.5">
+          <div className="text-green-400">+ def new_fn(): pass</div>
+          <div>def existing(): ...</div>
+          <div>def other(): ...</div>
+        </div>
+      </DataBox>
+      <DataBox label="feature: добавил функцию в конце" className="border-purple-500/30 w-72">
+        <div className="text-xs font-mono space-y-0.5">
+          <div>def existing(): ...</div>
+          <div>def other(): ...</div>
+          <div className="text-green-400">+ def helper(): pass</div>
+        </div>
+      </DataBox>
+    </FlowRow>
+    <Arrow direction="down" />
+    <Tooltip content="Git видит: разные строки, изменения не пересекаются — merge OK">
+      <FlowNode variant="output">Auto-merge succeeded</FlowNode>
+    </Tooltip>
+  </FlowColumn>
+</DiagramContainer>
+
+```bash
+$ git merge feature
+Auto-merging src/etl.py
+Merge made by the 'ort' strategy.
+```
+
+### 3. Одинаковые изменения с обеих сторон
+
+Редкий случай: обе ветки внесли **одно и то же** изменение в одни и те же строки. Git это распознаёт и не конфликтует.
+
+```bash
+# main: добавил logger.info("started")
+# feature: добавил такой же logger.info("started") в той же строке
+$ git merge feature
+Auto-merging src/etl.py
+Merge made by the 'ort' strategy.
+```
+
+Это **convergent change** — обе стороны независимо пришли к одному и тому же. Бывает, когда два человека параллельно фиксят один и тот же баг.
+
+---
+
+## Three-way merge: как Git вообще мерджит
+
+Чтобы понять, почему конфликт случается, нужно знать алгоритм мерджа. Git использует **three-way merge**: смотрит на три снимка файла.
+
+<DiagramContainer title="Три точки three-way merge" color="blue">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-4 justify-center flex-wrap">
+      <Tooltip content="OURS — текущая ветка, куда мерджим (например main)">
+        <DataBox label="OURS (HEAD)" className="border-blue-500/30 w-44">
+          <div className="text-xs">текущая ветка</div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="THEIRS — ветка, которую мерджим (feature)">
+        <DataBox label="THEIRS" className="border-purple-500/30 w-44">
+          <div className="text-xs">мерджимая ветка</div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="BASE — общий предок обеих веток (merge base)">
+        <DataBox label="BASE" className="border-zinc-500/30 w-44">
+          <div className="text-xs">общий предок</div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+    <Arrow direction="down" />
+    <Tooltip content="Для каждой строки Git сравнивает 3 версии и решает, как смерджить">
+      <FlowNode variant="default">Per-line comparison</FlowNode>
+    </Tooltip>
+  </FlowColumn>
+</DiagramContainer>
+
+Для каждой строки/блока Git смотрит:
+
+- **Если строка одинакова в BASE и OURS, но изменена в THEIRS** -> берёт THEIRS.
+- **Если строка одинакова в BASE и THEIRS, но изменена в OURS** -> берёт OURS.
+- **Если строка одинакова в OURS и THEIRS (но изменена относительно BASE)** -> берёт это значение (convergent change).
+- **Если строка изменена и в OURS, и в THEIRS, по-разному** -> **конфликт**.
+
+Это объясняет, почему "просто добавить строку" обычно не вызывает конфликт: одна сторона не трогала это место, другая — добавила. Видя BASE, Git понимает, кто что сделал, и берёт изменение.
+
+### Найти merge base руками
+
+```bash
+$ git merge-base main feature
+a1b2c3d4e5f6...
+
+$ git log --oneline a1b2c3d4..main
+f4e5d6c main: v2
+
+$ git log --oneline a1b2c3d4..feature
+9876543 feature: v3
+```
+
+Это полезно при диагностике: "от какой точки разошлись ветки?".
+
+---
+
+## Другие виды конфликтов
+
+Конфликт — это не только "строки в файле". Бывают более редкие случаи:
+
+### Rename/edit conflict
+
+Одна сторона переименовала файл, другая — изменила его содержимое.
+
+```bash
+# main: переименовал src/etl.py -> src/pipeline.py
+# feature: изменил содержимое src/etl.py
+
+$ git merge feature
+CONFLICT (modify/delete): src/etl.py deleted in HEAD and modified in feature.
+```
+
+### Delete/edit conflict
+
+Одна сторона удалила файл, другая — изменила.
+
+```bash
+$ git merge feature
+CONFLICT (modify/delete): src/old.py deleted in HEAD and modified in feature.
+```
+
+Решается через `git rm <file>` (подтверждаешь удаление) или `git checkout <file>` (восстанавливаешь файл).
+
+### Binary conflict
+
+Для текстовых файлов Git показывает diff построчно. Для бинарных (картинки, parquet, sqlite) — нет.
+
+```bash
+$ git merge feature
+CONFLICT (content): Merge conflict in data/sample.parquet
+```
+
+Решение: выбрать одну из версий целиком через `git checkout --ours data/sample.parquet` или `--theirs`.
+
+### Submodule conflict
+
+Если в репо есть submodules и обе ветки изменили коммит submodule на разные значения — конфликт. Решается через `git submodule update` и явное переключение submodule на нужный коммит.
+
+---
+
+## Конфликты возникают не только при merge
+
+В Git есть несколько операций, которые могут привести к конфликтам — везде по тому же алгоритму three-way merge:
+
+| Операция | Что мерджит |
+|----------|-------------|
+| `git merge feature` | OURS=HEAD, THEIRS=feature |
+| `git rebase main` | Для каждого коммита перебазируемой ветки: OURS=новая база, THEIRS=коммит из ветки |
+| `git cherry-pick <sha>` | OURS=HEAD, THEIRS=изменения коммита SHA |
+| `git pull` | По сути `fetch + merge` (или `+ rebase`) |
+| `git revert <sha>` | Применяет обратные изменения |
+| `git stash pop` | Мерджит stashed changes в working tree |
+
+Где бы конфликт ни возник, **разрешается одинаково** — об этом следующие уроки.
+
+---
+
+## Почему конфликты — не баг
+
+Конфликт = Git делает свою работу честно: говорит "я не знаю, что хотел программист". Все альтернативы хуже:
+
+- Молча выбрать одну из версий -> потерять работу одной из сторон.
+- Случайно объединить -> создать нерабочий код.
+- Спросить пользователя — это и есть конфликт.
+
+<Callout type="tip">
+Конфликты — нормальная часть рабочего процесса в команде. Если ты их боишься — это сигнал отработать workflow в безопасной песочнице (см. практику ниже).
+</Callout>
+
+---
+
+## Как минимизировать конфликты
+
+Конфликты невозможно убрать полностью, но их можно резко уменьшить:
+
+1. **Частые маленькие коммиты + частая синхронизация с `main`.** Если ты три недели работаешь в изоляции, при merge получишь катастрофу. Если каждый день делаешь `git fetch && git rebase origin/main` — конфликты будут крошечные.
+
+2. **Договорённости в команде про форматирование.** Если каждый файл переформатируется на каждое сохранение разным линтером — постоянные конфликты на whitespace. Решение: один общий config (`.editorconfig`, `pre-commit` hooks, форматирование в CI).
+
+3. **Маленькие PR.** Огромный PR на 50 файлов -> больше шансов конфликта при долгом review. Маленькие PR -> быстрый merge -> меньше окно для конфликта.
+
+4. **Чёткое разделение ответственности.** Если два человека одновременно правят один файл — это сигнал, что либо плохо разделили задачи, либо файл слишком большой и нужен рефакторинг.
+
+5. **`merge.conflictStyle = zdiff3`** — улучшает читаемость конфликта (об этом в следующем уроке).
+
+---
+
+## Попробуй сам: создай конфликт намеренно
+
+```bash
+# 1. Создай тестовый репо
+mkdir conflict-demo && cd conflict-demo
+git init
+cat > file.txt <<EOF
+line 1
+line 2 — important value v1
+line 3
+EOF
+git add . && git commit -m "init"
+
+# 2. Создай две ветки от одной точки
+git switch -c branch-a
+sed -i.bak 's/v1/v2-from-a/' file.txt && rm file.txt.bak
+git commit -am "branch-a: change v1 to v2"
+
+git switch main
+git switch -c branch-b
+sed -i.bak 's/v1/v3-from-b/' file.txt && rm file.txt.bak
+git commit -am "branch-b: change v1 to v3"
+
+# 3. Попробуй смерджить
+git switch main
+git merge branch-a   # этот пройдёт fast-forward
+git merge branch-b   # этот будет CONFLICT!
+
+# 4. Посмотри что Git сделал с файлом
+cat file.txt
+# Увидишь маркеры <<< === >>>
+
+# 5. Откати, чтобы не разбираться сейчас
+git merge --abort
+git status
+```
+
+Это безопасный sandbox для экспериментов. В следующем уроке мы разберём, что делать с маркерами и как их правильно разрешать.
+
+---
+
+<KnowledgeCheck
+  question="У вас в команде каждый день случается 5-10 merge-конфликтов на одном и том же файле `src/config/settings.py`. Каждый PR ломает merge для других. Какие три действия можно предпринять, не меняя структуру кода?"
+  answer="Конфликты на одном файле — почти всегда симптом организационной проблемы. Три действия: (1) **Договоритесь о коротких циклах**: каждый PR делает 1-2 изменения в settings.py максимум, мерджится в течение дня. Долгоживущие ветки на settings.py — главный источник конфликтов. (2) **Делегируйте порядок**: один человек/команда — owner файла, остальные обращаются через PR к нему, не править параллельно. (3) **Добавьте `merge.conflictStyle = zdiff3`** в `.gitconfig` — показывает общего предка, что радикально упрощает понимание конфликта (когда видишь, ЧТО было изначально, обычно понимаешь, какую сторону взять). Структурное решение, если ничего не помогает: разделить settings.py на доменные файлы (`db_settings.py`, `kafka_settings.py`, `airflow_settings.py`) — каждый сабсет правит свой файл, конфликты резко падают. Бонусный приём — `merge=union` атрибут в `.gitattributes` для специфических файлов типа списков constants, где можно автоматически объединять обе стороны (но это работает только для строк типа CHANGELOG.md, не для кода)."
+/>

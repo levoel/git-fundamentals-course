@@ -1,0 +1,63 @@
+{
+  "lessonSlug": "15-hooks-automation/04-husky-and-other-frameworks",
+  "moduleId": "15-hooks-automation",
+  "_meta": {
+    "idPrefix": "git-m15-04",
+    "description": "Quiz for lesson 04 of module 15 — alternative frameworks"
+  },
+  "questions": [
+    {
+      "id": "git-m15-04-q1",
+      "type": "multiple-choice",
+      "question": "Какие 3 главных hooks-framework на рынке и где сильные стороны каждого?",
+      "options": [
+        { "id": "a", "text": "Только pre-commit" },
+        { "id": "b", "text": "(1) pre-commit (Python, .pre-commit-config.yaml) — лидер в Python экосистеме, огромный community catalog, изолированные venvs для hooks. (2) husky (Node.js, .husky/ scripts + package.json) — стандарт в JS/TS проектах, простой setup для React/Vue. (3) lefthook (Go binary, lefthook.yml) — polyglot monorepo, параллельное выполнение by default, самый быстрый из трёх" },
+        { "id": "c", "text": "husky и Tomcat" },
+        { "id": "d", "text": "Все frameworks идентичны" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Три главных hooks framework: (1) pre-commit (pre-commit.com) — Python tool. Декларативный YAML конфиг, community-driven каталог hooks (~thousands), изолированные виртуальные окружения per hook через `language: python/node/ruby/system`. Стандарт в Python экосистеме (Django, FastAPI, Airflow, dbt). (2) husky (typicode/husky) — Node.js. Минималистичный, hooks как shell скрипты в .husky/. Сильно интегрирован с npm: setup через `npm install husky && npx husky init`. Обычно используется с lint-staged для запуска линтеров только на staged файлах. Стандарт в JS/TS проектах (React, Vue, Angular, Next.js). (3) lefthook (evilmartians/lefthook) — Go single binary. YAML config (lefthook.yml). Главная фишка — параллельное выполнение by default (заметно быстрее на больших конфигах). Polyglot — не privileged к одному языку, одинаково удобно для Python+JS+Go. Используется в monorepos где несколько стеков. Performance benchmark: lefthook быстрее pre-commit/husky на 30-200% в зависимости от конфигурации.",
+      "studyHint": "Повторите урок 04 — раздел 'Landscape: три главных игрока'",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m15-04-q2",
+      "type": "multiple-choice",
+      "question": "Какой framework лучше для polyglot monorepo (Python + JS + Go в одном репо)?",
+      "options": [
+        { "id": "a", "text": "pre-commit — он поддерживает все языки" },
+        { "id": "b", "text": "lefthook — нативно polyglot. YAML config с командами для каждого языка через glob паттерны. Параллельное выполнение by default — критично для большого monorepo. Single Go binary не зависит от Python/Node. {staged_files} placeholder — каждый command получает только relevant файлы. pre-commit можно использовать, но в polyglot менее эргономично" },
+        { "id": "c", "text": "husky — он самый универсальный" },
+        { "id": "d", "text": "Любой одинаково хорош" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Для polyglot monorepo lefthook оптимален по нескольким причинам: (1) Native polyglot — config описывает команды для разных стеков через glob patterns: ```yaml pre-commit: commands: ruff: { glob: '*.py', run: 'ruff check --fix {staged_files}' } eslint: { glob: '*.{js,ts}', run: 'eslint --fix {staged_files}' } gofmt: { glob: '*.go', run: 'gofmt -w {staged_files}' } ``` . Каждый command независим, активируется только когда staged файлы matched. (2) Параллельное выполнение by default — все commands запускаются одновременно. На 4 стека с десятками файлов разница sequential vs parallel = секунды vs минуты. (3) Single binary — Go static binary. Никаких dependency hell как с pre-commit (Python deps) или husky (Node modules). (4) {staged_files} — placeholder, заменяется списком только staged файлов с matching glob. Эффективно: Python hooks не запускаются на TS файлах. (5) Tags — `tags: [backend, frontend]` позволяет selective запуск (`lefthook run pre-commit --tags backend`). pre-commit в polyglot работает, но требует separately настраивать через language: для каждого hook, parallel execution не by default, медленнее на больших monorepo. husky — плохо для polyglot, requires npm и Python tools через workarounds.",
+      "studyHint": "Повторите урок 04 — раздел 'Сценарий 2: Monorepo Python + dbt + React dashboard'",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m15-04-q3",
+      "type": "multiple-choice",
+      "question": "В чём правильный setup-checklist для нового DE проекта в 2026?",
+      "options": [
+        { "id": "a", "text": "Только git init и start coding" },
+        { "id": "b", "text": "(1) Выбрать framework (pre-commit для Python, lefthook для polyglot); (2) Создать config; (3) Добавить hooks: format/lint, type check, secrets scan (gitleaks), large files block, notebook strip; (4) commit-msg hook для conventional commits; (5) Pin all versions; (6) Документация в README; (7) Makefile с command setup; (8) CI workflow с теми же hooks; (9) Branch protection: require status checks" },
+        { "id": "c", "text": "Только установить linter" },
+        { "id": "d", "text": "Достаточно code review" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Полный setup checklist для professional DE репо: (1) Framework — pre-commit для чистого Python (большинство DE проектов), lefthook для polyglot (Python ETL + React dashboard + Go service). (2) Config файл — `.pre-commit-config.yaml` или `lefthook.yml`. (3) Базовые hooks: format/lint (ruff для Python, eslint+prettier для JS, sqlfluff для SQL), type check (mypy/pyright), secrets scan (gitleaks/detect-secrets), large files block (`check-added-large-files --maxkb=1024`), notebook strip (nbstripout). (4) Commit-msg hook — commitlint с config-conventional, или commitlintжестче если расширенные правила. (5) Pinning versions через `rev:` (pre-commit) или explicit versions (lefthook) — reproducibility. (6) README — onboarding section: 'pip install pre-commit && pre-commit install' или эквивалент. (7) Makefile с `make setup` target — автоматизация onboarding. (8) CI workflow (.github/workflows/lint.yml) — `pre-commit/action@v3.0.1` или `lefthook run pre-commit --all-files`. Тот же набор checks локально и в CI. (9) Branch protection — Settings -> Branches -> 'Require status checks to pass' включая выбранные CI checks. Это canonical infrastructure для production DE проекта. Время на полный setup в первый раз — 2-3 часа, потом копируется между репо. Junior, который внедряет это в первой неделе — сразу демонстрирует профессионализм.",
+      "studyHint": "Повторите урок 04 — раздел 'Setup checklist для нового DE проекта'",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m15-04-q4",
+      "type": "true-false",
+      "question": "Для чисто Python DE проекта (Airflow + dbt + Python scripts) лучший выбор framework — pre-commit, потому что у Python инструментов (ruff, mypy, nbstripout, sqlfluff) есть официальные pre-commit hooks с правильно настроенными rev (версиями) и изолированными venv.",
+      "correctAnswer": true,
+      "explanation": "Точно. Для чистого Python DE pre-commit framework — оптимальный выбор. Преимущества: (1) Community catalog — все Python tools имеют официальные pre-commit hooks: ruff (`astral-sh/ruff-pre-commit`), mypy (`pre-commit/mirrors-mypy`), nbstripout (`kynan/nbstripout`), sqlfluff (`sqlfluff/sqlfluff`), gitleaks (`gitleaks/gitleaks`). Все pre-готовы с правильной интеграцией. (2) Изолированные venv — pre-commit создаёт отдельный virtualenv для каждого hook. Это значит ruff в pre-commit-cache не conflict-ит с ruff в твоём проектном venv. Можно иметь разные версии. (3) Pinning — `rev: v0.5.0` фиксирует версию tool — все коллеги получают идентичные результаты. (4) Auto-fix — большинство hooks автоматически исправляют (ruff --fix, ruff-format, end-of-file-fixer). После failed commit ты делаешь git add + commit повторно, изменения уже применены. (5) Industry standard — Airflow contributors, dbt-labs, snowflake-python используют pre-commit. Twoе resume получит больше resonance если ты говоришь 'я внедрил pre-commit с ruff/mypy/gitleaks в наш ETL pipeline'. (6) Performance в 2026 — ruff (Rust) — instant, mypy — самый медленный (1-5 сек на больших проектах), gitleaks — fast. Total pre-commit overhead обычно <5 сек на commit. Для polyglot или React-heavy проектов рассмотри alternatives, для чистого Python — pre-commit без сомнений.",
+      "bloomLevel": "conceptual"
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "11-pull-requests/05-draft-prs-suggestions",
+  "moduleId": "11-pull-requests",
+  "_meta": { "idPrefix": "git-m11-05" },
+  "questions": [
+    {
+      "id": "git-m11-05-q1",
+      "type": "multiple-choice",
+      "question": "Что такое Draft PR и для чего нужен?",
+      "options": [
+        { "id": "a", "text": "PR в режиме редактирования" },
+        { "id": "b", "text": "PR в состоянии 'черновик'. CI запускается, diff видно, обсуждать можно. НО: не запрашивает review автоматически, нельзя merge до перевода в 'Ready for review'. Используется для: early feedback на архитектуру, CI testing без отвлечения команды, long-running work, видимость команде что ты работаешь" },
+        { "id": "c", "text": "Закрытый PR" },
+        { "id": "d", "text": "Локальный PR" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Draft PR — профессиональный паттерн. Создание: gh pr create --draft или UI dropdown. Признак: серая иконка 'Draft', нельзя merge button, no auto reviewer notifications. Полезно когда хочешь feedback на approach ДО написания 500 строк, или CI gating WIP, или просто видимость 'я работаю над этим'. Когда готов: gh pr ready или UI button 'Ready for review' — становится нормальный PR.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m11-05-q2",
+      "type": "multiple-choice",
+      "question": "Что такое 'suggestion blocks' в review комментариях?",
+      "options": [
+        { "id": "a", "text": "Цитаты из документации" },
+        { "id": "b", "text": "Special markdown в reviewer комментарии: ```suggestion\\n<заменяющий код>\\n```. Author видит кнопку 'Commit suggestion' — один клик применяет suggested text к указанным строкам, создаёт коммит. Без local checkout/edit/push. Идеально для опечаток, переименований, мелких улучшений. Можно batch (несколько suggestions в один коммит)" },
+        { "id": "c", "text": "Suggestion для labels PR" },
+        { "id": "d", "text": "Auto-generated AI комментарии" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Suggestion blocks дроматически ускоряют review цикл. Reviewer пишет conkretный suggested code в специальный markdown block, author жмёт кнопку — apply. Один коммит появляется с message 'Apply suggestion from <reviewer>'. Multi-line support: выдели строки перед добавлением suggestion. Batch: 'Add to batch' на нескольких, потом 'Commit batch' = один коммит с всеми правками. Best for typos, renames, simple refactors.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m11-05-q3",
+      "type": "multiple-choice",
+      "question": "Почему `gh` (GitHub CLI) — must-have для junior DE?",
+      "options": [
+        { "id": "a", "text": "Это требование GitHub Pro плана" },
+        { "id": "b", "text": "Заменяет 90% UI clicks на терминальные команды, экономит часы каждую неделю. Топ-команды: gh pr create/view/list/checkout/merge, gh issue create/view, gh run watch (live CI monitor). Killer feature: gh pr checkout 234 — переключиться на чужой PR за одну команду для local testing. Освой в день 1" },
+        { "id": "c", "text": "Только для контрибьюшнов в gh repo" },
+        { "id": "d", "text": "Замена git CLI" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "gh — game changer для productive workflow. Установка: brew install gh + gh auth login. Командные команды: gh pr create --fill (auto-fill из commits), gh pr view/list, gh pr checkout (для local testing PR от других), gh pr merge --squash --delete-branch (merge + cleanup). Также: gh issue/run/repo. Junior с освоенным gh в день 1 на порядок продуктивнее тех кто работает только через web UI. Особенно когда PR много (10+ день).",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m11-05-q4",
+      "type": "multiple-choice",
+      "question": "Как переключиться на ветку чужого PR #234 для local testing?",
+      "options": [
+        { "id": "a", "text": "git pull pr-234" },
+        { "id": "b", "text": "gh pr checkout 234. Эквивалент: git fetch origin pull/234/head:pr-234 + git switch pr-234. Один command вместо 3-4. Полезно для review (запустить тесты локально, debug в IDE, попробовать pipeline). Без gh: вручную добавлять remote (если fork), fetch, branch, switch — много шагов" },
+        { "id": "c", "text": "git switch pull/234" },
+        { "id": "d", "text": "Через UI скачать ZIP" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "gh pr checkout — magic command. Под капотом: fetches PR branch (даже если из fork), создаёт local ветку, switches. После этого можно: pytest tests/, docker-compose up airflow, dbt run, debug в IDE. Critically полезно для thorough review (особенно DE PR-ов которые требуют запуска полного pipeline). Без gh CLI это тяжело сделать особенно для fork-based PR — приходится remote add, fetch refspec, и т.д.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m11-05-q5",
+      "type": "true-false",
+      "question": "Лучшая практика — делать чистые atomic commits на feature ветке, чтобы при squash merge история была идеальная.",
+      "correctAnswer": false,
+      "explanation": "Нет, наоборот: при squash merge все коммиты feature сплющиваются в один. Чистота промежуточных коммитов не сохраняется на main. Best practice для squash workflow: коммить локально часто и messy (WIP, fix typo, more tests, ack feedback) — это удобно для самого автора (granular undo, partial review). GitHub squash при merge создаст один чистый коммит на main с title PR. Time savings: не тратишь energy на perfect commit hygiene на feature, фокус на PR title/description. Lochные WIP commits полезны: можно git revert по одному локально, видна твоя engineering thought process.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

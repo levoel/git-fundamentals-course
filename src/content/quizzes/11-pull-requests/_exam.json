@@ -1,0 +1,89 @@
+{
+  "moduleId": "11-pull-requests",
+  "title": "Module 11 Exam — Pull Requests и code review",
+  "passThreshold": 70,
+  "_meta": {
+    "idPrefix": "git-m11-exam",
+    "description": "6 вопросов покрывающих PR концепцию, структуру PR, code review этикет, merge strategies, draft PR + GitHub CLI"
+  },
+  "questions": [
+    {
+      "id": "git-m11-exam-q1",
+      "type": "multiple-choice",
+      "question": "Полный flow создания PR для feature в dbt-репо?",
+      "options": [
+        { "id": "a", "text": "git push origin main && deploy" },
+        { "id": "b", "text": "(1) git switch -c feat/customer_ltv main; (2) work + commits (можно messy WIP); (3) git push -u origin feat/customer_ltv; (4) gh pr create --title 'feat(marts): customer LTV' --body 'Summary/Why/Test plan/Closes #N'; (5) CI запускается (dbt parse/test, sqlfluff); (6) reviewer назначен — addresses feedback iteratively; (7) Approve; (8) gh pr merge --squash --delete-branch; (9) deployment триггерится автоматически (CI/CD on merge to main или on tag push). 9 шагов, большинство — одна команда" },
+        { "id": "c", "text": "Только UI clicks" },
+        { "id": "d", "text": "Patch via email" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Standard DE PR workflow с full automation. gh CLI делает каждый шаг 1-2 команды. Branch protection enforce-ит process (require PR + approval + status checks). CI gates merge: невозможно merge с red CI. Reviewer focuses on logic/design (не на style — это линтер). Squash merge: clean main. Auto delete branch: clean repo. Auto deploy on tag: clean deployment story. Junior должен освоить весь этот pipeline в первый месяц.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m11-exam-q2",
+      "type": "multiple-choice",
+      "question": "Reviewer оставил три комментария: 'nit: имя переменной', 'question: почему INNER JOIN', 'blocker: SQL injection в строке 42'. Стратегия author?",
+      "options": [
+        { "id": "a", "text": "Игнорировать все три" },
+        { "id": "b", "text": "(1) blocker: ОБЯЗАТЕЛЬНО фикс — SQL injection критично, parameterized query через cur.execute('... %s', (param,)). Reply с commit hash где fix; (2) question: ответить с rationale — 'INNER intentional, без orders user не нужен per spec' — обсуждение, не обязательно фиксить; (3) nit: либо быстро фиксить (мелкая правка), либо ack 'оставлю как есть'. Префиксы дают чёткий сигнал что критично" },
+        { "id": "c", "text": "Спорить со всеми" },
+        { "id": "d", "text": "Закрыть PR и начать заново" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Правильная reaction strategy по категориям. Blocker — это блокирует merge, обязательно фиксить, нельзя обойти. Question — это диалог, ответ с rationale (объяснить почему), не обязательно менять код. Nit — оптional, можно фикс или ack. Reply на blocker должен включать ссылку на commit с fix-ом (например: 'Fixed in 7a8b9c0'), чтобы reviewer видел что именно изменилось. Игнорировать комментарии — sign of professional immaturity, спорить со всеми — обратное, оба пути плохие.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m11-exam-q3",
+      "type": "multiple-choice",
+      "question": "PR имеет 1500 LOC изменений в 30 файлах, разные темы (новая feature + refactor + bug fix). Что советует best practice?",
+      "options": [
+        { "id": "a", "text": "Открыть PR как есть — детальное review" },
+        { "id": "b", "text": "Раздели на atomic PRs по темам: PR #1 refactor (без изменения поведения), PR #2 feature (на refactored код), PR #3 bug fix. Каждый 200-400 LOC, focused, easy review. Можно stack PRs (#2 depends on #1) или feature flag для безопасного merge. PR > 1000 LOC — red flag: defect detection падает, никто не хочет review, висит долго, requires rebase из-за конфликтов" },
+        { "id": "c", "text": "Просто squash перед открытием" },
+        { "id": "d", "text": "Открыть несколько drafts одновременно" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "1500 LOC mixed-theme PR — anti-pattern. Reviewer не может effective review (теряется контекст), не может approve часть отклонить другую, нельзя точечно revert. Decomposition: layer-by-layer (refactor -> feature -> fix), stack PRs (зависимые), feature flag (merge безопасно, включить отдельно). Research: 75% багов find в первые 200 строк review, после 500 detection падает. Atomic PRs — стандарт качественной DE команды. Junior с такой дисциплиной выделяется.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m11-exam-q4",
+      "type": "multiple-choice",
+      "question": "Сравнение merge strategies на main для DE-репо?",
+      "options": [
+        { "id": "a", "text": "Все одинаковые" },
+        { "id": "b", "text": "Merge commit: сохраняет full history feature commits + один merge node (preserve, но шумный log); Squash: один коммит на PR (clean main log, ~70% DE teams выбирают это, allows messy WIP locally); Rebase: linear no merge commits (требует strong commit hygiene, переписывает SHA — теряет PR comment context). DE SaaS обычно Squash, large open-source — Merge commit или Rebase" },
+        { "id": "c", "text": "Только Squash работает с CI" },
+        { "id": "d", "text": "Rebase лучше всегда" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Trade-offs: Squash — best clean main log + dev flexibility, но теряет detailed history. Merge commit — preserves history + easy revert one PR, но шумный log. Rebase — linear + atomic commits, но fragile (SHA переписывается, lost comment context, требует careful hygiene). DE SaaS preferences (~70% squash) обусловлены: main log читаемость > detailed feature history, не у всех команд perfect commit discipline, простота revert важна. Junior должен спросить tech lead — это team convention.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m11-exam-q5",
+      "type": "multiple-choice",
+      "question": "Topology PR review: что reviewer должен проверять в порядке важности для DE PR?",
+      "options": [
+        { "id": "a", "text": "Только форматирование" },
+        { "id": "b", "text": "(1) Безопасность: hardcoded credentials, SQL injection, .env в коммите; (2) Корректность: логика, edge cases (null, empty, duplicates); (3) Тесты: покрывают changes, edge cases; (4) Производительность: O(n²), N+1 queries, full table scan; (5) Идемпотентность для Airflow/dbt: retry safe; (6) Naming; (7) DRY; (8) Документация; (9) Style — обычно delegate к линтеру. Сначала high-impact, потом low" },
+        { "id": "c", "text": "Только тесты" },
+        { "id": "d", "text": "В любом порядке" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Review checklist для DE PR. Security & correctness первыми — наиболее impact на production. Тесты — гарантирует regression safety. Performance — может быть critical для data pipelines (миллионы строк). Идемпотентность — DE-specific (Airflow tasks retry, dbt models могут запускаться повторно). Naming/DRY/docs — quality maintenance. Style — линтер должен делать, не human review. Reviewer фокусируется на high-leverage areas, не тратит время на форматирование.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m11-exam-q6",
+      "type": "true-false",
+      "question": "GitHub CLI (gh) — опциональный tool, можно полностью обойтись веб UI для всех PR операций.",
+      "correctAnswer": false,
+      "explanation": "Технически возможно но непрактично. Без gh: каждый PR action — 5-15 кликов в браузере (open, fill, submit, close, switch context). С gh: 1-2 терминальные команды. Junior с 10 PR-операциями в день экономит 1-2 часа с gh. Killer features недоступные в UI: gh pr checkout (переключиться на чужой PR за одну команду), gh pr create --fill (auto-fill from commit), gh run watch (live CI monitor), batch operations. В команде с PR-heavy workflow gh — must-have. Установка 1 минута, payback в первый день.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

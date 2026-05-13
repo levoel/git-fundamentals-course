@@ -1,0 +1,74 @@
+{
+  "lessonSlug": "04-branches-merging/01-what-is-a-branch",
+  "moduleId": "04-branches-merging",
+  "_meta": {
+    "idPrefix": "git-m04-01",
+    "description": "Quiz for lesson 4.1 — Что такое ветка"
+  },
+  "questions": [
+    {
+      "id": "git-m04-01-q1",
+      "type": "multiple-choice",
+      "question": "Что такое ветка в Git с точки зрения хранения на диске?",
+      "options": [
+        { "id": "a", "text": "Объект особого типа в .git/objects/" },
+        { "id": "b", "text": "Запись в SQLite-базе внутри Git" },
+        { "id": "c", "text": "Файл в .git/refs/heads/<name>, содержащий один SHA коммита + newline. Всего 41 байт" },
+        { "id": "d", "text": "Виртуальная копия working directory" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "Ветка в Git — это просто файл. Например, .git/refs/heads/main содержит 40 hex символов SHA + newline = 41 байт. Создание ветки = создание файла. Переименование = mv. Удаление = rm. Из такой простоты вытекает feature-branch culture: можно создавать сотни веток для экспериментов без штрафов по storage.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m04-01-q2",
+      "type": "multiple-choice",
+      "question": "Что такое HEAD в Git?",
+      "options": [
+        { "id": "a", "text": "Это первый коммит репозитория" },
+        { "id": "b", "text": "Файл .git/HEAD, обычно содержащий 'ref: refs/heads/<branch>' — указатель на текущую ветку. Когда коммитите, ветка двигается, HEAD за ней. В detached HEAD состоянии файл содержит SHA напрямую, без 'ref:'" },
+        { "id": "c", "text": "Указатель на последний tag" },
+        { "id": "d", "text": "Алиас для origin/main" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "HEAD = «вы здесь» в карте репозитория. Файл .git/HEAD. Обычно содержит 'ref: refs/heads/branch-name' — это указатель на текущую ветку. Через эту ссылку HEAD «привязан» к ветке: когда вы коммитите, обновляется файл ветки, HEAD через ссылку видит новый коммит. В detached HEAD состоянии файл содержит сам SHA коммита (без ref:) — указатель напрямую.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m04-01-q3",
+      "type": "multiple-choice",
+      "question": "Что произойдёт, когда вы сделаете коммит на ветке feature/x, если main стоит на коммите C0?",
+      "options": [
+        { "id": "a", "text": "Обе ветки сдвинутся на новый коммит" },
+        { "id": "b", "text": "Только feature/x сдвинется на новый коммит. main останется на C0 — она не двигалась, потому что вы не коммитили на ней" },
+        { "id": "c", "text": "Произойдёт автоматический merge" },
+        { "id": "d", "text": "main удалится" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Ветка двигается ТОЛЬКО когда вы на ней коммитите. После git commit обновляется файл refs/heads/<текущая-ветка>, остальные ветки не трогаются. Это и есть изоляция: работа на feature/x не затрагивает main, пока вы не сделаете merge.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m04-01-q4",
+      "type": "multiple-choice",
+      "question": "В чём разница между `git branch -d feature/x` и `git branch -D feature/x`?",
+      "options": [
+        { "id": "a", "text": "Разницы нет" },
+        { "id": "b", "text": "-d (lowercase) безопасное удаление: Git откажет, если ветка не слита в текущую. -D (uppercase) принудительное удаление: удалит даже если коммиты не слиты — те коммиты станут unreachable" },
+        { "id": "c", "text": "-D удаляет только теги, -d только ветки" },
+        { "id": "d", "text": "-D удаляет на сервере, -d локально" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Lowercase -d (или --delete) — безопасное удаление. Git проверяет: «эта ветка слита в текущую или upstream?». Если нет — отказывает с предупреждением, чтобы вы не потеряли работу. Uppercase -D (или --delete --force) — принудительное удаление без проверок. Используйте, когда уверены: например, экспериментальная ветка, которая никуда не идёт.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m04-01-q5",
+      "type": "true-false",
+      "question": "Если вы случайно сделали `git branch -D feature/x` на ветке с непримерженными коммитами, эти коммиты потеряны навсегда.",
+      "correctAnswer": false,
+      "explanation": "Нет, не сразу. Сами commit-объекты остаются в .git/objects/ как unreachable (никакая ветка/тег на них не указывает). Через reflog (модуль 09) их можно найти ещё ~30 дней и восстановить: `git reflog` найдёт SHA, `git switch -c rescue-branch <SHA>` создаст новую ветку на этом коммите. Только после git gc (через 30 дней default) коммиты удаляются физически. До тех пор всё восстановимо.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

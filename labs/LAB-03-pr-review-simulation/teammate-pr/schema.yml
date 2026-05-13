@@ -1,0 +1,25 @@
+version: 2
+
+models:
+  - name: fct_customer_orders
+    description: "Aggregates order totals per customer. Used by Marketing retention dashboard."
+    columns:
+      - name: customer_id
+        description: "Customer identifier."
+        tests:
+          - not_null
+
+      - name: total_orders
+        description: "Number of orders by this customer."
+
+      - name: total_revenue
+        description: "Sum of order amounts for this customer."
+
+      - name: estimated_profit
+        description: "Estimated profit (revenue * 0.15)."
+
+      - name: first_order_date
+        description: "Date of the first order."
+
+      - name: last_order_date
+        description: "Date of the last order."

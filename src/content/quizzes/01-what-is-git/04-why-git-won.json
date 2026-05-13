@@ -1,0 +1,74 @@
+{
+  "lessonSlug": "01-what-is-git/04-why-git-won",
+  "moduleId": "01-what-is-git",
+  "_meta": {
+    "idPrefix": "git-m01-04",
+    "description": "Quiz for lesson 1.4 — Почему Git победил"
+  },
+  "questions": [
+    {
+      "id": "git-m01-04-q1",
+      "type": "multiple-choice",
+      "question": "Сколько типов объектов в Git?",
+      "options": [
+        { "id": "a", "text": "2: file и directory" },
+        { "id": "b", "text": "4: blob (содержимое файла), tree (содержимое директории), commit (snapshot + metadata), tag (именованный указатель)" },
+        { "id": "c", "text": "7: blob, tree, commit, tag, branch, ref, head" },
+        { "id": "d", "text": "Зависит от версии Git" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "В Git ровно 4 типа объектов: blob (содержимое файла), tree (список «имя+SHA+mode» внутри директории), commit (snapshot tree + parent SHA + author + message), tag (annotated tag с дополнительными метаданными). Branch — это НЕ объект, а ссылка (ref) — файл с одним SHA. Эта простая модель — одно из ключевых технических преимуществ Git.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m01-04-q2",
+      "type": "multiple-choice",
+      "question": "Что такое 'ветка' в Git с точки зрения хранения данных?",
+      "options": [
+        { "id": "a", "text": "Объект особого типа в .git/objects/" },
+        { "id": "b", "text": "Это файл в .git/refs/heads/ с одной строкой — SHA коммита, на который указывает ветка (плюс newline). Создание ветки — это запись 41 байта. Поэтому ветки в Git сверхдешёвые" },
+        { "id": "c", "text": "Запись в SQL-таблице внутри Git" },
+        { "id": "d", "text": "Bitmap-индекс над commits" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Ветка в Git — это просто файл. Например, .git/refs/heads/main содержит один SHA (40 hex символов + newline = 41 байт). Создание ветки = запись файла с одним SHA. Переключение ветки = смена HEAD (тоже файл). Удаление ветки = удаление файла. Из такой простоты вытекает feature-branch культура: можно создавать сотни веток для экспериментов без штрафов.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m01-04-q3",
+      "type": "multiple-choice",
+      "question": "Почему Git победил Mercurial, который был технически приятнее в обычном использовании?",
+      "options": [
+        { "id": "a", "text": "Git был быстрее, но это не главная причина" },
+        { "id": "b", "text": "Главная причина — GitHub (2008), который поддерживал ТОЛЬКО Git и стал стандартом open-source. Сетевой эффект GitHub+Git был сильнее любых технических преимуществ Mercurial" },
+        { "id": "c", "text": "Mercurial был платным, Git — бесплатным" },
+        { "id": "d", "text": "Linus написал статью «Git лучше Mercurial»" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Технически Git превосходил Mercurial на больших репозиториях (скорость), имел простую модель данных (тулинг) и дешёвые ветки (workflow). Но решающим было нетехническое: GitHub запустился в 2008, поддерживал только Git, и стал стандартом open-source. Сетевой эффект «где больше людей — туда хочется» сделал Git default. Bitbucket поддерживал Mercurial до 2020, но был в 5 раз меньше GitHub. К 2024 даже Meta мигрировала с Mercurial.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m01-04-q4",
+      "type": "multiple-choice",
+      "question": "Что такое разделение plumbing/porcelain в Git?",
+      "options": [
+        { "id": "a", "text": "Это две версии Git — старая и новая" },
+        { "id": "b", "text": "Plumbing — низкоуровневые команды (git hash-object, git cat-file, git update-ref). Porcelain — высокоуровневые удобные команды (git add, git commit, git log). Porcelain построен поверх plumbing. Это дало гибкость для tooling: GUI-клиенты используют plumbing напрямую" },
+        { "id": "c", "text": "Plumbing — для Linux, porcelain — для Windows" },
+        { "id": "d", "text": "Plumbing — это плагины, porcelain — ядро" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Git разделяет команды на два класса. Plumbing — низкоуровневые операции напрямую над моделью данных: git hash-object, git cat-file, git update-ref, git read-tree. Porcelain — удобный пользовательский интерфейс: git add, git commit, git log. Porcelain под капотом вызывает plumbing. Эта архитектура дала Git огромную гибкость: GUI-клиенты (Sourcetree, GitKraken), плагины IDE, hooks-системы — все строят свой UX поверх plumbing. Mercurial был более 'всё-в-одном', что ограничивало tooling.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m01-04-q5",
+      "type": "true-false",
+      "question": "В 2026 году Git — это безусловный стандарт VCS, а альтернативы (Mercurial, Bazaar, SVN) фактически мертвы для новых проектов.",
+      "correctAnswer": true,
+      "explanation": "Это так. SVN остался в legacy enterprise (банки, госструктуры) и в отдельных огромных монорепо. Mercurial умер в 2024, когда Meta мигрировала. Bazaar умер около 2017. Для всех новых проектов в 2026 году выбор VCS = Git, иногда с расширениями (Sapling у Meta, GVFS у Microsoft). GitHub, GitLab, Bitbucket, Gitea, Forgejo, Codeberg, GitFlic, GitVerse — все основные хостинги работают с Git.",
+      "bloomLevel": "conceptual"
+    }
+  ]
+}

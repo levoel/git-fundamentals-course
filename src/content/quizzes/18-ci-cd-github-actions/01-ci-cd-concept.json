@@ -1,0 +1,59 @@
+{
+  "lessonSlug": "18-ci-cd-github-actions/01-ci-cd-concept",
+  "moduleId": "18-ci-cd-github-actions",
+  "_meta": {
+    "idPrefix": "git-m18-01"
+  },
+  "questions": [
+    {
+      "id": "git-m18-01-q1",
+      "type": "multiple-choice",
+      "question": "Junior открывает первый PR. CI запускает 5 jobs, один (mypy) красный. Что junior должен сделать?",
+      "options": [
+        {"id": "a", "text": "Попросить tech lead сделать merge несмотря на mypy fail"},
+        {"id": "b", "text": "Добавить [skip ci] в commit message для обхода"},
+        {"id": "c", "text": "Открыть логи failing job, прочитать ошибку mypy, исправить локально, push новый commit. CI запустится автоматически на новый push, ждать зелёного перед review"},
+        {"id": "d", "text": "Закрыть PR и открыть новый — повторно может запуститься без ошибки"}
+      ],
+      "correctAnswer": "c",
+      "explanation": "Standard workflow для failing CI: (1) открыть failed job в Actions UI, прочитать логи, найти конкретную ошибку (mypy error: dag.py:42: incompatible types); (2) исправить локально, проверить `uv run mypy` локально -> зелёный; (3) commit + push -> CI запустится автоматически на новый commit. Никогда не игнорировать failing CI и не просить merge сломанного кода — это базовое правило. [skip ci] — для docs/typo, не для production кода. Закрытие и открытие нового PR не помогает — та же ошибка.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m18-01-q2",
+      "type": "multiple-choice",
+      "question": "В dbt CI на PR используется `dbt build --select state:modified+ --state ./prod-state`. Что делает `state:modified+` и почему это важно?",
+      "options": [
+        {"id": "a", "text": "Запускает все 500 моделей проекта — гарантирует ничего не сломано"},
+        {"id": "b", "text": "Запускает только модели, которые отличаются от prod manifest, плюс все downstream-зависимые модели. Экономит Snowflake credits и время"},
+        {"id": "c", "text": "state:modified — это аналог git status, показывает изменённые файлы"},
+        {"id": "d", "text": "Запускает модели в порядке modification time"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "state:modified — dbt-селектор. Сравнивает текущий проект с prod manifest.json (скачивается перед CI). Возвращает модели, которые отличаются (новые, изменённый SQL, изменённый config). `+` после — downstream-зависимости (если изменил stg_users, то int_users и customers тоже включаются). Это golden CI pattern: тестируем что изменилось + что может быть affected. Запуск всех 500 моделей — wasteful (warehouse credits, время — 30+ минут vs 3 минуты). state — не git status, это dbt-specific концепция.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m18-01-q3",
+      "type": "multiple-choice",
+      "question": "Чем Continuous Delivery отличается от Continuous Deployment в DE контексте?",
+      "options": [
+        {"id": "a", "text": "Continuous Delivery дороже"},
+        {"id": "b", "text": "Continuous Delivery: auto-deploy в staging, production требует manual approval. Continuous Deployment: auto-deploy в production без human approval"},
+        {"id": "c", "text": "Это разные названия одного"},
+        {"id": "d", "text": "Continuous Deployment — для кода, Delivery — для конфигов"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Continuous Delivery: pipeline автоматизирует всё до production, но фактический prod-deploy требует human button-click. Защита от bad release. Continuous Deployment: каждый merge в main автоматически идёт в production. Требует **очень** mature CI (тесты ловят 99% багов, feature flags, easy rollback). Большинство DE-команд используют Delivery: staging auto, prod button. Это разумный compromise — automation без overconfidence.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m18-01-q4",
+      "type": "true-false",
+      "question": "DAG import errors — самая частая причина CI-fail в Airflow проектах: один `from some_lib import x`, где модуль не установлен, приводит к тому, что Airflow scheduler НЕ может загрузить ВЕСЬ DAG-folder, включая работающие DAG-и. CI smoke test 'попробуй импортировать каждый DAG-файл' ловит 80% таких проблем.",
+      "correctAnswer": true,
+      "explanation": "Это реальная боль Airflow: import errors на module level (top-level `import`, не внутри функции/task) ломают парсинг файла. Если файл не парсится — Airflow создаёт DagImportError, и хуже того — в зависимости от версии и конфигурации, может повлиять на загрузку других файлов. CI smoke test: `for f in dags/*.py; do python -c 'import importlib...'; done` — за 30 секунд ловит import-time ошибки. Это спасает от 02:00 AM pager 'весь Airflow упал'.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

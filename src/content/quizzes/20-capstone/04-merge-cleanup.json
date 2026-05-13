@@ -1,0 +1,59 @@
+{
+  "lessonSlug": "20-capstone/04-merge-cleanup",
+  "moduleId": "20-capstone",
+  "_meta": {
+    "idPrefix": "git-m20-04"
+  },
+  "questions": [
+    {
+      "id": "git-m20-04-q1",
+      "type": "multiple-choice",
+      "question": "Какой merge strategy default для большинства DE-команд и почему?",
+      "options": [
+        {"id": "a", "text": "Create a merge commit — preserves polный context"},
+        {"id": "b", "text": "Squash and merge — clean linear history main, один commit per feature, easy revert. Combine с 'Require linear history' в branch protection"},
+        {"id": "c", "text": "Rebase and merge — granular history"},
+        {"id": "d", "text": "Force push в main"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Squash and merge — самый популярный default для DE 2026: (1) main история linear, clean — легко read `git log --oneline`; (2) one commit per feature — `git revert <single-sha>` отменяет всю feature; (3) micro-commits в PR (включая review fix-ups) объединяются — main не loaded noise; (4) совместим с Require linear history. Tradeoff: granular PR history лost в main, но GitHub сохраняет PR ссылку в squashed commit message. Merge commit — для больших features где history value-able. Rebase merge — для open-source style проектов.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m20-04-q2",
+      "type": "multiple-choice",
+      "question": "После merge PR через 'Squash and merge', junior должен сделать какой cleanup?",
+      "options": [
+        {"id": "a", "text": "Ничего — GitHub всё сам"},
+        {"id": "b", "text": "(1) git switch main; (2) git pull origin main — обновить local; (3) git branch -d feat/... — удалить local feature branch (если merged); (4) git fetch --prune — убрать stale remote-tracking refs (если auto-delete-branch включён на GitHub)"},
+        {"id": "c", "text": "git push --force в main"},
+        {"id": "d", "text": "Удалить локальный clone репо"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Standard cleanup: (1) switch на main (с feature ветки); (2) pull, чтобы main local совпадал с remote (squash merge добавил commit); (3) удалить local feature branch — она устарела; (4) prune remote tracking, если remote feature branch удалёна автоматически после merge (Settings -> Pull Requests -> Automatically delete head branches). git config --global fetch.prune true — auto-prune на каждом fetch/pull. Без cleanup `git branch -a` через год — 200+ refs мусора.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m20-04-q3",
+      "type": "multiple-choice",
+      "question": "Hotfix scenario: typo в README, нужно срочно fix. Какой mini-flow?",
+      "options": [
+        {"id": "a", "text": "Прямо в main: git checkout main && git commit -am 'fix typo' && git push"},
+        {"id": "b", "text": "Trunk-based short-lived branch: (1) git switch main && git pull; (2) git switch -c hotfix/readme-typo; (3) fix + commit с conventional 'docs: fix typo'; (4) push -u + gh pr create; (5) quick review + squash merge"},
+        {"id": "c", "text": "Создать долгоживущую develop ветку"},
+        {"id": "d", "text": "Найти reviewer и просить direct push в main"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Trunk-based hotfix flow — short-lived branch + PR + fast merge. Даже для тривиального fix: (1) fresh main; (2) short hotfix branch; (3) conventional commit (docs: for typo); (4) PR через gh; (5) quick review (это не bypass — просто fast turnaround); (6) merge через squash. 2-5 минут total. Direct push в main — anti-pattern (branch protection блокирует). Создавать долгоживущие develop branches для typo — overkill. GitHub Flow с PR для всего — стандарт.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m20-04-q4",
+      "type": "true-false",
+      "question": "В trunk-based development все mainline (main) изменения проходят через PR с branch protection. Только время жизни feature/hotfix branches короткое (часы для hotfix, дни для feature). Это даёт continuous deployment-готовое main без long-lived release branches как в GitFlow.",
+      "correctAnswer": true,
+      "explanation": "Trunk-based development — modern Git workflow для serious teams: (1) main always deployable; (2) feature branches short (days, not weeks); (3) hotfix mini-flow (minutes); (4) integration через PR + CI, не через long release branches; (5) feature flags для toggling work-in-progress в main без visible behavior. Combine с continuous deployment даёт fast feedback loops, less merge hell, simpler mental model. GitFlow — legacy approach с develop/release/master сloud, сложнее, медленнее. DE-команды 2026 — преимущественно trunk-based с branch protection.",
+      "bloomLevel": "analytical"
+    }
+  ]
+}

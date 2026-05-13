@@ -1,0 +1,393 @@
+---
+title: "Merge, cleanup, hotfix: финал capstone"
+description: "Выбор merge strategy (squash для clean main, rebase merge, regular merge). После merge — delete branch, pull latest main, prune remote-tracking. Hotfix demo: git switch -c hotfix/fix-typo, fix, PR, merge — trunk-based flow."
+order: 4
+difficulty: "intermediate"
+estimatedTime: 30
+topics: ["merge-strategy", "squash", "branch-cleanup", "prune", "hotfix", "trunk-based"]
+---
+
+# Merge, cleanup, hotfix: финал capstone
+
+PR `#789` approved, CI зелёный, всё conversations resolved. Финальный шаг — нажать кнопку **Merge**. И тут junior часто видит выбор:
+
+```
+Merge pull request ▼
+  • Create a merge commit
+  • Squash and merge
+  • Rebase and merge
+```
+
+Три варианта. Какой выбрать? Зависит от team convention и semantic content PR. В этом уроке:
+
+1. Три merge strategies — что каждая делает, когда какую.
+2. Post-merge cleanup — local + remote.
+3. Hotfix simulation — trunk-based mini-flow.
+
+---
+
+## Три merge strategies
+
+### Strategy 1: Create a merge commit (`git merge --no-ff`)
+
+```
+До merge:
+main:    A -> B -> C
+              ↓
+PR:      X -> Y -> Z
+
+После merge commit:
+main:    A -> B -> C ──────M
+              ↓        ↗
+              X -> Y -> Z
+```
+
+Создаётся **merge commit M** с двумя parents: HEAD main (C) и HEAD ветки (Z). PR commits сохраняются как есть.
+
+**Pro**:
+- Полная история, видно когда и что merged.
+- Можно revert весь PR через `git revert M`.
+
+**Con**:
+- `git log --oneline` загромождается merge commits.
+- Если PR имеет 10 micro-commits — все в main.
+
+**Когда выбрать**: для крупных features, где history полезна (debug, archeology).
+
+### Strategy 2: Squash and merge (default for many teams)
+
+```
+До:
+main:    A -> B -> C
+              ↓
+PR:      X -> Y -> Z
+
+После squash:
+main:    A -> B -> C -> S        ← S = squashed (X+Y+Z) в один commit
+```
+
+PR commits объединены в **один** commit на main. Метаdata (автор, ticket ref) сохраняются.
+
+**Pro**:
+- Clean linear history на main.
+- One commit per feature — easy revert (`git revert S`).
+- Не важно сколько micro-commits в PR (всё equivalent).
+
+**Con**:
+- Granular history PR теряется (squashed).
+- Если PR имел rebase fixes — они тоже squashed.
+
+**Когда выбрать**: дефолт для большинства DE-команд. Особенно если линейная история main важна (модуль 18 — `Require linear history`).
+
+### Strategy 3: Rebase and merge
+
+```
+До:
+main:    A -> B -> C
+              ↓
+PR:      X -> Y -> Z
+
+После rebase merge:
+main:    A -> B -> C -> X' -> Y' -> Z'    ← X', Y', Z' — rebased commits, новые SHA
+```
+
+PR commits **пересажены** на HEAD main, как будто всегда были там. Без merge commit.
+
+**Pro**:
+- Linear history.
+- Сохраняет granularity PR commits.
+
+**Con**:
+- Новые SHA — confusing (твой `abc1234` стал `def5678` на main).
+- Не подходит если PR rebased/force-pushed — может быть сложно match.
+
+**Когда выбрать**: open-source проекты (Linux kernel, dbt-core), команды где granular history полезна.
+
+---
+
+## Recommendation для DE-команд
+
+| Тип PR | Strategy |
+|---|---|
+| Feature (твой DE-1234 case) | **Squash** |
+| Bug fix small | Squash |
+| Refactor с meaningful commits | Rebase merge |
+| Большая feature с reviewable steps | Merge commit (если команда ок с tree) |
+| Release branch merge | Merge commit (preserve context) |
+
+Большинство DE-команд используют **Squash by default**. Это упрощает revert, удобно для CI tracking. Если у команды есть **enforced linear history** + Squash default — junior просто кликает «Squash and merge», не задумываясь.
+
+---
+
+## Действие: merge через UI
+
+GitHub UI -> `Squash and merge`:
+
+```
+[Squash and merge ▼]
+
+Commit title:     feat(dags): add user_events ingestion DAG (DE-1234) (#789)
+Commit message:   
+  Daily load of S3 user_events parquet partitions to
+  Snowflake ANALYTICS.RAW.USER_EVENTS. Idempotent.
+  
+  Refs: DE-1234
+
+[Confirm squash and merge]
+```
+
+GitHub auto-предлагает title (PR title + PR number) и body (PR description). **Edit перед confirm**: убери лишнее, оставь meaningful summary.
+
+После confirm — PR closed, main продвинулся, branch на remote auto-deleted (если включено `Automatically delete head branches` в Settings).
+
+### Через CLI
+
+```bash
+$ gh pr merge 789 --squash --delete-branch
+[x] Squashed and merged pull request #789 (feat(dags): add user_events ingestion DAG)
+[x] Deleted branch feat/de-1234-user-events-dag and switched to branch main
+
+# Pull latest main
+$ git pull
+remote: ...
+Updating abc1234..def5678
+Fast-forward
+ dags/README.md                  |  20 ++++++++++++
+ dags/user_events_dag.py         |  78 +++++++++++++++++++++++++++++++++++
+ tests/test_user_events.py       |  35 ++++++++++++++++++
+ 3 files changed, 133 insertions(+)
+ create mode 100644 dags/user_events_dag.py
+ create mode 100644 tests/test_user_events.py
+```
+
+`--delete-branch` — auto delete head branch на remote после merge.
+
+---
+
+## Шаг 11: Cleanup
+
+После merge — несколько housekeeping команд.
+
+### Switch back to main
+
+```bash
+$ git switch main
+$ git pull origin main
+```
+
+(Если `gh pr merge` auto-switched — pull уже done.)
+
+### Delete local feature branch
+
+```bash
+$ git branch -d feat/de-1234-user-events-dag
+Deleted branch feat/de-1234-user-events-dag (was 9d0e1f2).
+```
+
+`-d` (lowercase) — safe delete, проверяет что ветка merged. Если нет — Git откажет с warning, требует `-D` (force).
+
+### Prune remote-tracking refs
+
+Когда remote branch удалена (auto-delete after merge), у тебя локально остаётся **stale remote-tracking ref**:
+
+```bash
+$ git branch -a | grep feat/de-1234
+  remotes/origin/feat/de-1234-user-events-dag    ← stale!
+```
+
+Pruning:
+
+```bash
+$ git fetch --prune
+remote: ...
+From github.com:acme-corp/analytics-dags
+ - [deleted]         (none)     -> origin/feat/de-1234-user-events-dag
+```
+
+Или раз и навсегда:
+
+```bash
+$ git config --global fetch.prune true
+```
+
+После этого все `git fetch` / `git pull` auto-prune.
+
+### Verify clean state
+
+```bash
+$ git branch
+* main
+
+$ git status
+On branch main
+Your branch is up to date with 'origin/main'.
+nothing to commit, working tree clean
+
+$ git log --oneline -5
+def5678 (HEAD -> main, origin/main) feat(dags): add user_events ingestion DAG (DE-1234) (#789)
+abc1234 fix(snowflake_loaders): change ON_ERROR default (#790)
+...
+```
+
+Clean. Готов к следующей задаче.
+
+---
+
+## Шаг 12: Hotfix simulation — trunk-based mini-flow
+
+Через час Алиса пишет:
+
+> @junior small thing — typo в README, заголовок `## Inegstion Pipelines` вместо `## Ingestion Pipelines`. Можешь quick fix? Direct PR, без full ticket process.
+
+Это **hotfix** — small, urgent, low-risk изменение. Trunk-based flow:
+
+### Шаг 1: Fresh main
+
+```bash
+$ git checkout main
+$ git pull
+```
+
+### Шаг 2: Short-lived branch
+
+```bash
+$ git switch -c hotfix/readme-typo
+```
+
+Naming: `hotfix/<short-desc>`, не нужен ticket ref.
+
+### Шаг 3: Fix
+
+```bash
+$ sed -i 's/Inegstion/Ingestion/' README.md
+$ git diff
+diff --git a/README.md b/README.md
+index abc..def 100644
+--- a/README.md
++++ b/README.md
+@@ -23,7 +23,7 @@ ...
+-## Inegstion Pipelines
++## Ingestion Pipelines
+```
+
+```bash
+$ git add README.md
+$ git commit -m "docs: fix typo in README
+
+Inegstion -> Ingestion"
+```
+
+### Шаг 4: Push + PR
+
+```bash
+$ git push -u origin hotfix/readme-typo
+
+$ gh pr create --base main --title "docs: fix typo in README" --body "Fixes typo `Inegstion` -> `Ingestion`. Trivial."
+```
+
+### Шаг 5: Self-approve? Нет — quick review
+
+Junior **не должен** обходить review даже для hotfix. Алиса просила «direct PR» — без ticket, но review всё ещё есть.
+
+`gh pr review --approve` — у Alice (она знает, что просила). 30 секунд.
+
+```bash
+$ gh pr merge --squash --delete-branch
+[x] Squashed and merged pull request #792 (docs: fix typo in README)
+[x] Deleted branch hotfix/readme-typo
+```
+
+Через 2 минуты от «пинг» до merged.
+
+### Trunk-based feel
+
+Это **trunk-based flow** (модуль 12): short-lived branches, fast merge, mainline всегда deployable. В отличие от GitFlow (long-lived feature branches), trunk-based — основа continuous deployment.
+
+DE-команды часто mix: feature work через GitHub Flow (modify), hotfixes через ultra-short trunk-based.
+
+---
+
+## What you accomplished
+
+К концу capstone у тебя:
+
+[x] Clone репо + 15-min explore.
+[x] Branch с conventional name.
+[x] Implement DAG с tests + docs.
+[x] Conventional commits с ticket refs.
+[x] Push + PR creation с meaningful body.
+[x] Wait зелёного CI.
+[x] Handle 5 типов review comments.
+[x] Rebase на updated main.
+[x] Resolve конфликт semantically.
+[x] Force push с `--force-with-lease`.
+[x] Squash merge to clean main.
+[x] Cleanup local + remote refs.
+[x] Hotfix mini-flow.
+
+Это **полный day-1 cycle junior DE**. Если у тебя получилось — ты готов к real production team.
+
+---
+
+## После capstone: что дальше
+
+### 1. Reproduce on real open-source
+
+Найди open-source DE-проект с `good first issue`:
+
+- [Apache Airflow](https://github.com/apache/airflow) — providers, docs, helpers.
+- [dbt-labs/dbt-core](https://github.com/dbt-labs/dbt-core) — core or adapters.
+- [Astronomer providers](https://github.com/astronomer/astronomer-providers) — community-maintained.
+- [Great Expectations](https://github.com/great-expectations/great_expectations) — data quality.
+
+Открой issue, follow capstone flow. Real review, real merge — best learning.
+
+### 2. Build portfolio
+
+5-10 merged PR-ов в open-source — это твой **public record**. Recruiter может проверить контрибуции, видит quality work. Лучше чем сертификат.
+
+### 3. Самоoбразование
+
+Реальные DE команды используют patterns которые **не покрыты** курсом:
+
+- Monorepo Bazel/Pants — atomic builds на multi-language repos.
+- GitOps (ArgoCD, Flux) — declarative deployment.
+- Trunk-based в большом scale (Google, Meta).
+- Conventional Commits + automatic release notes (semantic-release).
+- Pre-commit hooks для SQL (sqlfluff), Terraform (tflint), Markdown (markdownlint).
+
+Это next-level — изучай по запросу.
+
+### 4. Контрибуция в курс
+
+Если на курсе нашёл errors / improvements — PR в репо курса. Junior, contributing к курсу, — отличная sign of strong engineer mindset.
+
+---
+
+## Финальные takeaways курса
+
+**1. Git — это knowledge, не memorization**. Команды забываются — концепции остаются. `git restore` vs `git reset` — easy после понимания three trees.
+
+**2. Mental model > syntax**. Если знаешь что Git stores blobs + trees + commits в .git/objects/ — recovery становится intuitive. Без модели — chaotic.
+
+**3. Branch protection — your safety net**. Включай. На каждом репо. С первого commit. Никогда не работай в team без branch protection.
+
+**4. Pre-commit hooks — guardian**. gitleaks, ruff, mypy, nbstripout — каждый автоматизированный check спасает от обидной ошибки.
+
+**5. Communication > technical brilliance**. Junior, который чисто пишет commit messages и аккуратно responding на review — ценен в 2x раз больше junior, который пишет gorgeous code, но dismissive в discussions.
+
+**6. Recovery — last resort, prevention — strategy**. Reflog spасает иногда. Branch protection, CI, pre-commit — спасают всегда.
+
+**7. Push regular = backup**. Не дай работе жить только локально. После каждой логически завершённой части — push.
+
+**8. CI must be fast**. Less than 5 minutes feedback loop. Caching, parallelization, paths filters. Slow CI tears team velocity.
+
+**9. Secrets — never в Git**. ANY secret. Rotate before cleanup. Use Secrets Manager / Vault / doppler — not `.env` в production.
+
+**10. Real PR > hypothetical study**. Сделай 5 real merge в next month. Это transforms junior in middle.
+
+Поздравляю с финалом курса. Ты прошёл от `git init` до hotfix flow с управлением secrets и recovery. Этого достаточно для **first DE job**. И — самое главное — у тебя foundation для роста к middle и senior.
+
+Удачи в твоей DE-карьере. Push regular.
+
+<KnowledgeCheck quizSlug="20-capstone/04-merge-cleanup" />

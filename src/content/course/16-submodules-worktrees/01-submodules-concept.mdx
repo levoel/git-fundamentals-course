@@ -1,0 +1,451 @@
+---
+title: "Submodules: концепция и mental model"
+description: "Что такое submodule — ссылка на конкретный commit другого репо. Gitlinks в tree, .gitmodules, когда submodules — правильный выбор и когда нет"
+order: 1
+difficulty: "intermediate"
+estimatedTime: 22
+topics: ["Git", "submodules", "gitlinks", "monorepo", "shared code"]
+---
+
+# Submodules: концепция и mental model
+
+Submodule — один из самых **спорных** и при этом **полезных** механизмов Git. Это способ включить один Git репозиторий внутрь другого, не копируя файлы, а ссылаясь на конкретный commit. У многих junior DE submodules вызывают frustration: "детач HEAD внутри", "забыл push", "не обновляется само". Эта боль реальна, но возникает обычно от непонимания базовой mental model.
+
+В этом уроке: что именно submodule с точки зрения Git (он не "вложенный репозиторий", а ссылка), как выглядит механика gitlinks и `.gitmodules`, и три ключевых вопроса при принятии решения "submodule или нет".
+
+---
+
+## Mental model: submodule — это pinned reference
+
+Самое важное понимание: submodule — это **ссылка на конкретный commit** другого репозитория, замороженная во времени.
+
+<DiagramContainer title="Submodule = pinned commit reference" color="blue">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Parent repo — твой основной проект">
+        <DataBox label="parent repo" className="border-blue-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>airflow-dags/</div>
+            <div>├── dags/</div>
+            <div>├── plugins/</div>
+            <div>└── shared-utils/ ← submodule</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Arrow direction="right" label="points to" />
+      <Tooltip content="Submodule repo — отдельный Git репозиторий с своими commits">
+        <DataBox label="shared-utils repo" className="border-purple-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>commit C1</div>
+            <div>commit C2</div>
+            <div>commit C3 ← parent pinned здесь</div>
+            <div>commit C4 (новый — parent ещё не знает)</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+    <Tooltip content="В parent repo хранится только SHA, не сами файлы">
+      <DataBox label=".gitmodules + tree gitlink" className="border-emerald-500/30 w-96 mx-auto">
+        <div className="text-xs">parent tree: shared-utils -> SHA: abc123 (commit C3)</div>
+      </DataBox>
+    </Tooltip>
+  </FlowColumn>
+</DiagramContainer>
+
+В parent репо submodule представлен:
+
+1. **Запись в `.gitmodules`** (text file в корне parent) — какое имя, какой URL.
+2. **Gitlink в tree** — специальный type объекта (mode `160000`), хранит SHA коммита submodule-репо.
+
+Это два независимых артефакта. `.gitmodules` — конфигурация. Gitlink — указатель.
+
+```bash
+# .gitmodules в parent
+$ cat .gitmodules
+[submodule "shared-utils"]
+    path = shared-utils
+    url = https://github.com/acme/shared-utils.git
+
+# Что в tree parent-а?
+$ git ls-tree HEAD
+100644 blob 89abc... README.md
+040000 tree def012... dags/
+160000 commit 4cac19...  shared-utils    ← gitlink
+                          ^^^^^^^^^^^^^^^^^^^^
+                          mode 160000 = submodule
+                          указывает на commit 4cac19... в shared-utils репо
+```
+
+Mode `160000` — особенный. Git видит "это submodule, не blob, не tree". При checkout Git идёт в submodule-репо, делает `git checkout 4cac19...` там. После этого в working tree parent-а есть директория `shared-utils/` со своим `.git` (на самом деле gitfile-ссылкой на parent's `.git/modules/shared-utils/`, но это техническая деталь).
+
+---
+
+## Жизненный цикл: добавление submodule
+
+```bash
+# В parent репо
+$ cd my-parent-project
+
+# Добавить submodule
+$ git submodule add https://github.com/acme/shared-utils.git shared-utils
+Cloning into '.../shared-utils'...
+remote: Enumerating objects: ...
+
+# Что произошло:
+$ ls -la
+drwxr-xr-x  shared-utils/    ← клонированная директория
+-rw-r--r--  .gitmodules      ← новый файл
+
+$ cat .gitmodules
+[submodule "shared-utils"]
+    path = shared-utils
+    url = https://github.com/acme/shared-utils.git
+
+$ git status
+new file:   .gitmodules
+new file:   shared-utils    ← gitlink (одна запись, не файлы внутри)
+
+$ git diff --cached shared-utils
+diff --git a/shared-utils b/shared-utils
+new file mode 160000
++Subproject commit 4cac19622fc3ade9c373d54e8e76e85f7466bcab
+```
+
+Видишь — diff показывает "new file mode 160000" с указанием Subproject commit SHA. Это gitlink.
+
+```bash
+# Commit
+$ git add .gitmodules shared-utils
+$ git commit -m "feat: add shared-utils submodule"
+```
+
+С этого момента parent-репо хранит:
+- В индексе: запись о submodule с SHA `4cac19...`
+- В `.gitmodules`: метаданные (URL, path)
+- В рабочем дереве: реальные файлы submodule в `shared-utils/`
+
+Сам submodule репо — отдельная entity. У него своя история, свой `.git/`, свои бранчи. Parent просто **ссылается** на один конкретный commit.
+
+---
+
+## Жизненный цикл: clone parent с submodules
+
+Когда коллега клонирует parent, ему нужно **отдельно** запустить инициализацию submodules:
+
+```bash
+# Способ 1: clone с флагом --recurse-submodules
+$ git clone --recurse-submodules https://github.com/acme/parent.git
+# Это эквивалент clone + submodule init + submodule update
+
+# Способ 2: clone, потом init/update
+$ git clone https://github.com/acme/parent.git
+$ cd parent
+$ git submodule init      # читает .gitmodules, регистрирует в .git/config
+$ git submodule update    # клонирует submodule в нужный path, checkout pinned commit
+# Или одной командой:
+$ git submodule update --init --recursive
+```
+
+Без этого второго шага `shared-utils/` будет **пустой** директорией. Это самый частый footgun submodules: "почему shared-utils пустой?!". Ответ: ты забыл `submodule update --init`.
+
+<Callout type="warning">
+Запомни как мантру: `git clone --recurse-submodules` или после обычного clone — `git submodule update --init --recursive`. Без этого submodules не работают.
+</Callout>
+
+---
+
+## Жизненный цикл: обновление submodule
+
+Сценарий: в `shared-utils` появился новый commit (коллега добавил функцию). Ты хочешь использовать его в parent-проекте.
+
+```bash
+# В директории submodule
+$ cd shared-utils
+$ git fetch
+$ git checkout main
+$ git pull
+
+# Теперь shared-utils указывает на новый commit
+# Но parent об этом не знает — gitlink в parent всё ещё указывает на старый SHA
+
+$ cd ..  # обратно в parent
+$ git status
+modified:   shared-utils (new commits)
+
+$ git diff shared-utils
+- Subproject commit 4cac19622fc3ade9c373d54e8e76e85f7466bcab    ← старый
++ Subproject commit 89a3f12c44e2a1...                            ← новый
+
+# Commit обновление в parent
+$ git add shared-utils
+$ git commit -m "chore: bump shared-utils to latest"
+```
+
+Видишь: обновление submodule — это **два commit-а**: один в submodule-репо (новая функция), второй в parent (обновление gitlink).
+
+Альтернативный shortcut:
+
+```bash
+# Сразу обновить submodule до latest на его tracked branch
+$ git submodule update --remote shared-utils
+$ git add shared-utils
+$ git commit -m "chore: bump shared-utils"
+```
+
+`--remote` говорит "тяни последнее на tracking branch" (по умолчанию main или setting в `.gitmodules` через `branch = ...`).
+
+---
+
+## Когда submodule — правильный выбор
+
+Submodules хороши когда:
+
+<DiagramContainer title="Когда submodules — правильное решение" color="emerald">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Общий код используемый в нескольких проектах, изменяется реже">
+        <DataBox label="Shared library" className="border-emerald-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>Один utils для 5 ETL проектов</div>
+            <div>Обновляется по необходимости</div>
+            <div>Хочется явно pin версию</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Конкретный commit важен для reproducibility">
+        <DataBox label="Pinned versions" className="border-blue-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>Каждый деплой деплоит ТУ ЖЕ версию</div>
+            <div>Случайный update — explicit</div>
+            <div>Git tag не подходит — нужен SHA</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Несколько команд работают над разными частями">
+        <DataBox label="Separate ownership" className="border-purple-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>Platform team owns shared-utils</div>
+            <div>DE team owns dags</div>
+            <div>Разные access policies</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Конкретные DE сценарии">
+        <DataBox label="DE use cases" className="border-amber-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>Airflow plugins repo</div>
+            <div>Shared dbt macros</div>
+            <div>Protobuf schemas</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+### Real DE example: airflow DAGs со shared utils
+
+```
+acme-data-platform/
+├── dags/                           (airflow DAGs)
+├── plugins/                        (airflow plugins)
+├── tests/                          (integration tests)
+└── shared-utils/                   ← submodule
+    ├── connectors/                  (S3, Snowflake, etc.)
+    ├── transformations/             (common pandas helpers)
+    └── monitoring/                  (logging, alerts)
+```
+
+`shared-utils` — отдельный репо, который используется в `acme-data-platform`, `acme-ml-pipeline`, и `acme-reports-generator`. Все три репо имеют его как submodule.
+
+Когда platform team обновляет `shared-utils` (например, добавляют S3 connector v2):
+
+1. Изменения merge в `shared-utils:main`.
+2. DE-team в `acme-data-platform` решает, когда мигрировать. Делают `git submodule update --remote && git commit`.
+3. Test, deploy. Если всё работает — gitlink в parent обновлён.
+4. Если не работает — gitlink остался на старой версии, ничего не сломалось.
+
+Это явный controlled update — главное преимущество submodules.
+
+---
+
+## Когда submodule — плохой выбор
+
+<DiagramContainer title="Когда submodule — НЕ решение" color="rose">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Данные нужно версионировать через DVC или Git LFS, не submodule">
+        <DataBox label="Большие данные" className="border-rose-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>Submodule на data-репо</div>
+            <div>-> юзай DVC (модуль 14)</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Несколько компонентов часто меняются вместе — лучше monorepo">
+        <DataBox label="Tight coupling" className="border-rose-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>API и client меняются вместе</div>
+            <div>-> monorepo, single PR</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Если зависимость распространяется через пакет-менеджер">
+        <DataBox label="Package available" className="border-rose-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>Library есть на PyPI/npm</div>
+            <div>-> pip install / npm install</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Слишком много submodule-ов = managment hell">
+        <DataBox label="Too many submodules" className="border-rose-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>10+ submodules в parent</div>
+            <div>-> overhead больше пользы</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Антипатаerns:
+
+**1. Submodule на data-репо.** Если у тебя `data-raw/` как submodule — это плохая идея. Git не дружит с большими бинарями (модуль 14). Используй DVC.
+
+**2. Tight coupling.** Если API repo и client repo меняются вместе при каждой фиче (изменил endpoint — обновил клиента), submodule создаёт extra step. Лучше — monorepo.
+
+**3. Library доступная через package manager.** Если пакет есть на PyPI (`pandas`, `requests`) — используй `pip install`, не submodule. Submodule — для **internal code** без публичного package distribution.
+
+**4. Множество submodules.** 1-2 submodule — терпимо. 5+ — overhead начинает превышать пользу. Coordination между ними становится pain.
+
+---
+
+## Альтернативы submodule
+
+Прежде чем выбирать submodule, рассмотри:
+
+1. **Pip package** — если library shared, опубликуй её на PyPI (или private package server: pypiserver, AWS CodeArtifact, JFrog). Стандартный `requirements.txt`, нет проблем submodule.
+
+2. **Monorepo** — если несколько компонентов tightly coupled, держи всё в одном репо. Tooling: Bazel, Pants, Turborepo для polyglot monorepos.
+
+3. **Git subtree** (следующий урок) — встроенный механизм Git без боли submodule.
+
+4. **Vendoring** — копирование чужого кода в свой репо. Старая практика, но иногда оправдана для legal/security изоляции.
+
+5. **DVC** для data, **Git LFS** для бинарей (модуль 14).
+
+Submodule — когда **ничего из выше не подходит** и нужен именно SHA-pinned reference на другой репо.
+
+---
+
+## Hands-on: добавление submodule
+
+```bash
+# Создай parent-репо
+mkdir parent && cd parent
+git init
+echo "main project" > README.md
+git add . && git commit -m "init"
+
+# Симулируй submodule-репо (на самом деле — отдельный локальный)
+cd ..
+mkdir shared-utils && cd shared-utils
+git init
+echo "def hello(): print('hello')" > main.py
+git add . && git commit -m "init utils"
+git remote add origin git@github.com:fake/shared-utils.git  # фиктивный URL
+
+# Вернись в parent, добавь submodule
+cd ../parent
+git submodule add ../shared-utils shared-utils
+# Используем relative path для демо
+
+ls -la
+# Вижу: shared-utils/, .gitmodules
+cat .gitmodules
+# [submodule "shared-utils"]
+#     path = shared-utils
+#     url = ../shared-utils
+
+git status
+# new file: .gitmodules
+# new file: shared-utils (gitlink)
+
+git diff --cached
+# diff --git a/.gitmodules b/.gitmodules ...
+# diff --git a/shared-utils b/shared-utils ...
+# new file mode 160000
+# +Subproject commit <SHA>
+
+git commit -m "feat: add shared-utils submodule"
+
+# Внутри submodule — обычный git репо!
+cd shared-utils
+git log
+# Видишь историю shared-utils, не parent
+
+# Что показывает status parent?
+cd ..
+git status
+# nothing to commit
+
+# Обнови submodule
+cd shared-utils
+echo "def goodbye(): print('bye')" >> main.py
+git commit -am "add goodbye"
+
+cd ..
+git status
+# modified: shared-utils (new commits)
+git diff shared-utils
+# - Subproject commit OLD
+# + Subproject commit NEW
+
+git add shared-utils && git commit -m "chore: bump shared-utils"
+```
+
+Это базовая mechanika. В следующем уроке (16.02) — детальный workflow и решение common pain points (detached HEAD, forgot to push).
+
+---
+
+## .git/modules: где живут submodule .git
+
+Технический insight: когда ты добавляешь submodule, его `.git` директория НЕ в `shared-utils/.git/` (это просто файл-указатель), а в `parent/.git/modules/shared-utils/`:
+
+```bash
+$ cat shared-utils/.git
+gitdir: ../.git/modules/shared-utils
+
+$ ls .git/modules/
+shared-utils/
+$ ls .git/modules/shared-utils/
+HEAD  config  description  hooks  info  objects  refs
+```
+
+Это сделано так, чтобы parent мог управлять submodule (например, удалить целиком одной командой). С точки зрения пользователя работа с submodule-директорией идентична работе с обычным репо: `cd shared-utils && git log` работает.
+
+---
+
+## TL;DR
+
+- Submodule = ссылка на конкретный commit другого Git репо.
+- Parent хранит: запись в `.gitmodules` + gitlink в tree (mode 160000) с SHA.
+- Submodule репо имеет свою историю, бранчи, .git. Работа с ним — как с любым Git репо.
+- Главный footgun: после `git clone` parent — submodule пустой, нужно `git submodule update --init --recursive`.
+- Хорошо для: shared internal libraries, pinned versions, separate ownership teams.
+- Плохо для: data (используй DVC), tight coupling (monorepo), public libraries (pip install), too many (overhead).
+
+В следующем уроке — практический workflow с submodules и решение common pain points.
+
+---
+
+<KnowledgeCheck
+  question="Platform team в acme поддерживает репо `acme-shared-utils` с общими помощниками для S3, Snowflake, Pandas трансформаций. Эта library используется в 5 разных DE проектах (ETL pipelines, ML training, reports). Какие альтернативы есть и почему именно submodule может быть правильным выбором?"
+  answer="Альтернативы и анализ: (1) Pip-пакет на PyPI или private package server — стандартный путь, requirements.txt. Минусы: requires release process (versioning, publishing), может быть medlennее для итераций. Плюсы: industry standard, легко для consumers. (2) Monorepo — все 5 проектов + utils в одном репо. Плюсы: atomic updates, нет coordination. Минусы: огромный clone, разные ownership teams путаются, deploy complex. (3) Submodule — каждый из 5 проектов имеет shared-utils как submodule, ссылается на конкретный SHA. Плюсы: (a) Explicit pin — каждый проект deploy-ит конкретную версию utils, no surprises. (b) Controlled update — DE-team в каждом проекте сама решает когда мигрировать (`git submodule update --remote`). (c) Separate ownership — platform team owns shared-utils, DE-teams own свои pipelines. (d) Single source of truth — fixes в utils видны через bump submodule всем consumers. (e) Бесплатно — не нужен PyPI account или private package server. Минусы: команды должны помнить про --recurse-submodules при clone, detached HEAD при наивной работе. Когда submodule — правильно: (1) Internal library, не публичная. (2) Need pinned SHA (для reproducibility deploy-ов). (3) Independent teams. (4) Не критична velocity иterations (если меняется каждый день — pip быстрее). Когда нет: tightly coupled (API+client) -> monorepo, large data -> DVC, public package -> pip publish. В acme сценарии submodule оптимален если: нет требований к публичной distribution, ok с manual update workflow в consumer projects, teams comfortable с submodule mechanics. Альтернатива — private pypi (внутренний package server) если хочется более standard workflow."
+/>

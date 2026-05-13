@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "08-history-inspection/04-git-bisect",
+  "moduleId": "08-history-inspection",
+  "_meta": { "idPrefix": "git-m08-04" },
+  "questions": [
+    {
+      "id": "git-m08-04-q1",
+      "type": "multiple-choice",
+      "question": "Что такое `git bisect`?",
+      "options": [
+        { "id": "a", "text": "Команда для удаления багов" },
+        { "id": "b", "text": "Бинарный поиск по истории коммитов для нахождения первого 'плохого' коммита: задаёшь good и bad границы, Git делает checkout на средний коммит, ты говоришь good/bad, повторяешь, log₂(N) шагов до результата" },
+        { "id": "c", "text": "Автоматический code review" },
+        { "id": "d", "text": "Утилита для split коммитов" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`git bisect` — бинарный поиск bug-introducing commit. Workflow: (1) `git bisect start`, (2) `git bisect bad` — текущий (broken), (3) `git bisect good <sha>` — last known good. Git делает checkout на средний коммит между good и bad. (4) Тестируешь — `git bisect good` или `git bisect bad`. Git берёт следующий средний. (5) Повторяешь log₂(N) раз. (6) Git показывает 'first bad commit'. Завершить: `git bisect reset`. Незаменимо для регрессий в 100+ коммитов — ручной перебор займёт часы, bisect — 7 шагов.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m08-04-q2",
+      "type": "multiple-choice",
+      "question": "Что делает `git bisect run ./test.sh`?",
+      "options": [
+        { "id": "a", "text": "Запускает test.sh один раз" },
+        { "id": "b", "text": "Автоматизирует bisect: для каждого среднего коммита Git делает checkout, запускает test.sh; exit 0 = good, non-zero = bad; продолжает до первого bad commit" },
+        { "id": "c", "text": "Останавливает bisect" },
+        { "id": "d", "text": "Записывает bisect log" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Автоматизация bisect: вместо ручного тестирования каждого коммита, Git сам делает: checkout -> запуск script -> проверка exit code -> следующий коммит. Script должен возвращать **0 для good, non-zero для bad**. Например, для регрессии в тестах: `pytest tests/test_specific.py` — exit 0 если тест прошёл. Можно использовать с реальным DAG/pipeline: запустить и проверить output. **Важно**: script должен быть **детерминированным** — если иногда зелёное, иногда красное (flaky tests), bisect запутается. Включи retry: `for i in 1 2 3; do test.sh && exit 0; done; exit 1`.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m08-04-q3",
+      "type": "true-false",
+      "question": "`git bisect` можно использовать не только для 'baгов', но и для performance регрессий (когда стало медленнее).",
+      "correctAnswer": "true",
+      "explanation": "Можно использовать с произвольными терминами через `--term-old` и `--term-new`. Например: `git bisect start --term-old=fast --term-new=slow`, затем `git bisect slow` и `git bisect fast`. Это работает для любых монотонных регрессий: 'стало медленнее', 'добавился warning', 'тесты flake', 'memory usage вырос'. Главное условие: тест возвращает 0 или non-zero детерминированно для каждого коммита, и регрессия монотонна (после первого bad — все следующие тоже bad). Не работает для 'появилось, потом исчезло, потом снова появилось'.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m08-04-q4",
+      "type": "multiple-choice",
+      "question": "При bisect Git делает checkout на средний коммит, но в этом коммите проект не компилируется из-за известной зависимости. Что делать?",
+      "options": [
+        { "id": "a", "text": "Завершить bisect через --abort" },
+        { "id": "b", "text": "git bisect skip — пропустить коммит, Git попросит протестировать другой рядом. Если много подряд проблемных — skip каждый, в конце Git выдаст 'первый плохой среди этих'" },
+        { "id": "c", "text": "Сказать good, потом разобраться" },
+        { "id": "d", "text": "Удалить broken коммит из истории" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`git bisect skip` — для коммитов, которые нельзя протестировать (не компилируется, отсутствуют зависимости, broken state). Git попросит протестировать другой коммит рядом. Если несколько проблемных коммитов подряд — `--skip` каждый. В конце Git может выдать: 'первый плохой — один из этих [список]', и тебе придётся разобраться вручную через `git log -p` или другие методы. **НЕ** использовать `--abort` (полный откат всего bisect) или говорить good/bad когда не уверен — это запутает поиск.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m08-04-q5",
+      "type": "multiple-choice",
+      "question": "В каком случае bisect НЕ сработает хорошо?",
+      "options": [
+        { "id": "a", "text": "При большом количестве коммитов — bisect замедляется логарифмически" },
+        { "id": "b", "text": "Когда регрессия немонотонна (появилось -> исправили -> снова появилось), при flaky tests (то проходит, то падает), или когда 'bad commit' — squashed monster с 500 файлами (виновник где-то внутри)" },
+        { "id": "c", "text": "При работе в team — bisect для personal" },
+        { "id": "d", "text": "Только для compiled языков" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Ограничения bisect: (1) **Немонотонная регрессия** — bisect предполагает 'после первого bad все следующие тоже bad'. Если баг был в X, исправлен в Y, снова появился в Z — bisect найдёт Y как 'good' и пропустит X. (2) **Flaky tests** — если тест то проходит то падает на одном коммите, bisect двинется не туда. Решение: retry в script. (3) **Monster commit с squashed changes** — bisect нашёл коммит, но в нём 500 файлов изменений; виновник конкретный кусок, нужен дополнительный поиск (часто `git log -p` для конкретных файлов в этом коммите). (4) **Внешние зависимости** — если поведение зависит от внешнего состояния (база, S3), нужно изолировать или зафиксировать test data.",
+      "bloomLevel": "analytical"
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "11-pull-requests/03-code-review-etiquette",
+  "moduleId": "11-pull-requests",
+  "_meta": { "idPrefix": "git-m11-03" },
+  "questions": [
+    {
+      "id": "git-m11-03-q1",
+      "type": "multiple-choice",
+      "question": "Что значат теги nit:, suggestion:, blocker: в review комментариях?",
+      "options": [
+        { "id": "a", "text": "Это random labels" },
+        { "id": "b", "text": "Категории важности: nit: (nitpick — мелкая стилистика, опционально); question: (вопрос, не критика); suggestion: (улучшение, обсуждаемо); blocker: (критично — нельзя merge до исправления). Даёт чёткий сигнал author-у что обязательно исправить, что опционально" },
+        { "id": "c", "text": "Только для security комментариев" },
+        { "id": "d", "text": "GitHub auto-добавляет их" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Префиксы — convention для clear communication. Без них junior может в панике переделывать всё подряд, тратя дни на nit-ы вместо важного. С тегами: nit можно пропустить, question — ответить, suggestion — обсудить, blocker — обязательно фиксить. Это reduces friction и demotivation. Reviewer-у проще писать критику если можно пометить «не блокер, но...».",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m11-03-q2",
+      "type": "multiple-choice",
+      "question": "Какой комментарий конструктивный?",
+      "options": [
+        { "id": "a", "text": "Это говнокод, переделать" },
+        { "id": "b", "text": "Очевидно неправильно" },
+        { "id": "c", "text": "blocker: SQL injection в строке 42 — pet.name из user input, не sanitized. Используй parameterized query: cur.execute('SELECT * FROM users WHERE name = %s', (pet.name,)). Указывает конкретное место, объясняет проблему (почему опасно), предлагает решение (как исправить)" },
+        { "id": "d", "text": "Не нравится" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "Конструктивный комментарий имеет 3 части: (1) WHAT — конкретное место в коде; (2) WHY — что не так и почему; (3) HOW — предложение решения или приглашение к обсуждению. (a, b, d) — атаки на человека или оценки без объяснения. (c) — указывает на строку, объясняет SQL injection risk, предлагает parameterized query. Author может pofiksiть за 30 секунд. Хороший review focuses on code, not person.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m11-03-q3",
+      "type": "multiple-choice",
+      "question": "Когда reviewer должен использовать 'Request changes' vs 'Comment'?",
+      "options": [
+        { "id": "a", "text": "Always Request changes" },
+        { "id": "b", "text": "Request changes ТОЛЬКО для реальных blocker-ов (баг, security issue, broken tests). Comment для nit-ов и обсуждений. Использование Request changes для мелких стилистических замечаний — anti-pattern: раздражает author-а, блокирует merge без необходимости. Approve with comments — для approval с обсуждаемыми точками без блокировки" },
+        { "id": "c", "text": "Request changes для всех PR" },
+        { "id": "d", "text": "Только tech lead может Request changes" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Right tool for the job. Request changes — серьёзный сигнал, блокирует merge до явного approval. Должно быть оправдано: blocker по безопасности, корректности, broken CI. Comment — для nit, suggestion, question. Approve with pending discussions — author может пофиксить или нет, не блокировано. Junior reviewer часто перегибает с Request changes за мелочи — раздражает team, замедляет merge. Best practice: проверь, действительно ли это блокер.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m11-03-q4",
+      "type": "multiple-choice",
+      "question": "Как author должен ответить на reviewer's nit-комментарий, с которым не согласен?",
+      "options": [
+        { "id": "a", "text": "Игнорировать без ответа" },
+        { "id": "b", "text": "Сразу удалить комментарий" },
+        { "id": "c", "text": "Объяснить своё rationale: 'ack, понял замечание, но текущий вариант intentional — [причина]. Если согласен, оставлю как есть; если хочешь обсудить — let's chat'. Не молча игнорировать (раздражает reviewer-а), не подчиняться слепо (если уверен), не агрессивно отказывать. Code review — discussion, не подчинение" },
+        { "id": "d", "text": "Спорить и доказывать что reviewer не прав" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "Code review — диалог. Если ты автор и не согласен — обязательно ответь с rationale, не молчи. Author имеет право отказаться от nit (не от blocker — там надо фиксить). Хороший pattern: 'ack, intentional because X. Open to discuss'. Это уважительно, конструктивно, показывает что ты think про comment. Reviewer может ответить 'OK, accept' или 'но смотри так-то' — продолжается conversation. Молчаливое игнорирование — sign of professional immaturity.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m11-03-q5",
+      "type": "true-false",
+      "question": "В здоровой DE команде есть soft-SLA 24 часа на первое review PR.",
+      "correctAnswer": true,
+      "explanation": "Да, в здоровых командах. Author обещает: быстрая реакция на blocker/nit-ы (тот же день). Reviewer обещает: дать первое review в 24 часа с момента request. Без дисциплины PR-ы пухнут в очереди, конфликты копятся, merge замедляется. Junior должен active push свой PR через pipeline: через 24h — мягкий ping в Slack, через 48h — другой reviewer, через 72h — escalate к tech lead. Не молча ждать неделю.",
+      "bloomLevel": "conceptual"
+    }
+  ]
+}

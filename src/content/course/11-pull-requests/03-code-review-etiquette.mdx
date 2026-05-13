@@ -1,0 +1,243 @@
+---
+title: "Этикет code review — как комментировать и как отвечать"
+description: "Reviewer: suggest не demand, nit: vs blocker:, фокус на код не на человека, request changes vs approve with comments. Author: agree+fix или discuss+rationalize."
+order: 3
+difficulty: "beginner"
+estimatedTime: 25
+topics: ["code-review", "etiquette", "communication", "feedback", "nit", "blocker"]
+---
+
+# Code review — этикет с обеих сторон
+
+Code review — это не «найти что плохо в коде Васи». Это **совместная работа** для улучшения кода и обмена знаниями. Хороший review повышает качество кода, ускоряет junior до senior, ловит баги до прода. Плохой review — конфликты, демотивация, медленная команда.
+
+В этом уроке: как комментировать (роль reviewer), как отвечать (роль author), какие frame использовать для конструктивной коммуникации, и три категории комментариев (`nit:`, `question:`, `blocker:`).
+
+---
+
+## Базовый принцип: фокус на коде, не на человеке
+
+**Плохо:** «Ты пишешь говнокод. Зачем так делать?»
+**Хорошо:** «Эта функция повторяется 3 раза. Можем вынести в helper?»
+
+**Плохо:** «Очевидно же что не так. Ты Python вообще знаешь?»
+**Хорошо:** «Здесь есть memory leak — DataFrame не закрывается. Лучше использовать `with` блок.»
+
+**Плохо:** «Я бы сделал по-другому.» (без объяснения)
+**Хорошо:** «Альтернатива — использовать `pandas.merge` вместо двойного цикла. Это O(n) вместо O(n²). Стоит ли менять?»
+
+Code review — про **код**, не про **автора**. Любой комментарий должен:
+
+1. Указывать на **конкретное место** в коде.
+2. Объяснять **проблему** (что не так).
+3. Предлагать **решение** или приглашать к обсуждению.
+
+---
+
+## Три категории комментариев
+
+В современных командах принято префиксовать комментарии тегами:
+
+| Тег | Что означает | Должен ли author исправлять |
+|---|---|---|
+| `nit:` | Nitpick — мелкая стилистика, идеализм | Опционально, можно проигнорировать |
+| `question:` | Вопрос, не критика | Ответить, не обязательно менять код |
+| `suggestion:` | Конкретное улучшение | Рассмотреть, обсудить |
+| `blocker:` | Критичная проблема — не можем merge | **Обязательно** исправить |
+
+Примеры:
+
+```
+nit: переменная `df` слишком общая, лучше `users_df`
+
+question: почему мы здесь используем INNER JOIN, а не LEFT? Не потеряем
+ли пользователей без orders?
+
+suggestion: можно вынести этот блок в отдельный таск Airflow — будет
+переиспользуемо.
+
+blocker: hardcoded пароль в строке 42. Должно идти через Airflow Variable.
+```
+
+Префиксы дают чёткий сигнал author-у: что критично, а что «когда время будет». Без них junior может в панике переделывать всё подряд, тратя дни на nit-ы вместо важного.
+
+---
+
+## Что reviewer должен искать
+
+Список что проверять в DE PR-е (порядок важности):
+
+1. **Безопасность**: hardcoded credentials, SQL injection, .env в коммите, public S3 buckets.
+2. **Корректность**: логика правильная? Edge cases (null, empty, duplicates)?
+3. **Тесты**: покрывают ли changes? Тестируют ли edge cases?
+4. **Производительность**: O(n²) циклы, N+1 queries, full table scan где нужно index.
+5. **Идемпотентность** (для Airflow / dbt): retry safe? `INSERT OVERWRITE` vs `INSERT INTO`?
+6. **Naming**: `df`, `tmp`, `x` — плохо. `users_df`, `df_after_filter`, `customer_id` — хорошо.
+7. **DRY**: повторяющийся код, вытащить в utility.
+8. **Документация**: docstrings, comments для non-obvious decisions.
+9. **Style**: forматирование (часто лучше делегировать линтеру).
+
+Reviewer **не** должен проверять:
+- Корректность auto-formatted кода (это работа линтера).
+- Whitespace, tabs vs spaces (тоже линтер).
+- Личные предпочтения без objective причины.
+
+---
+
+## Suggested changes — экономия времени
+
+GitHub имеет фичу **suggestion blocks**. Reviewer пишет:
+
+````markdown
+`nit:` лучше переименовать в users_df:
+
+```suggestion
+users_df = pd.read_csv("users.csv")
+```
+````
+
+Author видит кнопку **«Commit suggestion»** — одним кликом применяет правку, появляется новый коммит. Никаких local checkout, edit, push.
+
+Идеально для:
+- Опечатки.
+- Переименования переменных.
+- Мелкие улучшения форматирования.
+- Замена одной строки на другую.
+
+Не работает для:
+- Многострочные изменения (хотя GitHub поддерживает, но криво).
+- Изменения в разных файлах.
+
+Используй suggestion blocks щедро — ускоряет review циклы драматически. Подробнее в уроке 05.
+
+---
+
+## Approve / Request changes / Comment
+
+GitHub UI даёт три варианта при submit review:
+
+| Action | Когда |
+|---|---|
+| **Approve** | Всё хорошо, можно merge |
+| **Request changes** | Есть blocker(ы), merge запрещён до fix |
+| **Comment** | Просто комментарии (nit, question), merge не блокируется |
+
+Tips:
+
+- **Approve with comments** (вариант Approve но с обсуждаемыми точками): «approve, но обрати внимание на nit-ы». Author может пофиксить или нет — merge не блокирован.
+- **Request changes** только для **реальных blocker**-ов (баг, security, broken tests). Не для nit-ов — иначе author раздражён.
+- **Comment** для review-in-progress, или когда хочешь обсудить, но не блокировать.
+
+<Callout type="tip">
+Junior reviewer часто ставит «Request changes» за мелкие стилистические замечания. Это раздражает author и блокирует merge без необходимости. Правило: **request changes только если код реально нельзя мержить без исправления**. Nit-ы — через Comment.
+</Callout>
+
+---
+
+## Author: как реагировать на комментарии
+
+Author — это ты, когда тебе ревьюят PR. Стратегия:
+
+### Agree + fix (большинство случаев)
+
+```
+Reviewer: nit: лучше переименовать df в users_df
+Author: Good catch! Fixed.
+[коммит с правкой]
+```
+
+Не «спорь по принципу» с разумными замечаниями. Просто исправь — это быстрее.
+
+### Discuss + rationalize (если не согласен)
+
+```
+Reviewer: question: почему INNER JOIN, а не LEFT?
+Author: INNER intentional — users без orders в этой витрине не нужны
+(business spec). Если LEFT — будут NULL в revenue, что ломает downstream
+агрегацию. Уточняй с PM, но текущий behavior правильный.
+```
+
+Объясни причину, не отступай если уверен. Это **discussion**, не обязанность подчиняться.
+
+### Ack без действий (для nit без согласия)
+
+```
+Reviewer: nit: можно вынести в helper
+Author: ack, в следующем PR. Сейчас scope ограничен — refactor отдельно.
+```
+
+OK сказать «understood, не сейчас». Не каждое замечание должно превратиться в фикс **в этом** PR.
+
+### Не reply «done» односложно
+
+```
+Reviewer: blocker: SQL injection в строке 42
+Author: done
+```
+
+Без контекста reviewer теряется. Лучше:
+
+```
+Author: Fixed in 7a8b9c0 — заменил на parameterized query.
+```
+
+С ссылкой на коммит — reviewer сразу видит что именно поменялось.
+
+---
+
+## Когда review занимает долго
+
+Senior reviewer часто busy. PR может висеть 1-3 дня. Что делать author-у:
+
+1. **Через 24h** — мягкий ping в Slack/комментарии: «hey, не забудь review PR #234 пожалуйста».
+2. **Через 48h** — повторно ping, possibly с другим reviewer.
+3. **Через 72h+** — escalate к tech lead.
+
+Не молча ждать неделю — это плохая практика. Junior должен **активно push** свой PR через review pipeline.
+
+---
+
+## Конкретные примеры комментариев
+
+### Хорошие
+
+```
+blocker: Этот SQL подвержен injection — pet.name приходит из user input,
+не sanitized. Используй parameterized query: cur.execute("...", (pet.name,))
+
+suggestion: Эта функция длинная (80 строк). Можем разделить на 3 части:
+parse_input, transform, save? Будет проще тестить.
+
+question: Я не вижу теста на случай пустого DataFrame. Будет ли работать
+правильно или упадёт?
+
+nit: Лишний пустой ряд в строке 27.
+```
+
+### Плохие
+
+```
+не понимаю что ты сделал                          # без конкретики
+почему так?                                       # вопрос без контекста
+плохо                                             # оценка без объяснения
+TODO: посмотреть позже                            # не давай оценки которые не закончишь
+```
+
+---
+
+## Time culture: 24h SLA на review
+
+В здоровых командах есть soft-SLA на review:
+
+- **Author** обещает: реагировать на blocker-ы и nit-ы в **тот же день** (если есть время).
+- **Reviewer** обещает: дать первое review в **24 часа** с момента request.
+
+Это не строгое правило, но дисциплина — иначе PR пухнут в очереди, конфликты копятся, merge замедляется. Junior должен **активно** работать в этом ритме: открыл PR -> next day check status -> fix -> re-request review.
+
+---
+
+## Killer takeaway
+
+Code review — про код, не про человека. Префиксы `nit:`, `question:`, `suggestion:`, `blocker:` дают чёткий сигнал что критично. `Request changes` только для реальных blocker-ов, `Comment` для nit-ов. Author: agree + fix для разумных замечаний; discuss + rationalize если уверен; не молчи на запросы. Use GitHub suggestion blocks щедро — ускоряет циклы.
+
+<KnowledgeCheck quizSlug="11-pull-requests/03-code-review-etiquette" />

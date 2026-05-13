@@ -1,0 +1,277 @@
+---
+title: "Установка Git на macOS, Linux и Windows"
+description: "Установка Git на трёх основных ОС: brew, apt, scoop/winget. Git for Windows vs WSL2. Проверка через git --version"
+order: 1
+difficulty: "beginner"
+estimatedTime: 15
+topics: ["Git", "Установка", "macOS", "Linux", "Windows", "WSL2"]
+---
+
+# Установка Git на macOS, Linux и Windows
+
+Самое практичное в этом курсе. Через ~15 минут после прочтения у вас будет работающий Git 2.54+ на машине, проверенный через `git --version`. Это база, на которой строится всё остальное.
+
+Версия Git, актуальная на май 2026 — **2.54** (релиз февраль 2026). Старые версии (особенно ниже 2.23 — без `git switch`/`git restore`) использовать не стоит. Если у вас стоит Git 1.x или ранний 2.x — обновите.
+
+---
+
+## macOS: установка через Homebrew
+
+Homebrew — фактический стандарт менеджера пакетов на macOS. Если у вас уже Homebrew, установка одной командой:
+
+```bash
+brew install git
+```
+
+Если Homebrew нет, поставьте его сначала (это полезно для другого):
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+После установки:
+
+```bash
+git --version
+# git version 2.54.0
+```
+
+<DiagramContainer title="Установка Git на macOS" color="indigo">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Homebrew" tooltip="Менеджер пакетов macOS. Устанавливает в /opt/homebrew (Apple Silicon) или /usr/local (Intel). Стандарт для разработчиков" variant="highlight">Рекомендуется</DataBox>
+      <Arrow direction="right" label="brew install" />
+      <DataBox label="git 2.54.0" tooltip="Свежая версия с поддержкой git switch, restore, commit-graph и других новых возможностей">Готово</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Xcode CLI Tools" tooltip="Apple ставит свою версию Git вместе с xcode-select --install. Обычно отстаёт на 1-2 минорные версии. Подходит, если не хочется ставить brew" variant="warning">Альтернатива</DataBox>
+      <Arrow direction="right" label="xcode-select --install" />
+      <DataBox label="git ~2.50" tooltip="Чуть устаревшая, но работает">Окей</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+<Callout type="note">
+На macOS macOS 13+ есть встроенный Git, который ставится с Xcode Command Line Tools. Он чуть отстаёт от свежего brew, но в общем работает. Однако если вы серьёзно учитесь — лучше brew, потому что обновления приходят сразу.
+</Callout>
+
+### Если у вас Apple Silicon (M1/M2/M3/M4) и Intel-Git
+
+На переходных машинах иногда встречается ситуация, когда установлен Git под Rosetta. Проверьте архитектуру:
+
+```bash
+file $(which git)
+# /opt/homebrew/bin/git: Mach-O 64-bit executable arm64
+# или: x86_64 — это Intel-сборка через Rosetta
+```
+
+Если у вас arm64 Mac — поставьте arm64-Git через brew. Будет работать быстрее.
+
+---
+
+## Linux: apt, dnf, pacman
+
+На Linux Git в большинстве случаев уже установлен (но старой версии). Проверьте:
+
+```bash
+git --version
+```
+
+Если версия меньше 2.40 или Git вообще не установлен — обновляйтесь.
+
+### Ubuntu / Debian (apt)
+
+```bash
+sudo apt update
+sudo apt install -y git
+```
+
+Ubuntu apt-репозитории могут отставать. Если хотите свежую версию:
+
+```bash
+sudo add-apt-repository ppa:git-core/ppa
+sudo apt update
+sudo apt install -y git
+```
+
+### Fedora / RHEL / Rocky (dnf)
+
+```bash
+sudo dnf install -y git
+```
+
+### Arch / Manjaro (pacman)
+
+```bash
+sudo pacman -S git
+```
+
+### Из исходников (если хочется свежайшую версию)
+
+Если хочется бить-в-бить актуальный Git 2.54:
+
+```bash
+sudo apt install -y build-essential libcurl4-openssl-dev libssl-dev \
+  libexpat1-dev gettext zlib1g-dev
+
+wget https://www.kernel.org/pub/software/scm/git/git-2.54.0.tar.gz
+tar -xzf git-2.54.0.tar.gz
+cd git-2.54.0
+make prefix=/usr/local all
+sudo make prefix=/usr/local install
+```
+
+Подробности — на git-scm.com/download/linux. Для обучения этого делать не обязательно — версии 2.30+ хватит.
+
+---
+
+## Windows: три способа
+
+На Windows ситуация интереснее. У вас три варианта, и нужно выбрать осознанно.
+
+<DiagramContainer title="Установка Git на Windows — три варианта" color="emerald">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Git for Windows" tooltip="Стандартный установщик с git-scm.com. Включает Git Bash (mini-shell на базе MSYS2). Работает в Windows напрямую, без WSL">Native Git</DataBox>
+      <DataBox label="WSL2 + apt" variant="highlight" tooltip="Windows Subsystem for Linux 2. Полноценная Ubuntu внутри Windows. Идеально для DE-работы: PostgreSQL, Docker, Python — всё нативно. РЕКОМЕНДУЕТСЯ для DE">WSL2 Ubuntu</DataBox>
+      <DataBox label="scoop / winget" tooltip="Менеджеры пакетов для Windows. Аналог brew/apt. Удобно, но всё ещё ставит Git for Windows под капотом">Package manager</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+### Вариант 1: Git for Windows (native)
+
+Самый простой. Скачайте установщик с https://git-scm.com/download/win и запустите. На большинстве экранов жмите Next, но обратите внимание на пару опций:
+
+- **Default editor**: выберите VS Code или Notepad++, не оставляйте `vim` (если вы не уверены, что умеете в vim).
+- **Default branch name**: выберите `main`. Это индустриальный стандарт с 2020 года.
+- **PATH adjustments**: выберите «Git from the command line and also from 3rd-party software». Это позволит использовать `git` из cmd.exe и PowerShell.
+- **Line endings**: «Checkout Windows-style, commit Unix-style line endings». Это безопасный default.
+
+После установки откройте Git Bash (появится в Start menu):
+
+```bash
+git --version
+# git version 2.54.0.windows.1
+```
+
+### Вариант 2: WSL2 + Ubuntu (рекомендуется для DE)
+
+Если вы планируете работать как Data Engineer — поставьте WSL2 + Ubuntu. Это даст вам полноценный Linux-стек внутри Windows, что критично для DE (Docker, PostgreSQL, Python — всё нативно работает на Linux, а на Windows-native иногда лажают).
+
+В PowerShell от администратора:
+
+```powershell
+wsl --install
+```
+
+Команда установит WSL2 и Ubuntu (последняя LTS, на май 2026 — Ubuntu 24.04). После перезагрузки откройте «Ubuntu» из Start menu, создайте Linux-пользователя. Дальше работаете как с обычным Ubuntu:
+
+```bash
+sudo apt update
+sudo apt install -y git
+git --version
+# git version 2.43.0 (Ubuntu 24.04 LTS)
+```
+
+Если нужна свежая версия — `add-apt-repository ppa:git-core/ppa` (как описано выше для Linux).
+
+<Callout type="tip">
+WSL2 — это полноценная Linux VM, работающая через Hyper-V с быстрым доступом к Windows-файловой системе. В 95% случаев Junior DE на Windows будет именно WSL2. Если ваш будущий работодатель — российская компания со специфическими ограничениями (например, нет Hyper-V на корпоративных машинах), уточняйте, но это редкость.
+</Callout>
+
+### Вариант 3: winget / scoop
+
+Современный способ. winget — встроен в Windows 11:
+
+```powershell
+winget install --id Git.Git -e
+```
+
+scoop — community менеджер:
+
+```powershell
+scoop install git
+```
+
+Оба варианта под капотом ставят Git for Windows. Удобно, если уже привыкли к менеджерам пакетов.
+
+---
+
+## Проверка установки
+
+После любого из способов проверьте:
+
+```bash
+git --version
+```
+
+Если выводит версию — Git установлен и работает. Если выводит «command not found» — проблема в PATH. Решения:
+
+- macOS / Linux: проверьте, что путь к git есть в `$PATH`: `echo $PATH | tr ':' '\n'`. Должен быть `/opt/homebrew/bin` (Apple Silicon brew) или `/usr/local/bin`.
+- Windows: открой Settings -> System -> About -> Advanced system settings -> Environment Variables. Убедитесь, что в `Path` есть путь к Git.
+
+Стандартный вывод:
+
+```bash
+git version 2.54.0          # macOS brew, Linux
+git version 2.43.0          # WSL2 Ubuntu 24.04 (немного устаревшая)
+git version 2.54.0.windows.1  # Git for Windows
+```
+
+Все эти версии достаточны для курса. Чем свежее — тем лучше, но даже 2.40+ позволит сделать 95% урока.
+
+---
+
+## Что ещё проверить сразу
+
+Запустите `git`:
+
+```bash
+git
+# usage: git [-v | --version] [-h | --help] [-C <path>] [-c <name>=<value>]
+#            [--exec-path[=<path>]] [--html-path] [--man-path] [--info-path]
+#            [-p | --paginate | -P | --no-pager] [--no-replace-objects] [--bare]
+#            [--git-dir=<path>] [--namespace=<name>] [--config-env=<name>=<envvar>]
+#            <command> [<args>]
+```
+
+Если вы видите такой help-текст — Git работает. Это help, потому что вы запустили `git` без команды.
+
+Запустите `git --help`:
+
+```bash
+git --help
+```
+
+Откроется man-страница. На Windows откроется HTML-документация в браузере. Закрыть man-страницу — нажмите `q`.
+
+---
+
+## Что мы получили
+
+Установленный Git, который можно вызвать из терминала. Но он пока **не настроен**: не указано имя автора, email, default branch, SSH-ключи. Без этого первый же `git commit` напишет «please configure user.email». В следующем уроке настроим Git — это критический шаг, без которого работа невозможна.
+
+---
+
+## Попробуй сам
+
+1. Установите Git на вашей системе по инструкции выше.
+2. Проверьте версию: `git --version`. Запишите её.
+3. Попробуйте: `git --help`. Закройте через `q`.
+4. Попробуйте `git status` (без репозитория):
+
+```bash
+cd ~
+git status
+# fatal: not a git repository (or any of the parent directories): .git
+```
+
+Это нормально — мы вне репозитория. В следующем уроке создадим первый.
+
+---
+
+<KnowledgeCheck
+  question="Если вы — будущий Junior DE на Windows-машине, какой вариант установки Git предпочтительнее: Git for Windows или WSL2 + Ubuntu?"
+  answer="Для будущего DE — WSL2 + Ubuntu. Причины: 1) DE-стек (Docker, PostgreSQL, Kafka, Airflow, Spark) разработан для Linux и нативно работает только там. На Windows-native эти инструменты либо вообще не запускаются, либо работают через хаки. 2) Большинство production-команд работает на Linux-серверах, и опыт работы в Linux-окружении пригодится. 3) Git работает одинаково хорошо в WSL2, как и в Git for Windows, но в WSL2 у вас сразу полный Linux-shell с привычными утилитами. Единственная причина не использовать WSL2 — отсутствие Hyper-V на корпоративной машине (редко) или проблемы с производительностью I/O на старом железе. Для нового опыта в обучении — однозначно WSL2."
+/>

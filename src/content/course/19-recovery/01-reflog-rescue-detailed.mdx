@@ -1,0 +1,505 @@
+---
+title: "Reflog rescue: глубже модуля 09 — time-based ссылки, recovered branches"
+description: "git reflog show <ref>, time-based HEAD@{2.hours.ago}, recovering deleted branch. Reflog хранит 90 дней reachable refs, 30 days unreachable. После gc может удалиться — НЕ ждать. Story: junior сделал git reset --hard HEAD~5 потеряв 3 дня -> reflog -> recovered за 30 секунд."
+order: 1
+difficulty: "intermediate"
+estimatedTime: 30
+topics: ["reflog", "recovery", "deleted-branch", "reset-hard", "time-based-refs", "HEAD"]
+---
+
+# Reflog rescue: глубже модуля 09 — time-based ссылки, recovered branches
+
+В модуле 09 мы познакомились с `git reflog` как с «time machine для HEAD». В этом уроке — **глубокое погружение**. Что reflog умеет, чего не умеет, какие refs хранит, как использовать time-based ссылки (`HEAD@{2.hours.ago}`), и как восстановить **удалённую ветку** или **commits после `reset --hard`**.
+
+Это критически важная тема для junior DE. История из реальной команды:
+
+> Junior работал над feature три дня — 8 коммитов в `feat/etl-improvements`. Утром в пятницу попытался rebase, что-то пошло не так, и в панике сделал `git reset --hard HEAD~5`. Думал, что откатил последний reset на rebase. На самом деле — стёр 3 дня работы. Сел плакать.
+>
+> Tech lead зашёл, открыл `git reflog`, через 30 секунд работа вернулась как было. Junior до сих пор помнит этот momento — "git ничего не теряет, если ты знаешь где искать".
+
+Цель этого урока — чтобы такой момент **никогда не превратился в драму** для тебя.
+
+---
+
+## Что такое reflog — recap и углубление
+
+`reflog` (reference log) — это **журнал движений** каждого ref. Хранится в `.git/logs/`:
+
+```
+.git/logs/
+├── HEAD                          # лог движений HEAD
+├── refs/
+│   ├── heads/
+│   │   ├── main                  # лог ветки main
+│   │   ├── feat/etl-improvements # лог feature-ветки
+│   └── remotes/
+│       └── origin/
+│           └── main              # лог remote-tracking
+```
+
+Каждая строка журнала — одна **операция**, которая изменила ref:
+
+```
+$ cat .git/logs/HEAD
+abc1234 def5678 user <user@example.com> 1715600000 +0000 commit: Add ETL
+def5678 ghi9012 user <user@example.com> 1715600100 +0000 checkout: from main to feat
+ghi9012 jkl3456 user <user@example.com> 1715600200 +0000 commit: WIP
+jkl3456 mno7890 user <user@example.com> 1715600300 +0000 reset: moving to HEAD~2
+```
+
+Формат: `<old-SHA> <new-SHA> <author> <timestamp> <message>`. Каждая операция — old + new.
+
+`git reflog` — удобный wrapper для чтения этого лога:
+
+```bash
+$ git reflog
+mno7890 (HEAD -> feat) HEAD@{0}: reset: moving to HEAD~2
+jkl3456 HEAD@{1}: commit: WIP
+ghi9012 HEAD@{2}: checkout: from main to feat
+def5678 HEAD@{3}: commit: Add ETL
+abc1234 HEAD@{4}: commit: Initial
+```
+
+`HEAD@{0}` — текущее состояние. `HEAD@{1}` — где HEAD был **операцию** назад. Не commit назад! Это разные вещи.
+
+### HEAD@{N} vs HEAD~N
+
+| Notation | Что значит |
+|---|---|
+| `HEAD~3` | Прародитель: HEAD, потом его parent, потом его parent — три шага по графу commits |
+| `HEAD@{3}` | Reflog: HEAD три **операции** назад (commit, checkout, reset — любая операция) |
+
+Это **критическая** разница. `HEAD~3` идёт **по истории commits** (которая может быть переписана). `HEAD@{3}` идёт **по локальным операциям** (всегда отражает что ты делал).
+
+После `git reset --hard HEAD~5` твой `HEAD~0` (= HEAD) = старый `HEAD~5`. Но `HEAD@{0}` = после reset, `HEAD@{1}` = **до** reset = старая позиция HEAD. То есть `HEAD@{1}` указывает на потерянные 5 коммитов.
+
+---
+
+## Сценарий 1: восстановление после `reset --hard`
+
+Самый частый «помоги» от junior. Пошагово:
+
+```bash
+# Setup: создадим работу 5 коммитов
+$ mkdir reflog-demo && cd reflog-demo
+$ git init
+$ for i in 1 2 3 4 5; do
+    echo "version $i" > file.txt
+    git add file.txt
+    git commit -m "Commit $i"
+  done
+
+$ git log --oneline
+e5e5e5e (HEAD -> main) Commit 5
+d4d4d4d Commit 4
+c3c3c3c Commit 3
+b2b2b2b Commit 2
+a1a1a1a Commit 1
+
+# Catastrophe: reset --hard стирает 4 commits
+$ git reset --hard HEAD~4
+
+$ git log --oneline
+a1a1a1a (HEAD -> main) Commit 1
+
+# Файл откатился к старому состоянию
+$ cat file.txt
+version 1
+```
+
+Паника. Но reflog знает:
+
+```bash
+$ git reflog
+a1a1a1a (HEAD -> main) HEAD@{0}: reset: moving to HEAD~4
+e5e5e5e HEAD@{1}: commit: Commit 5
+d4d4d4d HEAD@{2}: commit: Commit 4
+c3c3c3c HEAD@{3}: commit: Commit 3
+b2b2b2b HEAD@{4}: commit: Commit 2
+a1a1a1a HEAD@{5}: commit: Commit 1
+```
+
+`HEAD@{1}` = `e5e5e5e` — это где был HEAD **до reset**.
+
+Восстанавливаем:
+
+```bash
+$ git reset --hard HEAD@{1}
+
+$ git log --oneline
+e5e5e5e (HEAD -> main) Commit 5
+d4d4d4d Commit 4
+c3c3c3c Commit 3
+b2b2b2b Commit 2
+a1a1a1a Commit 1
+```
+
+Работа вернулась. Файлы — состояние коммита 5 (`cat file.txt` = `version 5`).
+
+<Callout type="tip">
+Когда видишь панику junior после `reset --hard` — первое что говоришь: «Не делай больше ничего, открой `git reflog`, найди где был HEAD до reset». 99% случаев — работа жива.
+</Callout>
+
+---
+
+## Сценарий 2: time-based reflog references
+
+Reflog поддерживает **временные** ссылки. Формат: `<ref>@{<time>}`:
+
+```bash
+# Где была main 2 часа назад
+$ git log main@{2.hours.ago}
+
+# Где был HEAD вчера в 09:00
+$ git log HEAD@{yesterday}
+$ git log HEAD@{2026-05-12.09:00}
+
+# 30 минут назад
+$ git log HEAD@{30.minutes.ago}
+
+# Конкретная дата
+$ git log feature@{2026-05-12}
+```
+
+Поддерживаемые time spec-ы (синтаксис похож на `git log --since`):
+
+```
+HEAD@{now}                      # сейчас
+HEAD@{1.hour.ago}
+HEAD@{2.hours.ago}
+HEAD@{1.day.ago}
+HEAD@{yesterday}
+HEAD@{1.week.ago}
+HEAD@{tuesday}                  # last Tuesday
+HEAD@{2026-05-12}
+HEAD@{2026-05-12.09:30:00}
+HEAD@{2026-05-12.09:30:00.+0300}
+```
+
+### Конкретный кейс
+
+Junior в 09:00 был на правильном коммите. В 13:00 что-то наделал, не знает что. Хочет вернуться к 09:00:
+
+```bash
+$ git reset --hard HEAD@{09:00}
+# или
+$ git reset --hard HEAD@{4.hours.ago}
+```
+
+Reflog найдёт ближайшее состояние HEAD к указанному времени.
+
+<Callout type="warning">
+Time-based reflog работает **только** для локальных операций (твоего .git/). Если ты `clone` репо два часа назад, `HEAD@{4.hours.ago}` не существует — твой reflog тогда был пуст. Этот синтаксис **не** про время в истории commits, а про время **локальных операций**.
+</Callout>
+
+---
+
+## Сценарий 3: восстановление удалённой ветки
+
+Junior сделал:
+
+```bash
+$ git checkout main
+$ git branch -D feat/etl-pipeline
+Deleted branch feat/etl-pipeline (was abcdef123).
+```
+
+`-D` — capital, force delete без проверки merged. Ветки больше нет. `git log feat/etl-pipeline` выдаёт error. Но commits **никуда не делись** — они только без ссылки.
+
+Восстановление:
+
+```bash
+# Reflog для HEAD показывает все операции
+$ git reflog
+abcdef1 HEAD@{0}: checkout: from feat/etl-pipeline to main
+abcdef1 HEAD@{1}: commit: Add validation logic
+fedcba9 HEAD@{2}: commit: Initial pipeline
+...
+
+# Нашли последний commit ветки: abcdef1
+# Восстанавливаем ветку из этого SHA
+$ git branch feat/etl-pipeline abcdef1
+
+$ git log feat/etl-pipeline
+abcdef1 (feat/etl-pipeline) Add validation logic
+fedcba9 Initial pipeline
+```
+
+### Если не помнишь commit SHA
+
+`git reflog` для самой ветки:
+
+```bash
+$ git reflog show feat/etl-pipeline
+# может уже не работать, ветка удалена...
+
+# но HEAD reflog помнит все checkout-ы
+$ git reflog | grep "feat/etl-pipeline"
+abcdef1 HEAD@{17}: checkout: from main to feat/etl-pipeline
+fedcba9 HEAD@{15}: checkout: from feat/etl-pipeline to main
+...
+```
+
+Самый «верхний» commit, на котором был HEAD при checkout `feat/etl-pipeline` — последний commit ветки. Восстанавливаем:
+
+```bash
+$ git branch feat/etl-pipeline abcdef1
+```
+
+---
+
+## Reflog show для конкретного ref
+
+```bash
+# Reflog для HEAD (default)
+$ git reflog
+
+# Reflog для конкретной ветки
+$ git reflog show main
+$ git reflog show feat/etl-pipeline
+
+# Reflog для всех refs сразу
+$ git reflog --all
+
+# Сколько записей хранится
+$ git reflog | wc -l
+247
+```
+
+`git reflog show <ref>` показывает изменения **этого ref**, а не HEAD. Например:
+
+```bash
+$ git reflog show main
+e5e5e5e main@{0}: commit: Merge PR #42
+d4d4d4d main@{1}: pull: Fast-forward
+c3c3c3c main@{2}: reset: moving to origin/main
+```
+
+Видно: на main делали commit, потом pull, потом reset. Это полезно для аудита «что произошло с веткой».
+
+---
+
+## Как долго хранится reflog
+
+Reflog не вечен. Есть **2 параметра** в config:
+
+| Параметр | Default | Применение |
+|---|---|---|
+| `gc.reflogExpire` | 90 дней | Для **reachable** records (есть путь от ref до записи) |
+| `gc.reflogExpireUnreachable` | 30 дней | Для **unreachable** (висящие, orphaned) |
+
+Reachable значит: с текущего HEAD ты можешь дойти до этого commit. Unreachable — commit «потерялся» из всех refs.
+
+Просмотр / изменение:
+
+```bash
+$ git config --get gc.reflogExpire
+90.days.ago
+
+$ git config --get gc.reflogExpireUnreachable
+30.days.ago
+
+# Увеличить срок для критичного репо
+$ git config gc.reflogExpire 365.days.ago
+$ git config gc.reflogExpireUnreachable 180.days.ago
+```
+
+`git gc` (garbage collector) при запуске **удаляет** просроченные reflog записи. После этого — commits становятся недоступны (если на них нет других refs).
+
+`gc` запускается:
+- Автоматически — после некоторых операций (push, merge, rebase), когда количество loose objects превышает порог.
+- Явно — `git gc` или `git gc --aggressive`.
+
+<Callout type="danger">
+Не жди. Если что-то потерял, делай recovery **сегодня**, не откладывай на завтра. После `git gc` reflog может быть очищен, и orphaned commits удалены безвозвратно.
+</Callout>
+
+---
+
+## Что reflog НЕ умеет
+
+Reflog хранит изменения **локальных** refs. Это **не**:
+
+- Backup remote ref-ов. Если кто-то force-pushed в `origin/main`, твой `origin/main` обновился, но **старые** коммиты могут не остаться в твоём reflog (если ты их не fetch-ил ранее).
+- Backup стэшей. `git stash` имеет **свой** reflog (`refs/stash`), но drop удалит запись.
+- Backup working tree. `git restore` без флагов — изменения в working tree **уничтожаются**, reflog не помогает.
+- Backup untracked файлов. `git clean -fd` стирает untracked файлы — Git их не отслеживает, восстановить нельзя.
+
+Для последних двух пунктов — backup тулы ОС (Time Machine на macOS, btrfs snapshots на Linux), не Git.
+
+---
+
+## Сценарий 4: recovery после force pull / fetch с rewrite
+
+DE-сценарий: коллега force-pushed в remote ветку (`git push --force origin feat/dbt`). Ты сделал `git pull`:
+
+```bash
+$ git pull origin feat/dbt
+From github.com:org/repo
+ + abcdef1...new789  feat/dbt   -> origin/feat/dbt  (forced update)
+
+Updating abcdef1..new789
+Fast-forward
+ models/customers.sql | 50 ++++++++++++++++++++++++++++++++++++++++++--------
+ 1 file changed, 42 insertions(+), 8 deletions(-)
+```
+
+`forced update` — старые commit заменены новыми. Это могло убить твою недавнюю локальную работу или коллег. **Reflog знает старое состояние**:
+
+```bash
+$ git reflog show feat/dbt
+new789 feat/dbt@{0}: pull: Fast-forward
+abcdef1 feat/dbt@{1}: commit: Local work
+fedcba9 feat/dbt@{2}: pull: previous state
+```
+
+Откатить:
+
+```bash
+$ git reset --hard feat/dbt@{1}
+# или
+$ git reset --hard abcdef1
+```
+
+Дальше — разобраться с коллегой, кто force-push был неправ, как мержить.
+
+---
+
+## DE-specific: recovery в Airflow DAG-репо
+
+Сценарий: DE pipeline в production — критичное. Junior случайно стёр изменения, которые уже были merged в main (через rebase или reset):
+
+```bash
+$ git checkout main
+$ git reset --hard origin/main~5    # ОПС, не туда смотрел
+$ git push --force                    # тут было бы катастрофой,
+                                      # но branch protection не дала бы (модуль 18)
+```
+
+Восстановление:
+
+```bash
+$ git reflog show main
+# смотрим main reflog
+$ git reset --hard main@{1}
+```
+
+Или если уже было `git push --force`-нуто — спасает только `origin/main` reflog (если он ещё свеж) или **backup репо**.
+
+<Callout type="tip">
+Для критичных DE репо: **enable Settings -> Code, planning, and automation -> Branches -> "Allow force pushes" — DISABLE** (модуль 18). И на сервере (если self-hosted GitLab) — `git config receive.denyDeleteCurrent true`. Reflog — last resort, **prevention** лучше.
+</Callout>
+
+---
+
+## fsck: что показывает помимо reflog
+
+`git reflog` показывает только refs. Если SHA коммита **больше не в reflog**, но **ещё не gc-нут** — есть `git fsck` (file system check, см. урок 02):
+
+```bash
+$ git fsck --lost-found
+Checking object directories: 100%
+dangling commit abcdef1234567890abcdef1234567890abcdef12
+dangling commit fedcba9876543210fedcba9876543210fedcba98
+```
+
+`dangling commit` — commit без ref на него, не на parent чьего-либо ref. Это **orphan**, кандидат на gc.
+
+```bash
+$ git show abcdef1
+# смотрим что было в этом commit
+```
+
+И восстанавливаем как ветку:
+
+```bash
+$ git branch recovered-work abcdef1
+```
+
+Этот метод работает **дольше** reflog (90+ дней vs до gc), но менее convenient — не знаешь автоматически какой commit нужен, надо смотреть `git show` каждый и решать.
+
+---
+
+## Попробуй сам
+
+Полный сценарий drama -> recovery:
+
+```bash
+$ mkdir reflog-drama && cd reflog-drama
+$ git init
+
+# 5 коммитов "работы"
+$ for i in {1..5}; do
+    echo "feature $i" > feat-$i.txt
+    git add feat-$i.txt
+    git commit -m "Add feature $i"
+  done
+
+# Создаём ветку, добавляем "secret work"
+$ git checkout -b feat/secret-work
+$ echo "important" > critical.txt
+$ git add critical.txt
+$ git commit -m "Critical feature"
+
+# Drama: переключаемся обратно, удаляем ветку
+$ git checkout main
+$ git branch -D feat/secret-work
+Deleted branch feat/secret-work (was XYZ).
+
+# Симулируем "уже неделя прошла" (на самом деле — пять секунд)
+$ ls
+feat-1.txt feat-2.txt feat-3.txt feat-4.txt feat-5.txt
+# critical.txt нет!
+
+# Recovery
+$ git reflog | grep secret
+XYZ HEAD@{1}: checkout: from feat/secret-work to main
+XYZ HEAD@{2}: commit: Critical feature
+
+# Восстанавливаем
+$ git branch feat/secret-work XYZ
+$ git checkout feat/secret-work
+$ ls
+critical.txt feat-1.txt ... feat-5.txt
+
+# Welcome back, critical.txt
+```
+
+Делай это 2-3 раза в безопасном sandbox — мышечная память спасёт в реальной панике.
+
+---
+
+## Pro tip: `git wip` alias
+
+Многие DE настраивают git alias для super-fast safety:
+
+```bash
+$ git config --global alias.wip '!git add -A && git commit -m "WIP" --no-verify'
+$ git config --global alias.unwip '!git reset HEAD~1'
+```
+
+Использование:
+
+```bash
+# Перед рискованным rebase / reset
+$ git wip
+[main abcdef1] WIP
+
+# Делаешь рискованную операцию
+$ git rebase -i HEAD~10
+# что-то пошло не так
+
+# Возвращаемся
+$ git reset --hard HEAD@{1}  # до wip-commit
+$ git unwip                  # uncommit wip
+```
+
+Это **physical insurance** — WIP commit становится reflog entry, который reset не сотрёт.
+
+---
+
+## Killer takeaway
+
+`git reflog` — журнал движений всех refs. `HEAD@{N}` — N **операций** назад (≠ HEAD~N, который N commits назад). Time-based: `HEAD@{2.hours.ago}`, `main@{yesterday}`. Хранится 90 дней (reachable) / 30 дней (unreachable), потом `gc` удаляет — **не жди**. Восстановление после `reset --hard`: `git reset --hard HEAD@{1}`. Восстановление удалённой ветки: найти SHA через `git reflog | grep <branch>`, `git branch <name> <sha>`. Force pull со стиранием? `git reset --hard <ref>@{1}`. Reflog не работает для working tree (uncommitted) и untracked файлов — для них нужен OS backup. Для критичных репо включи branch protection (модуль 18) — prevention > recovery.
+
+<KnowledgeCheck quizSlug="19-recovery/01-reflog-rescue-detailed" />

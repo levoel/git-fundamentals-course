@@ -1,0 +1,426 @@
+---
+title: "git show и git blame: что и кто"
+description: "Показать коммит целиком и узнать, кто написал каждую строку"
+order: 3
+difficulty: "beginner"
+estimatedTime: 18
+topics: ["Git", "show", "blame", "history"]
+---
+
+# git show и git blame: что и кто
+
+`git log` отвечает на вопрос "когда?". `git diff` — "что изменилось между X и Y?". Но в реальной работе джуну часто нужны два других вопроса:
+
+- **`git show`**: "что именно в этом коммите?" — показывает один конкретный коммит со всем содержимым (сообщение + diff).
+- **`git blame`**: "кто и когда написал эту строку?" — для каждой строки файла показывает автора и коммит.
+
+В этом уроке разбираемся, как и когда использовать каждую команду, плюс важные ловушки `blame` (когда оно "обманывает" из-за форматирования).
+
+---
+
+## `git show <ref>`: один коммит целиком
+
+`git show` без аргументов показывает текущий HEAD коммит:
+
+```bash
+$ git show
+commit f4e5d6c7a8b9c0d1e2f3g4h5...
+Author: Lev Neganov <lev@example.com>
+Date:   Wed May 13 10:23:45 2026 +0300
+
+    feat: add hourly aggregation for spark job
+
+    Adds a new Spark job that aggregates events by hour
+    and writes results to Delta Lake.
+
+diff --git a/src/etl.py b/src/etl.py
+index a1b2c3d..f4e5d6c 100644
+--- a/src/etl.py
++++ b/src/etl.py
+@@ -1,3 +1,15 @@
++from pyspark.sql import SparkSession
++
+ def process():
+     # ...
+```
+
+Показывает:
+
+- Метаданные: SHA, автор, дата.
+- Commit message (subject + body).
+- Diff: что изменилось.
+
+С аргументом — любой коммит:
+
+```bash
+git show abc1234        # коммит по SHA
+git show HEAD~3         # три коммита назад
+git show v1.0           # тег
+git show main           # верхушка ветки
+```
+
+### Показать только конкретный файл из коммита
+
+```bash
+git show abc1234 -- src/etl.py
+```
+
+Только diff `src/etl.py` из коммита abc1234. Остальные файлы в коммите не показываются.
+
+### Показать содержимое файла на момент коммита
+
+```bash
+git show abc1234:src/etl.py
+```
+
+Это покажет **полное содержимое** `src/etl.py` каким оно было в коммите `abc1234`, не diff. Полезно когда нужно "посмотреть, что было в этом файле в этот момент".
+
+Это удобно для быстрой проверки: "какая версия скрипта была в проде на момент инцидента?".
+
+### Показать только сообщение коммита
+
+```bash
+git show --no-patch <sha>
+# или
+git show --quiet <sha>
+git show -s <sha>
+```
+
+`-s` = silent, не показывать diff. Полезно для скриптов: "вытащить только subject":
+
+```bash
+git show -s --format=%s <sha>
+# feat: add hourly aggregation for spark job
+```
+
+---
+
+## `git show` для tag, tree, blob
+
+`git show` работает не только с коммитами:
+
+### Tag
+
+```bash
+$ git show v1.2.0
+tag v1.2.0
+Tagger: Lev <lev@example.com>
+Date:   ...
+Tag message: Release version 1.2.0
+
+commit f4e5d6c...
+Author: ...
+```
+
+Для annotated tag показывает tag-объект + коммит, на который он указывает.
+
+### Tree (директория)
+
+```bash
+$ git show abc1234^{tree}
+tree abc1234^{tree}
+
+LICENSE
+README.md
+src/
+tests/
+```
+
+Содержимое директории на момент коммита.
+
+### Blob (один файл)
+
+```bash
+$ git show abc1234:src/etl.py
+# (содержимое файла)
+```
+
+Уже видели выше.
+
+---
+
+## `git blame <file>`: построчно кто
+
+`git blame` показывает для **каждой строки** файла, кто и когда её написал.
+
+```bash
+$ git blame src/etl.py
+^9876543 (Alice    2025-01-15 10:23:45 +0300  1) from pyspark.sql import SparkSession
+^9876543 (Alice    2025-01-15 10:23:45 +0300  2)
+^9876543 (Alice    2025-01-15 10:23:45 +0300  3) def process(data):
+abc1234d (Lev      2025-03-22 14:10:00 +0300  4)     # logging added later
+abc1234d (Lev      2025-03-22 14:10:00 +0300  5)     logger.info("start")
+^9876543 (Alice    2025-01-15 10:23:45 +0300  6)     return [x.upper() for x in data]
+```
+
+Формат:
+
+- SHA коммита (тот, где строка появилась в текущем виде).
+- Автор.
+- Дата.
+- Номер строки.
+- Содержимое.
+
+Без аргументов — для всего файла. Чтобы только часть:
+
+```bash
+git blame -L 10,20 src/etl.py        # строки 10-20
+git blame -L 5,+10 src/etl.py        # строки 5-14 (5 и 10 далее)
+git blame -L /^def process/,/^def/ src/etl.py  # regex range
+```
+
+---
+
+## Когда `blame` обманывает
+
+`git blame` показывает **последнее изменение** строки. Это часто вводит в заблуждение.
+
+### Кейс 1: форматирование
+
+```bash
+# Alice написала функцию в 2024:
+def process(data):
+    return [x.upper() for x in data if x is not None]
+
+# Bob в 2026 запустил Black formatter, который переформатировал:
+def process(data):
+    return [
+        x.upper() for x in data if x is not None
+    ]
+```
+
+`git blame` теперь покажет Bob'а как автора всех этих строк, хотя он только форматирование переписал. Логику писала Alice.
+
+### Кейс 2: переименование переменных
+
+```bash
+# Alice написала
+def process(items):
+    return [x for x in items]
+
+# Bob переименовал items -> records
+def process(records):
+    return [x for x in records]
+```
+
+`git blame` запишет эти строки на Bob'а.
+
+### Кейс 3: переезд между файлами
+
+Если код переехал из `old_module.py` в `new_module.py`, `git blame new_module.py` покажет переезд как "Bob добавил это сегодня", потеряв весь backстори.
+
+---
+
+## `--ignore-revs-file`: исключить cosmetic commits
+
+С Git 2.23+ есть отличная фича: можно сказать `blame` "игнорируй вот эти коммиты".
+
+Создай файл `.git-blame-ignore-revs` в корне репо:
+
+```
+# .git-blame-ignore-revs
+# Black formatting
+9876543210abcdef9876543210abcdef98765432
+
+# isort sweep
+abcdef1234567890abcdef1234567890abcdef12
+```
+
+В файл записываешь полные SHA коммитов, которые ты хочешь игнорировать (обычно — массовые форматирования).
+
+Подключи:
+
+```bash
+git config blame.ignoreRevsFile .git-blame-ignore-revs
+```
+
+Теперь `git blame` будет "проскакивать" эти коммиты, показывая предыдущего автора каждой строки.
+
+```bash
+$ git blame src/etl.py
+# Теперь cosmetic commit от Bob'а не показывается, всё на Alice
+```
+
+<Callout type="tip">
+Хорошая практика: при крупном форматировании (Black + isort + ruff на всём репо) — создавай **отдельный коммит** только для форматирования, и сразу добавляй его SHA в `.git-blame-ignore-revs`. Тогда вся будущая команда сможет нормально пользоваться blame.
+</Callout>
+
+### GitHub автоматически уважает `.git-blame-ignore-revs`
+
+С 2023 года GitHub UI автоматически читает этот файл из репо. Когда смотришь "Blame" на GitHub, переформатирования исключаются автоматически. Это даёт командам бесплатный win без дополнительной настройки.
+
+GitLab тоже поддерживает это с 2023+.
+
+---
+
+## `-w`: игнорировать whitespace
+
+```bash
+git blame -w src/etl.py
+```
+
+Игнорирует whitespace-only changes. Если кто-то поменял indent на табы или удалил trailing spaces — это не будет считаться изменением.
+
+`-w` помогает в большинстве случаев "blame показывает не того, кто реально менял логику".
+
+---
+
+## `-M` и `-C`: следить за перемещениями
+
+```bash
+git blame -M src/etl.py
+```
+
+`-M` — детектировать **перемещения внутри файла** (переставил функцию выше — это не изменение, это перемещение).
+
+```bash
+git blame -CCC src/etl.py
+```
+
+`-C` (можно повторить до 3 раз) — детектировать **копирования между файлами**. Если код переехал из другого файла, blame укажет original авторство.
+
+Это медленнее (Git делает дополнительный анализ), но даёт более правдивую картину. Полезно для investigation, не для дефолта.
+
+---
+
+## Альтернатива blame: `git log -L`
+
+`git log -L` — это "log по строкам файла". Показывает все коммиты, которые меняли указанный диапазон.
+
+```bash
+git log -L 10,20:src/etl.py
+git log -L /^def process/,/^def/:src/etl.py
+```
+
+В отличие от `blame`, который показывает **финальное** состояние, `log -L` показывает **историю изменений** этих строк во времени.
+
+Пример: ты видишь подозрительную логику в строках 15-25 и хочешь увидеть, как она эволюционировала.
+
+```bash
+$ git log -L 15,25:src/etl.py
+commit abc1234
+Author: Lev
+Date: 2026-05-13
+
+    feat: add validation
+
+@@ -15,3 +15,5 @@
+ def validate(data):
+-    return data
++    if not data:
++        raise ValueError("empty")
++    return data
+
+commit def5678
+Author: Alice
+Date: 2025-08-10
+
+    feat: add validate function
+
+@@ -15,0 +15,3 @@
++def validate(data):
++    return data
+```
+
+Это намного информативнее, чем blame, для понимания эволюции.
+
+---
+
+## GUI alternatives
+
+Visual blame часто лучше CLI. В IDE:
+
+- **VS Code**: расширение **GitLens** показывает blame inline (рядом с каждой строкой имя и дата автора). Также есть "Toggle File Blame Annotations" — view с full blame.
+- **PyCharm / IntelliJ**: Right-click -> Git -> Annotate (правит файл с blame в gutter).
+- **GitHub UI**: на странице файла кнопка "Blame".
+- **`tig`** — TUI Git viewer, поддерживает интерактивный blame.
+
+В быту gitlens в VS Code часто экономит больше всего времени.
+
+---
+
+## Реальные сценарии
+
+### Сценарий 1: "вижу странный код, кто это написал?"
+
+```bash
+# Открой файл, найди строку, например 47
+git blame -L 47,47 src/etl.py
+# Один автор + SHA
+
+# Посмотри коммит целиком
+git show <sha>
+
+# Прочитай commit message — обычно объясняет почему
+```
+
+### Сценарий 2: "когда это сломалось?"
+
+```bash
+git log -L 100,120:src/etl.py
+# Лента коммитов с изменениями в этих строках
+# Найди подозрительный — git show <sha>
+```
+
+### Сценарий 3: "хочу увидеть полный контекст коммита из PR"
+
+```bash
+git show <sha-of-merge-or-feature-commit>
+# Полный diff + сообщение
+```
+
+### Сценарий 4: "что лежало в проде месяц назад"
+
+```bash
+# Найди коммит месяц назад
+git log --until="1 month ago" --oneline | head -5
+
+# Посмотри содержимое файла
+git show <sha>:src/etl.py
+# Или сохрани в файл для сравнения
+git show <sha>:src/etl.py > /tmp/etl-old.py
+diff /tmp/etl-old.py src/etl.py
+```
+
+---
+
+## Попробуй сам
+
+```bash
+# Клонируй большой репо для практики
+git clone https://github.com/python/cpython.git
+cd cpython
+
+# Сделай blame на Python core file
+git blame Lib/json/__init__.py | head -20
+
+# Посмотри случайный коммит из истории
+RANDOM_SHA=$(git log --oneline | shuf -n 1 | cut -d' ' -f1)
+git show $RANDOM_SHA --stat
+
+# Посмотри как файл менялся за всю историю — берём первые 5 коммитов, которые его трогали
+git log --oneline -- Lib/json/__init__.py | head -5
+
+# Покажи самую раннюю версию файла
+EARLIEST_SHA=$(git log --reverse --oneline -- Lib/json/__init__.py | head -1 | cut -d' ' -f1)
+git show $EARLIEST_SHA:Lib/json/__init__.py | head -30
+
+# Сравни с текущей
+git diff $EARLIEST_SHA -- Lib/json/__init__.py | head -50
+
+# Найди коммит, в котором добавилась функция
+git log -S "def dumps" --oneline -- Lib/json/__init__.py | head -5
+
+# Blame на range строк
+git blame -L 100,120 Lib/json/__init__.py
+
+# Blame с whitespace ignore
+git blame -w -L 100,120 Lib/json/__init__.py
+```
+
+---
+
+<KnowledgeCheck
+  question="В корпоративном репозитории видишь в Python файле непонятный workaround — три строки кода с комментарием '# DON'T REMOVE - breaks XYZ'. Хочешь понять полную историю: когда и почему появился workaround, какие коммиты его трогали, и правда ли он ещё нужен. Опиши последовательность команд."
+  answer="Пошаговый подход: (1) **Кто и когда добавил**: `git blame -L <start>,<end> src/file.py` для тех строк. Получишь SHA коммита и автора. Если кажется, что blame показывает кого-то от автоформатирования, добавь `-w` (игнорировать whitespace). (2) **Прочитать оригинальный commit**: `git show <sha>` — посмотри commit message (часто там есть ссылка на тикет, объяснение проблемы) и полный diff контекста. (3) **Эволюция этих строк за всю историю**: `git log -L <start>,<end>:src/file.py` — лента всех коммитов, которые меняли эти строки. Это лучше blame для понимания истории — увидишь все попытки исправить/упростить workaround, и кто их откатывал. (4) **Найти связанные коммиты**: `git log -S 'характерная-строка-из-workaround' --all --oneline` — pickaxe найдёт все коммиты, где эта строка появлялась/исчезала (включая удаления и восстановления). Если кто-то пытался убрать workaround и вернул — увидишь оба коммита. (5) **Найти связанные тикеты**: если commit message содержит `JIRA-1234` или `#1234`, открой тикет — там обсуждение проблемы. (6) **Понять текущую актуальность**: проверь упомянутые в commit'е библиотеки/системы — обновились ли. Может оказаться, что workaround был для bug в lib v1.2, а сейчас v2.5 — он больше не нужен. Запусти тесты без workaround: уберите, run test suite. Если зелёное — workaround можно убрать (с PR где в описании ссылка на оригинальный коммит и объяснение). Дополнительный шаг: для важных workaround-ов добавь их SHA в `.git-blame-ignore-revs` если потом будешь cosmetic refactor — чтобы будущие blame не путались."
+/>

@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "06-conflicts/02-conflict-markers",
+  "moduleId": "06-conflicts",
+  "_meta": { "idPrefix": "git-m06-02" },
+  "questions": [
+    {
+      "id": "git-m06-02-q1",
+      "type": "multiple-choice",
+      "question": "Что обозначают маркеры в конфликте по дефолтному стилю diff2?",
+      "options": [
+        { "id": "a", "text": "<<<<<<< — версия из stash, ======= — local, >>>>>>> — remote" },
+        { "id": "b", "text": "<<<<<<< HEAD начало OURS, ======= разделитель, >>>>>>> branch конец THEIRS" },
+        { "id": "c", "text": "Это случайные знаки, чтобы показать, что конфликт есть" },
+        { "id": "d", "text": "<<<<<<< — error, ======= — warning, >>>>>>> — info" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Стандартные маркеры: `<<<<<<< HEAD` открывает блок OURS (текущая ветка, куда мерджишь). `=======` разделитель. `>>>>>>> branch-name` закрывает блок THEIRS (мерджимая ветка). Между OURS и THEIRS — две конфликтующие версии одного фрагмента. После HEAD пишется имя ветки или коммита, к которому относится OURS. При rebase интуиция переворачивается: OURS = новая база (main), THEIRS = твой коммит.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m06-02-q2",
+      "type": "multiple-choice",
+      "question": "Что добавляет `merge.conflictStyle = zdiff3` к дефолтному отображению?",
+      "options": [
+        { "id": "a", "text": "Цветовую подсветку маркеров" },
+        { "id": "b", "text": "Третий блок BASE между OURS и THEIRS — показывает общего предка (что было до конфликта)" },
+        { "id": "c", "text": "Автоматическое разрешение конфликтов" },
+        { "id": "d", "text": "Убирает маркеры из файла" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`zdiff3` показывает три версии: OURS, BASE (общий предок), THEIRS. Маркер `||||||| merged common ancestors` открывает блок BASE — это то, что было ДО того, как обе ветки разошлись. Видеть BASE радикально упрощает понимание конфликта: 'аха, было X, мы поменяли на Y, они на Z'. Доступен с Git 2.35 (январь 2022), в 2026 — стандарт. Включить: `git config --global merge.conflictStyle zdiff3`. Без минусов, только плюсы.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m06-02-q3",
+      "type": "true-false",
+      "question": "При `git rebase main` на ветке feature, если возник конфликт, OURS — это main (новая база), а THEIRS — твой коммит из feature.",
+      "correctAnswer": "true",
+      "explanation": "При rebase Git применяет коммиты твоей ветки поверх новой базы (main). На каждой итерации HEAD временно установлен на новую базу, а твой коммит из feature накладывается как 'патч сверху'. Поэтому OURS (HEAD) = main, THEIRS = твой коммит из feature. Это **наоборот** относительно `git merge`, где HEAD — текущая ветка. Поэтому при rebase 'оставить свою версию' = выбирать THEIRS, а не OURS.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m06-02-q4",
+      "type": "multiple-choice",
+      "question": "В команде `git status` показывает 'both modified: package-lock.json' среди конфликтных файлов. Что НЕ нужно делать?",
+      "options": [
+        { "id": "a", "text": "git checkout --theirs package-lock.json + npm install + git add" },
+        { "id": "b", "text": "Открыть в редакторе и вручную разрешать маркеры конфликта по строкам" },
+        { "id": "c", "text": "git checkout --ours package-lock.json + npm install + git add" },
+        { "id": "d", "text": "Регенерировать lock-файл и закоммитить новый" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "package-lock.json — это автогенерируемый файл с криптографическими хешами и сложной структурой. Ручной merge практически невозможен правильно — даже эксперты часто ошибаются. Правильный подход: взять одну из версий целиком (`--ours` или `--theirs`), потом регенерировать lock-файл из manifest (`package.json`) через `npm install`, и закоммитить. Регенерация делает lock детерминированно — обе стороны получат один результат. То же для poetry.lock (`poetry lock`), uv.lock (`uv lock`), Pipfile.lock (`pipenv lock`).",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m06-02-q5",
+      "type": "multiple-choice",
+      "question": "В index конфликтные файлы хранятся в нескольких 'stages'. Что значит stage 1, 2, 3?",
+      "options": [
+        { "id": "a", "text": "1, 2, 3 — просто номера попыток мерджа" },
+        { "id": "b", "text": "Stage 1 = BASE, Stage 2 = OURS, Stage 3 = THEIRS — после git add файл схлопывается в stage 0" },
+        { "id": "c", "text": "Stage 1 = local, Stage 2 = backup, Stage 3 = remote" },
+        { "id": "d", "text": "Stages не существуют, это миф" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "При конфликте Git хранит файл в трёх 'ступенях' index одновременно: stage 1 = BASE (общий предок), stage 2 = OURS, stage 3 = THEIRS. Команда `git ls-files -u` это показывает. Когда ты делаешь `git add <file>` после разрешения, все три stage схлопываются в stage 0 — Git понимает, что конфликт разрешён. Команды типа `git checkout-index --stage=2 -- file` могут явно вытащить конкретную ступень. В повседневной жизни знать это не нужно, но полезно понимать механизм.",
+      "bloomLevel": "conceptual"
+    }
+  ]
+}

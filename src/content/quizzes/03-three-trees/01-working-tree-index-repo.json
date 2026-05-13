@@ -1,0 +1,74 @@
+{
+  "lessonSlug": "03-three-trees/01-working-tree-index-repo",
+  "moduleId": "03-three-trees",
+  "_meta": {
+    "idPrefix": "git-m03-01",
+    "description": "Quiz for lesson 3.1 — Три дерева"
+  },
+  "questions": [
+    {
+      "id": "git-m03-01-q1",
+      "type": "multiple-choice",
+      "question": "Какие три «дерева» (состояния) одновременно существуют в Git?",
+      "options": [
+        { "id": "a", "text": "main, develop, feature" },
+        { "id": "b", "text": "blob, tree, commit" },
+        { "id": "c", "text": "Working tree (файлы на диске), Index/Staging (.git/index), HEAD (последний commit)" },
+        { "id": "d", "text": "Local, Remote, Origin" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "Три дерева в Git: Working tree (файлы, которые вы видите и редактируете), Index (он же Staging — промежуточный snapshot перед коммитом, физически файл .git/index), HEAD (указатель на последний commit). Команды Git перемещают данные между этими тремя состояниями: git add (WT -> Index), git commit (Index -> HEAD), git restore (Index -> WT, отмена изменений). Это самый важный концепт Git.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m03-01-q2",
+      "type": "multiple-choice",
+      "question": "Зачем в Git нужен Index (Staging), если в SVN можно делать commit сразу без него?",
+      "options": [
+        { "id": "a", "text": "Index ускоряет commit" },
+        { "id": "b", "text": "Index позволяет selective commit — выбирать, что попадает в commit. Это даёт чистую логическую историю: даже если в работе несколько задач одновременно, можно сделать отдельные коммиты для каждой. Через git add -p можно добавлять не весь файл, а отдельные hunks" },
+        { "id": "c", "text": "Index — это требование GitHub" },
+        { "id": "d", "text": "Index хранит зашифрованные данные" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Index даёт контроль над тем, что попадает в commit. Реальный сценарий: вы делаете фичу, по пути замечаете и фиксите баг. Без Index = один коммит «feature + fix» (плохая история). С Index: git add только баг-фикс, commit «fix: NPE», потом git add фичи, commit «feat: add OAuth». Два чистых коммита. Через git add -p можно добавлять отдельные hunks одного файла — даже один файл с двумя изменениями можно разнести по двум коммитам.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m03-01-q3",
+      "type": "multiple-choice",
+      "question": "Что показывает команда `git diff --staged`?",
+      "options": [
+        { "id": "a", "text": "Разница между Working tree и Index — что изменено, но ещё не добавлено" },
+        { "id": "b", "text": "Разница между Index и HEAD — что добавлено в Index, готово к коммиту" },
+        { "id": "c", "text": "Разница между Working tree и HEAD — все изменения" },
+        { "id": "d", "text": "Разница между ветками main и develop" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "git diff --staged (или git diff --cached) показывает разницу между Index и HEAD. То есть «что я подготовил для следующего коммита». git diff без аргументов — между WT и Index («что изменено, но не staged»). git diff HEAD — между WT и HEAD («все изменения»). Эти три варианта диффа — основа понимания трёх деревьев.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m03-01-q4",
+      "type": "multiple-choice",
+      "question": "Junior изменил файл, сделал git add file.py, потом ещё раз отредактировал тот же файл (но без второго git add). Что покажет git status?",
+      "options": [
+        { "id": "a", "text": "Только «Changes not staged for commit»" },
+        { "id": "b", "text": "Только «Changes to be committed»" },
+        { "id": "c", "text": "ОБЕ секции: file.py в «Changes to be committed» (первая версия в Index) И file.py в «Changes not staged» (вторая версия в WT отличается от Index)" },
+        { "id": "d", "text": "Ошибку «conflicting state»" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "Это классический пример отличия трёх деревьев. После первого git add — Index содержит первую модификацию. После второго редактирования — WT содержит уже вторую модификацию. HEAD — оригинал. Все три отличаются! git status покажет file.py в двух секциях. Если сделать git commit сейчас, в коммит попадёт ПЕРВАЯ модификация (то, что в Index), а вторая останется в WT.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m03-01-q5",
+      "type": "true-false",
+      "question": "Index (Staging) — это физический файл .git/index на диске, не абстракция.",
+      "correctAnswer": true,
+      "explanation": "Это правда. Index — это бинарный файл .git/index, содержащий записи о файлах в виде «path -> blob SHA -> mode». Когда вы делаете git add, в этот файл добавляется запись. Когда git commit, Git создаёт commit-объект на основе этого файла. Можно просмотреть содержимое индекса командой `git ls-files --stage`. Это не виртуальное состояние, а реальный файл с реальными данными.",
+      "bloomLevel": "conceptual"
+    }
+  ]
+}

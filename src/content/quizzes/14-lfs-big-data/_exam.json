@@ -1,0 +1,89 @@
+{
+  "moduleId": "14-lfs-big-data",
+  "title": "Module 14 Exam — Git LFS и большие данные",
+  "passThreshold": 70,
+  "_meta": {
+    "idPrefix": "git-m14-exam",
+    "description": "6-question integrated exam for Module 14"
+  },
+  "questions": [
+    {
+      "id": "git-m14-exam-q1",
+      "type": "multiple-choice",
+      "question": "Почему обычный Git плохо подходит для бинарных файлов >10MB, особенно сжатых форматов (parquet, sqlite)?",
+      "options": [
+        { "id": "a", "text": "Git вообще не поддерживает бинари" },
+        { "id": "b", "text": "Git хранит каждую версию blob-а целиком. Для текста работает delta compression (сохраняет только изменения), для сжатых бинарей не работает: внутреннее сжатие (gzip/snappy/deflate) распределяет изменения по всему файлу — Git не находит общих байт между версиями. Результат: каждое изменение 100MB parquet добавляет 100MB в .git/, год активной работы -> гигабайты репо, медленный clone, замедленные операции, превышение GitHub лимита 100MB" },
+        { "id": "c", "text": "Лимит файлов в Git — 1MB" },
+        { "id": "d", "text": "Git заточен только под Python код" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Mechanics проблемы: Git делает delta compression при `git gc` или push — для похожих blob-ов хранит как 'base + delta'. Текст: изменение одной строки = delta ~50 bytes (Git находит общие префиксы/суффиксы и сохраняет diff). Сжатый бинарь: изменение одного значения данных -> переписаны целиком блоки сжатия -> delta ≈ размер всего файла. Git не находит общих байт между v1 и v2 parquet. Реальный сценарий: 50MB parquet, обновляется 1 раз в неделю в течение года -> 50MB × 52 = 2.6GB в .git/. Через 2 года — 5GB. На GitHub: > 50MB warning, > 100MB hard reject. Последствия большого репо: clone 5+ минут, CI startup медленный, операции git status/log тормозят, члены команды носят гигабайты. Решения: .gitignore + external storage (S3, scripted download), Git LFS (pointer + LFS storage), DVC (метаданные в Git + любой S3 backend).",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m14-exam-q2",
+      "type": "multiple-choice",
+      "question": "Полный workflow подключения Git LFS к новому репо для tracking parquet файлов?",
+      "options": [
+        { "id": "a", "text": "Просто git add big_file.parquet" },
+        { "id": "b", "text": "(1) `brew install git-lfs` — установить утилиту на машину; (2) В репо `git lfs install` — активировать clean/smudge filters; (3) `git lfs track '*.parquet'` — добавит в .gitattributes строку `*.parquet filter=lfs diff=lfs merge=lfs -text`; (4) `git add .gitattributes && git commit` — КРИТИЧНО commit правил FIRST; (5) `git add file.parquet && git commit` — clean filter заменит на pointer (130 байт), реальный файл в LFS cache; (6) `git push` — pointer в Git, реальный файл в LFS storage отдельным каналом" },
+        { "id": "c", "text": "Перенастроить core.autocrlf" },
+        { "id": "d", "text": "Использовать .gitignore" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Detailed workflow: (1) Install — git-lfs это отдельная утилита, ставится через brew/apt/winget. Без неё `git lfs` команды не работают. (2) `git lfs install` — регистрирует filters в global ~/.gitconfig (или per-repo в .git/config): `[filter \"lfs\"] clean = git-lfs clean -- %f, smudge = git-lfs smudge -- %f`. Без этого filters не активируются и LFS не работает. (3) `git lfs track 'pattern'` — добавляет в .gitattributes строку с filter=lfs. (4) Commit .gitattributes ПЕРЕД добавлением файлов — иначе они попадут в обычный Git blob. Это распространённая ошибка джунов: трекают, сразу добавляют файлы, .gitattributes ещё не commit-нут -> файлы идут в обычный Git, не LFS. (5) Добавление файла — clean filter автоматически заменяет на pointer (3 строки текста ~130 байт). Реальный файл в `.git/lfs/objects/<hash-prefix>/<hash-rest>`. (6) Push — два канала: Git push отправляет pointer-blob-ы, LFS push (автоматически) отправляет реальные файлы по hash-у в LFS-server (на GitHub — встроенный). Это происходит прозрачно при обычном `git push`.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m14-exam-q3",
+      "type": "multiple-choice",
+      "question": "DVC vs Git LFS: какие критерии выбора для production ML/DE команды?",
+      "options": [
+        { "id": "a", "text": "Всегда LFS — он проще" },
+        { "id": "b", "text": "LFS если: small team, у GitHub есть LFS bandwidth quota, бинарные artifacts (PDF, видео, models), не нужны pipelines. DVC если: уже есть S3/GCS (используется напрямую — нет дополнительных storage costs), частые updates (нет bandwidth fees), нужны pipelines/experiments (dvc.yaml, dvc exp), reproducibility критична (git checkout + dvc pull = атомарный snapshot code+data)" },
+        { "id": "c", "text": "Всегда DVC" },
+        { "id": "d", "text": "Зависит только от размера файлов" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Полная матрица выбора. LFS преимущества: (1) Простой setup — git lfs install + track + commit, всё интегрировано в обычный Git. (2) Лучше для случайных бинарей (PDF, видео, изображения) — не нужна data-pipeline инфраструктура. (3) GitHub UI поддерживает LFS прозрачно. LFS минусы: (1) Bandwidth fees на GitHub — каждый pull/CI тратит, может дорого выходить. (2) Hard quotas на free tier — выгорают на активных проектах. (3) Дублирующий storage если у вас уже есть S3 — Lfs данные на GitHub-серверах, а ваши прод-данные в S3. DVC преимущества: (1) Использует ваш existing S3/GCS — нет дополнительных storage costs, transfer в том же regional обычно бесплатен. (2) Нет bandwidth fees от Git-хостинга. (3) `dvc.yaml` pipelines — DAG между data prepare -> train -> evaluate с smart caching (re-run только изменившегося). (4) `dvc exp` experiments — tracking метрик, сравнение runs (типа MLflow). (5) Reproducibility — `git checkout v2024.Q1 && dvc pull` атомарно возвращает code+data того времени. DVC минусы: (1) Сложнее setup (нужен S3 + IAM). (2) Команда учит отдельный CLI. Рекомендация: для production ML/DE с уже-существующим cloud storage — DVC. Для маленьких проектов с парой бинарей — LFS.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m14-exam-q4",
+      "type": "multiple-choice",
+      "question": "Полный setup для team DE-проекта с Jupyter notebooks, чтобы избежать pain от .ipynb?",
+      "options": [
+        { "id": "a", "text": "Просто положить *.ipynb в .gitignore" },
+        { "id": "b", "text": "(1) nbstripout через pre-commit для всех *.ipynb — автоматически выкидывает outputs из commit-ов. Setup в .pre-commit-config.yaml: repos с kynan/nbstripout. (2) Для shared collaboration notebooks — jupytext с paired .py файлами: commit-ишь .py, .ipynb в .gitignore, merge работает как обычный Python. (3) Для documentation/tutorial notebooks — nbdime в отдельной папке (с outputs), специальный diff/merge driver. (4) В CI с pre-commit install автоматизируется для всей команды — onboarding sans extra steps" },
+        { "id": "c", "text": "Удалить все notebooks из репо" },
+        { "id": "d", "text": "Использовать только Git LFS для notebooks" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Полный production setup для Jupyter в Git: (1) Базовый слой — nbstripout. Активируется через pre-commit framework (модуль 15): добавляется `kynan/nbstripout` в .pre-commit-config.yaml. После `pre-commit install` каждый коллега автоматически получает hook. При commit outputs убираются -> размер blob-а маленький, diff читаемый. (2) Shared collaborative notebooks (где несколько людей делают changes) — jupytext: pair-up .py + .ipynb через `jupytext --set-formats ipynb,py:percent`. Commit-ить только .py, .ipynb в .gitignore. Это решает merge problem — .py мержится как Python. (3) Documentation notebooks (tutorials с rendered output) — отдельная папка `docs/notebooks/`, в .gitattributes исключение из nbstripout (`docs/notebooks/*.ipynb !filter`), nbdime enabled для удобного diff. (4) Pre-commit hooks auto-install при clone — нулевой friction для нового коллеги. Эта схема даёт чистый репо, читаемые diffs, working merge, сохранённые demos. Stack: nbstripout (default) + jupytext (collab) + nbdime (docs) + pre-commit (automation) — каноничный 2026 setup для DE/ML команды.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m14-exam-q5",
+      "type": "multiple-choice",
+      "question": "Ты диагностируешь репо размером 3GB. Top-10 объектов через `git rev-list --objects | git cat-file --batch-check ...` показывает: 1.5GB total на 50 разных версий `data/raw_users.parquet`, плюс 800MB на 12 разных версий `models/lgbm_v*.pkl`. Какой план действий?",
+      "options": [
+        { "id": "a", "text": "Удалить файлы через `git rm`" },
+        { "id": "b", "text": "(1) Срочно: добавить *.parquet и *.pkl в .gitignore чтобы остановить дальнейший рост. (2) Для очистки истории: `git lfs migrate import --include='*.parquet,*.pkl' --everything` ИЛИ `git filter-repo --path data/raw_users.parquet --path 'models/lgbm_*.pkl' --invert-paths` чтобы убрать из всей истории. (3) Force-push: `git push --force-with-lease origin --all`. (4) Уведомить команду — все pull/clone должны быть пересозданы (SHA коммитов изменились). (5) Долгосрочно: завести DVC с S3 для data versioning, models через MLflow или DVC. На будущее — pre-commit hook `check-added-large-files` чтобы блокировать accidental добавление" },
+        { "id": "c", "text": "Перенести в новый репо" },
+        { "id": "d", "text": "Купить GitHub Pro" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Полный план recovery: (1) STOP THE BLEEDING — .gitignore *.parquet, *.pkl, и закоммитить. Без этого новые версии будут продолжать раздувать репо. (2) ОЧИСТКА ИСТОРИИ — два варианта: (a) `git lfs migrate import --include='*.parquet,*.pkl' --everything` — переписывает историю, файлы становятся LFS pointers. Сохраняет файлы как accessible через LFS. (b) `git filter-repo --path file --invert-paths` (или `--path-glob`) — полностью удаляет файлы из истории, как будто никогда не было. Радикальнее, но больше очищает. Для каждого варианта SHA коммитов меняются. (3) FORCE-PUSH с --force-with-lease (модуль 7). (4) КОМАНДА — все должны пересоздать клоны: `rm -rf old-clone && git clone fresh`. Старые feature ветки нужно перезаписать. Открытые PR пересоздать. (5) ДОЛГОСРОЧНО — выбрать систему для data versioning: DVC если есть S3 (рекомендую для DE), LFS если нет инфраструктуры. Для моделей — MLflow или DVC. (6) ПРЕВЕНЦИЯ — pre-commit hook `check-added-large-files --maxkb=1024`, чтобы блокировать accidental добавление файлов > 1MB в будущем. Это long fix — несколько часов работы + onboarding команды. Без него репо продолжит расти до 5-10GB через пол года.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m14-exam-q6",
+      "type": "true-false",
+      "question": "В production DE проекте 2026 года полная стратегия работы с большими файлами включает: (1) Жёсткий .gitignore для data/raw/, models/, *.parquet — данные НИКОГДА в Git; (2) DVC для версионированных datasets с S3 backend; (3) nbstripout через pre-commit для .ipynb; (4) jupytext для shared collaborative notebooks; (5) pre-commit check-added-large-files для защиты от accidental commits.",
+      "correctAnswer": true,
+      "explanation": "Это эталонная стратегия. Каждый слой решает свою задачу: (1) .gitignore — превентивная защита, главное правило 'данные не в Git'. Должен быть строгим: data/raw/, data/interim/, data/processed/, models/, *.parquet, *.duckdb, *.sqlite. (2) DVC — для тех data, которые ДОЛЖНЫ быть versioned (training datasets, ML features). Хранение в S3, метаданные в Git. Команды: dvc add -> git commit -> dvc push. (3) nbstripout — автоматическая очистка outputs из notebooks. Через pre-commit для команды — все коллеги получают автоматически. (4) jupytext — для notebooks, над которыми работают несколько людей. Solves merge problem. (5) check-added-large-files — pre-commit hook, который кричит при попытке commit-нуть файл > 1MB. Спасает от случайных venv/, datasets, моделей попавших в commit. Эта стратегия — стандарт для серьёзных DE-команд в 2026. Junior DE, который внедряет такую инфраструктуру в первой неделе работы — сразу демонстрирует профессионализм. Без этого через 6 месяцев репо распухает, CI замедляется, команда страдает. Bonus: добавить `.pre-commit-config.yaml` с этими hooks + README с onboarding инструкциями.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

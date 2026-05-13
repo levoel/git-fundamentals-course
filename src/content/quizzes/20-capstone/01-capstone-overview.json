@@ -1,0 +1,59 @@
+{
+  "lessonSlug": "20-capstone/01-capstone-overview",
+  "moduleId": "20-capstone",
+  "_meta": {
+    "idPrefix": "git-m20-01"
+  },
+  "questions": [
+    {
+      "id": "git-m20-01-q1",
+      "type": "multiple-choice",
+      "question": "Capstone сценарий: junior получил JIRA ticket DE-1234. Какой ПЕРВЫЙ шаг workflow, ДО написания любого кода?",
+      "options": [
+        {"id": "a", "text": "Начать сразу писать DAG в существующей main ветке"},
+        {"id": "b", "text": "Clone репо, потратить 15 минут на изучение README, существующих DAG-ов (особенно похожих), CI workflows, CODEOWNERS, и conventional style commits через git log"},
+        {"id": "c", "text": "Скачать AWS credentials и сразу запустить production deploy"},
+        {"id": "d", "text": "Открыть PR через gh pr create без коммитов"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "15-min sweep — самая важная часть onboarding в новый проект. Чему учат: (1) README — context проекта; (2) Похожий по теме DAG — твой template; (3) CI workflows — что нужно зелёным проходить; (4) CODEOWNERS — кто будет твой reviewer; (5) git log — commit message conventions. Без этого junior пишет код, не подходящий по стилю команды, и получает 20 review comments вместо 5. Прямо в main писать — anti-pattern (branch protection не дала бы, см. модуль 18).",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m20-01-q2",
+      "type": "multiple-choice",
+      "question": "В контексте capstone что важнее для junior долгосрочно?",
+      "options": [
+        {"id": "a", "text": "Запомнить все команды наизусть"},
+        {"id": "b", "text": "Decision making: когда rebase vs merge, какой размер commit, как responding на review comment. Команды забываются — judgment остаётся"},
+        {"id": "c", "text": "Скорость print typing"},
+        {"id": "d", "text": "Знание всех флагов git rebase"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Capstone — про judgment, не memorization. Junior, который умеет принимать решения (\"squash для clean main\", \"keep granular commits для self-documenting feature\", \"reasonable response to disagreement on review\") — становится middle быстрее, чем тот, кто помнит все флаги. Команды Git — справочные данные, всегда можно посмотреть. Mental models и professional judgement — это что отличает junior от senior.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m20-01-q3",
+      "type": "true-false",
+      "question": "После завершения capstone, лучший next step для real-world growth — сделать 5-10 реальных merged PR в open-source проекты (Apache Airflow, dbt-core, Great Expectations). Это даёт real review от experienced engineers + public portfolio для recruitment.",
+      "correctAnswer": true,
+      "explanation": "Capstone — это симуляция. Real-world learning — open-source contributions. Apache Airflow / dbt-core / Great Expectations / Astronomer-providers имеют 'good first issue' labels — entry-level задачи. Real review от senior engineers — лучший feedback. Merged PRs — public record на GitHub profile. Recruiter видит контрибуции, оценивает quality. 5-10 PRs за месяц — solid portfolio. Этот approach намного value-able, чем дополнительный курс или зазубривание.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m20-01-q4",
+      "type": "multiple-choice",
+      "question": "Junior получает review comment от senior: 'Suggestion: use timedelta(minutes=5) instead of bare 300 for clarity.' Лучший response style?",
+      "options": [
+        {"id": "a", "text": "ok"},
+        {"id": "b", "text": "I disagree, bare int is fine"},
+        {"id": "c", "text": "Agreed, switched to timedelta in <commit-sha> — cleaner. Thanks for the catch."},
+        {"id": "d", "text": "Why do you care about this nit, it's working"}
+      ],
+      "correctAnswer": "c",
+      "explanation": "Хороший review response style: (1) acknowledge — 'Agreed'; (2) specifics — commit SHA, чтобы reviewer легко проверил; (3) brief reasoning — 'cleaner'; (4) thanks — recognize, что reviewer вложил время. 'ok' слишком terse, reviewer не знает что сделано. Defensive ('I disagree') без reasoning — bad team dynamics. 'Why do you care' — открытая агрессия, недопустимо. Если действительно несогласен — explain reasoning с links to convention/docs, suggest alternative. Style review responses — soft skill, влияющий на team relationships и career growth.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

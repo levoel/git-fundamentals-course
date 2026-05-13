@@ -1,0 +1,418 @@
+---
+title: ".gitattributes: per-file поведение, merge стратегии, linguist"
+description: ".gitattributes управляет поведением Git для отдельных файлов — eol, merge стратегии, diff drivers, linguist метки, export-ignore"
+order: 3
+difficulty: "intermediate"
+estimatedTime: 22
+topics: ["Git", "gitattributes", "EOL", "merge", "linguist"]
+---
+
+# .gitattributes: per-file поведение, merge стратегии, linguist
+
+`.gitignore` говорит "не следи за этим файлом". `.gitattributes` — наоборот: "следи за этим файлом особенным образом". Это конфиг, который меняет поведение Git для отдельных файлов или паттернов: как делать line endings, как мержить, как считать diff, как помечать в статистике GitHub.
+
+Junior DE редко открывает этот файл, и часто из-за этого получает странные баги: ноутбуки взрываются при merge, скрипты не работают на Windows, репо считает 80% кода как JavaScript (хотя там 90% Python). В этом уроке разберём ключевые директивы и как они влияют на твою повседневную работу.
+
+---
+
+## Где живёт .gitattributes
+
+Как и `.gitignore`, `.gitattributes` — это текстовый файл с паттернами. Кладётся в:
+
+- `.gitattributes` в корне репо — общий, версионируется
+- `.gitattributes` в поддиректориях — для специфики
+- `~/.config/git/attributes` — глобальный (редко используется)
+- `.git/info/attributes` — локальный для репо, не versioned
+
+В 99% случаев тебе нужен один файл в корне репо. Этот файл commit-ишь, и его правила распространяются на всех, кто склонирует.
+
+---
+
+## Базовый синтаксис
+
+Каждая строка — паттерн + набор атрибутов:
+
+```gitattributes
+# Паттерн         атрибут1=значение  атрибут2  -атрибут3
+
+# Все .sh файлы — текст с LF
+*.sh              text eol=lf
+
+# Бинарные файлы — не текстовые, не делать diff
+*.parquet         binary
+
+# Notebooks — специальный merge driver
+*.ipynb           merge=union
+
+# Скрытые от языковой статистики GitHub
+*.generated.py    linguist-generated=true
+
+# Не включать в git archive
+docs/             export-ignore
+.github/          export-ignore
+```
+
+Паттерны работают по тем же правилам, что и в `.gitignore`: glob, `**`, leading/trailing slash. Атрибуты — это пары `key=value` или просто `key` (boolean true), или `-key` (boolean false).
+
+<Callout type="tip">
+`.gitattributes` — это конфигурация поведения Git, а не файлов. Файлы остаются теми же, меняется то, как Git их обрабатывает: checkout, diff, merge, export.
+</Callout>
+
+---
+
+## text и eol: line endings и текстовый режим
+
+Самые важные атрибуты для cross-platform проектов. Подробно их разбираем в следующем уроке, тут — обзор.
+
+```gitattributes
+# Авто-определение текста + всегда LF при checkout
+*                 text=auto eol=lf
+
+# Конкретно shell-скрипты — всегда LF
+*.sh              text eol=lf
+
+# Bat-файлы (только для Windows) — CRLF
+*.bat             text eol=crlf
+
+# Бинари — не трогать
+*.parquet         binary
+*.png             binary
+```
+
+Что делает:
+
+- `text` — Git считает файл текстовым, нормализует line endings при commit и при checkout
+- `eol=lf` — при checkout всегда LF, независимо от ОС
+- `binary` — синоним `-text -diff`, Git не трогает байты, не делает diff
+
+Без `.gitattributes` все эти решения зависят от глобальной настройки `core.autocrlf`, которая у каждого может быть своя. Это рецепт катастрофы — об этом подробно следующий урок.
+
+---
+
+## merge: стратегии слияния
+
+По умолчанию Git мержит файлы по three-way merge (модуль 6). Для некоторых файлов это не работает — например, ноутбуки или generated файлы. `.gitattributes` позволяет указать другую стратегию.
+
+```gitattributes
+# Notebooks — стратегия union (берёт обе версии, не пытается merge)
+*.ipynb           merge=union
+
+# Lock-файлы pip/poetry — пусть всегда переописывается из ours/theirs
+poetry.lock       merge=theirs
+package-lock.json merge=ours
+
+# CHANGELOG — простое склеивание
+CHANGELOG.md      merge=union
+```
+
+Доступные built-in стратегии:
+
+| Стратегия | Поведение |
+| --- | --- |
+| `text` | Стандартный three-way merge (default) |
+| `binary` | Не мержить, конфликт всегда |
+| `union` | Взять обе стороны, склеить без проверки логики |
+
+`union` особенно полезен для CHANGELOG, requirements.txt, добавляемых-only списков — Git берёт изменения от обоих и склеивает. Может дать дубликаты, но избегает конфликтов.
+
+<DiagramContainer title="Стратегии merge: text vs union vs binary" color="blue">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Default — three-way merge, конфликты на одинаковых строках">
+        <DataBox label="text" className="border-blue-500/30 w-56">
+          <div className="text-xs">умный merge</div>
+          <div className="text-xs">конфликты возможны</div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Берёт ВСЕ изменения обеих сторон, дубликаты возможны">
+        <DataBox label="union" className="border-emerald-500/30 w-56">
+          <div className="text-xs">конкатенация версий</div>
+          <div className="text-xs">конфликтов нет</div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Считает файл двоичным, любое расхождение = конфликт">
+        <DataBox label="binary" className="border-rose-500/30 w-56">
+          <div className="text-xs">не пытается мержить</div>
+          <div className="text-xs">всегда конфликт при изменениях</div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+### Кастомный merge driver
+
+Для notebook-ов union — не идеал (получаешь сломанный JSON). Лучше — кастомный driver через `nbmerge` или `nbdime`. Это тема урока 14.04 (notebook workflows), но синтаксис:
+
+```gitattributes
+*.ipynb           merge=jupyter
+```
+
+```bash
+# Конфиг для driver — в .git/config или ~/.gitconfig
+git config merge.jupyter.driver "nbdime merge --jupyter --input %A %O %B %A"
+git config merge.jupyter.name "Jupyter notebooks merge driver"
+```
+
+`%A` — наш (HEAD), `%B` — их (incoming), `%O` — общий предок, `%P` — путь к файлу. Driver получает все три версии, должен оставить результат в `%A` и вернуть 0 (success) или ≠0 (конфликт).
+
+---
+
+## diff: кастомный diff driver
+
+Аналогично merge, можно настроить, **как** Git считает diff для определённых файлов. Это про человеко-читаемые diff-ы.
+
+```gitattributes
+# Notebooks — diff через nbdime
+*.ipynb           diff=jupyter
+
+# Markdown — словесный diff (по словам, не символам)
+*.md              diff=markdown
+
+# CSV — табличный diff
+*.csv             diff=csv
+
+# Python — учитывать функции при контексте
+*.py              diff=python
+```
+
+Конфигурация driver-а:
+
+```bash
+# Diff для notebooks через nbdime
+git config diff.jupyter.command "nbdime diff"
+
+# Markdown через difft (difftastic)
+git config diff.markdown.command "difft"
+```
+
+Самый полезный встроенный driver — `diff=python`. Он умеет распознавать имена функций и классов в Python для контекста в hunk header:
+
+```diff
+@@ -10,7 +10,7 @@ def extract_data(source: str) -> DataFrame:
+     conn = create_engine(source)
+-    query = "SELECT * FROM users"
++    query = "SELECT id, name FROM users"
+```
+
+Видишь `def extract_data(...)` в header? Это работа `diff=python`. Без него было бы просто `@@ -10,7 +10,7 @@` без подсказки, в какой функции изменение.
+
+Git поддерживает встроенные `diff` для популярных языков: `python`, `ruby`, `bash`, `go`, `rust`, `java`, `csharp`, `cpp`, и пары других. Просто прописываешь в `.gitattributes`:
+
+```gitattributes
+*.py              diff=python
+*.go              diff=golang
+*.rs              diff=rust
+```
+
+И функция в hunk header начинает работать сразу.
+
+---
+
+## linguist: что GitHub считает за что
+
+GitHub справа от репо показывает language statistics — какой процент кода на каком языке. Это делает [linguist](https://github.com/github-linguist/linguist) — open-source инструмент, который классифицирует файлы по расширению/содержанию.
+
+Проблема: linguist считает **всё**. Включая сгенерированный код, vendored библиотеки и документацию. В DE-проекте может быть так:
+
+- Реальный код: 50 Python файлов, 5000 строк
+- Notebooks: 20 .ipynb, выглядят как JSON (huge), считаются как Jupyter Notebook
+- Generated SQL: 200 .sql файлов от DBT
+- Vendored .py от старого pip install: 100MB
+
+Результат: GitHub утверждает, что репо на 80% Jupyter и 15% SQL, хотя реально — 95% твоей работы в Python. Это путает потенциальных контрибьюторов.
+
+Решение — `linguist-*` атрибуты:
+
+```gitattributes
+# Скрыть из статистики — generated файлы
+**/migrations/*.py        linguist-generated=true
+*.min.js                  linguist-generated=true
+dist/                     linguist-generated=true
+
+# Скрыть vendored библиотеки (третьесторонний код)
+vendor/                   linguist-vendored=true
+third_party/              linguist-vendored=true
+
+# Сказать "это документация", не основной код
+docs/                     linguist-documentation=true
+
+# Сказать "это data, не код"
+fixtures/                 linguist-detectable=false
+*.sample.csv              linguist-detectable=false
+```
+
+После commit-а `.gitattributes` и push на GitHub статистика пересчитывается (с задержкой 10-30 мин).
+
+<Callout type="note">
+Для opensource проектов это очень важно. Например, какой-нибудь dbt-проект на 70% — это generated SQL, на 30% — модели и macros. Без linguist-generated в `.gitattributes` GitHub утверждает, что проект на 99% на SQL. С linguist-generated — показывает реальную картину: Python + YAML + SQL в нормальной пропорции.
+</Callout>
+
+---
+
+## export-ignore: что не попадает в git archive
+
+`git archive` — команда, которая упаковывает репо в tar/zip без `.git/` директории. Используется для релизов: "вот версия 1.2.0 как .tar.gz".
+
+По умолчанию архив содержит **всё**, что в working tree. Часто это не нужно: тесты, документация, CI-конфиги — лишнее для пользователей пакета.
+
+```gitattributes
+# Не включать в архив релиза
+.github/            export-ignore
+.gitattributes      export-ignore
+.gitignore          export-ignore
+tests/              export-ignore
+docs/               export-ignore
+.pre-commit-config.yaml  export-ignore
+```
+
+Теперь:
+
+```bash
+$ git archive --format=tar.gz --output=release-1.0.tar.gz HEAD
+```
+
+Получишь tar.gz, в котором уже не будет `tests/`, `.github/` и прочего. Только то, что нужно для использования продукта.
+
+Для DE-проектов это особенно полезно при подготовке релизных Airflow DAG-bundle или dbt-пакета.
+
+---
+
+## ident, filter, encoding: остальные атрибуты
+
+Reference list для полноты:
+
+- `ident` — Git подставляет `$Id: <sha>$` в файл при checkout. Редко используется в 2026.
+- `filter=X` — кастомный clean/smudge filter (используется LFS, см. модуль 14).
+- `encoding=UTF-16` — для не-UTF-8 файлов (Windows проекты иногда).
+- `working-tree-encoding=cp1251` — то же самое.
+
+Для DE проектов в 2026 они почти не нужны. Самые важные — `text`/`eol`, `merge`, `diff`, `linguist-*`, `export-ignore`.
+
+---
+
+## Полный пример .gitattributes для Python DE проекта
+
+```gitattributes
+# === Line endings ===
+* text=auto eol=lf
+
+# Шелл-скрипты — всегда LF
+*.sh        text eol=lf
+*.bash      text eol=lf
+
+# Windows batch — всегда CRLF
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+
+# === Бинари ===
+*.png       binary
+*.jpg       binary
+*.parquet   binary
+*.duckdb    binary
+*.sqlite    binary
+
+# === Diff drivers ===
+*.py        diff=python
+
+# === Merge стратегии ===
+# Notebooks — кастомный merge через nbdime (см. модуль 14)
+*.ipynb     merge=jupyter
+
+# Lock-файлы — пусть theirs перезаписывает (наш lock устарел при pull)
+poetry.lock         merge=theirs
+package-lock.json   merge=theirs
+uv.lock             merge=theirs
+
+# CHANGELOG — union для безконфликтного добавления
+CHANGELOG.md        merge=union
+
+# === Linguist (GitHub статистика) ===
+*.sql               linguist-generated=true     # DBT generated SQL
+docs/               linguist-documentation=true
+tests/fixtures/     linguist-detectable=false
+*.csv               linguist-detectable=false
+
+# === export-ignore (git archive) ===
+.github/                    export-ignore
+.gitattributes              export-ignore
+.gitignore                  export-ignore
+tests/                      export-ignore
+.pre-commit-config.yaml     export-ignore
+```
+
+---
+
+## Попробуй сам: linguist в действии
+
+```bash
+# Создай тестовый репо
+mkdir attributes-demo && cd attributes-demo
+git init
+
+# Создай "реальный" Python код
+mkdir src
+cat > src/main.py <<'EOF'
+def main():
+    print("hello")
+EOF
+
+# Создай сгенерированные SQL (имитируем DBT)
+mkdir target
+for i in 1 2 3 4 5; do
+    cat > target/model_$i.sql <<EOF
+-- generated by dbt
+SELECT * FROM model_$i WHERE created_at > '2026-01-01';
+EOF
+done
+
+# Без .gitattributes — linguist будет считать SQL 90% репо
+git add .
+git commit -m "init"
+
+# Создай .gitattributes — пометим target/ как generated
+cat > .gitattributes <<'EOF'
+target/    linguist-generated=true
+EOF
+
+git add .gitattributes
+git commit -m "chore: mark target/ as generated"
+
+# После push на GitHub — статистика пересчитается через 10-30 мин,
+# и target/ перестанет учитываться. Python будет 100%.
+
+# Проверь, что атрибуты применены к файлам
+git check-attr -a -- target/model_1.sql
+# target/model_1.sql: linguist-generated: set
+
+git check-attr -a -- src/main.py
+# (пусто — нет атрибутов)
+```
+
+`git check-attr` — аналог `git check-ignore`. Показывает, какие атрибуты Git применит к данному файлу.
+
+```bash
+# Какие атрибуты у конкретного файла?
+git check-attr -a -- src/main.py
+# src/main.py: diff: python
+
+# Все файлы и их атрибуты
+git ls-files | xargs git check-attr -a --
+```
+
+---
+
+## Cross-link: где это всплывёт дальше
+
+- **Модуль 14, урок 4 (notebook workflows)** — конкретные `merge=jupyter` и driver для `.ipynb`
+- **Модуль 14, урок 2 (Git LFS)** — атрибут `filter=lfs` для больших файлов
+- **Модуль 17 (секреты)** — атрибут `filter` для git-crypt (опционально)
+
+`.gitattributes` — это инфраструктурный файл. Один раз настроил под проект — годами работает в фоне.
+
+---
+
+<KnowledgeCheck
+  question="У тебя в репо DBT проект: 50 .sql моделей (написанных тобой), 500 generated .sql в target/ (DBT их генерит) и 30 .py macros. GitHub показывает language stats: 90% SQL, 10% Python. Что не так и как починить?"
+  answer="GitHub считает все .sql файлы — и твои модели, и DBT-generated в target/. На самом деле generated файлы — не твой код, и они раздувают статистику. Решение — в `.gitattributes`: `target/  linguist-generated=true`. После commit + push на GitHub linguist пересчитает: твои 50 моделей + 30 .py macros. Статистика покажет нормальную пропорцию SQL/Python. Дополнительные полезные атрибуты для DBT: `*.yml diff=yaml` для лучшего diff yaml-конфигов, `dbt_packages/ linguist-vendored=true` для скрытия third-party packages. `target/` вообще обычно должен быть в .gitignore — но если по какой-то причине его всё же коммитят, linguist-generated спасает статистику."
+/>

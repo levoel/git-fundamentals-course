@@ -1,0 +1,280 @@
+---
+title: "Какой workflow выбрать — decision matrix для DE команды"
+description: "Decision matrix: solo -> push to main; small SaaS -> GitHub Flow; mobile/SDK -> GitFlow; mature с flags -> trunk-based. Hybrid OK. Что юзают в реальных DE командах (Airflow DAGs, dbt, ETL)."
+order: 4
+difficulty: "intermediate"
+estimatedTime: 20
+topics: ["workflow-decision", "team-size", "deployment", "real-world-examples", "comparison"]
+---
+
+# Какой workflow выбрать — practical decision matrix
+
+В прошлых трёх уроках мы изучили GitHub Flow, GitFlow, Trunk-Based. Каждый имеет свои use cases. Junior часто застревает на вопросе «**какой именно** мне использовать?». В этом уроке: practical decision matrix по факторам, реальные примеры из DE-команд (Airflow, dbt, Spark), и почему «hybrid» — часто optimal.
+
+---
+
+## Главные факторы выбора
+
+### 1. Размер команды
+
+| Команда | Workflow |
+|---|---|
+| Solo dev | Просто push to main |
+| 2-5 dev | GitHub Flow |
+| 5-20 dev | GitHub Flow (обычно) |
+| 20-50 dev | GitHub Flow или Trunk-Based |
+| 50+ dev | Trunk-Based (если зрелость есть) |
+
+Больше людей -> больше merge conflicts -> нужна более disciplined workflow.
+
+### 2. Deployment frequency
+
+| Деплой | Workflow |
+|---|---|
+| Несколько в день | GitHub Flow или Trunk-Based |
+| Раз в день | GitHub Flow |
+| Раз в неделю | GitHub Flow |
+| Раз в 2 недели — месяц | GitFlow (versioned releases) |
+| Раз в квартал и реже | GitFlow |
+
+Чем чаще деплой -> тем проще workflow нужен.
+
+### 3. Тип продукта
+
+| Продукт | Workflow |
+|---|---|
+| SaaS (web app, data platform) | GitHub Flow / Trunk-Based |
+| Mobile app (iOS / Android store) | GitFlow или hybrid |
+| Library / SDK с semver | GitFlow или hybrid |
+| Enterprise software с patch releases | GitFlow |
+| Internal tools / scripts | GitHub Flow |
+| DE репо (Airflow DAGs, dbt models) | GitHub Flow |
+
+### 4. CI/CD зрелость
+
+| Зрелость | Workflow |
+|---|---|
+| Тесты + auto-deploy готовы | GitHub Flow OK |
+| + monitoring + feature flags | Trunk-Based |
+| + release planning + audit | GitFlow |
+| Нет CI вообще | Создайте CI **сначала**, потом workflow |
+
+Workflow не спасёт от отсутствия CI/CD. Чем проще workflow при отсутствии automation — тем лучше.
+
+### 5. Junior ratio
+
+| Soviet | Workflow |
+|---|---|
+| >50% senior | Trunk-Based может работать |
+| Mostly mid | GitHub Flow optimal |
+| >50% junior | GitHub Flow (проще, безопасней) |
+
+Junior нужна простота. TBD с дисциплиной flag management — рискованно для junior team.
+
+---
+
+## Decision tree
+
+<DiagramContainer title="Decision tree для DE команды">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox tooltip="Начни с этого вопроса">Релизы версионные?</DataBox>
+      <FlowNode tooltip="">да</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="Versioned: mobile app, library, SDK">GitFlow или hybrid</FlowNode>
+    </FlowRow>
+    <FlowRow>
+      <DataBox tooltip="">нет (continuous deploy)</DataBox>
+      <FlowNode tooltip="Сколько dev?">размер команды?</FlowNode>
+    </FlowRow>
+    <FlowRow>
+      <FlowNode tooltip="">solo</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="Push to main, простота">Direct to main</FlowNode>
+    </FlowRow>
+    <FlowRow>
+      <FlowNode tooltip="">2-20</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="DE standard">GitHub Flow</FlowNode>
+    </FlowRow>
+    <FlowRow>
+      <FlowNode tooltip="">20+ и mature</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="Big platform team">Trunk-Based</FlowNode>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+---
+
+## Что юзают реальные DE команды
+
+### Airflow community (Apache Airflow source repo)
+
+**Workflow**: GitHub Flow с release branches.
+
+- `main` для активной разработки (Airflow 3.x).
+- `v2-10-stable`, `v2-9-stable` — release branches для патчей.
+- Hotfix на release branch + cherry-pick на main (или manual port).
+
+Это **hybrid**: основной flow GitHub Flow, но с поддержкой нескольких versions через release branches. Не чистый GitFlow (нет develop), не чистый GitHub Flow (есть release branches).
+
+### dbt community (dbt-core source repo)
+
+**Workflow**: GitHub Flow с tagged releases.
+
+- `main` continuous.
+- Tags `v1.7.0`, `v1.7.1` для releases.
+- Hotfix -> patch release.
+- Иногда release/v1.7 branch для backports.
+
+Большинство **внутренних dbt репо в компаниях** (analytical models) — pure GitHub Flow без release branches.
+
+### Apache Spark
+
+**Workflow**: GitFlow-like.
+
+- `master` (main) для активной разработки.
+- `branch-3.5`, `branch-3.4` для releases.
+- Strict release process с release planning.
+
+Apache projects часто GitFlow-style — community-driven, multiple supported versions, versioned releases.
+
+### Netflix data team (internal)
+
+**Workflow**: Trunk-Based.
+
+- Все коммитят в main.
+- Feature flags через internal service.
+- Continuous deployment.
+- Тысячи commits/day.
+
+### Internal data platform в medium company
+
+**Workflow**: GitHub Flow.
+
+- 10 DE.
+- Один main.
+- Feature branches 1-3 дня.
+- CI на BigQuery (dbt test, dbt run на staging).
+- Auto-deploy on merge.
+
+**Это типичный DE setup в 2026**.
+
+### Junior pet project / freelancer
+
+**Workflow**: Direct push to main.
+
+- Solo dev, нет review.
+- Маленькие commits, descriptive messages.
+- GitHub Pages / Vercel auto-deploy.
+- Никаких branches кроме экспериментов.
+
+OK для solo, но **сразу как только присоединится второй человек** -> переход на GitHub Flow.
+
+---
+
+## Hybrid workflows — нормально
+
+В реальности команды редко используют чистый GitHub Flow или чистый GitFlow. Гибриды:
+
+### GitHub Flow + release branches
+
+```
+main (continuous)
+├── feature/* (короткие, merge в main)
+├── release/v1.x (long-lived, для патчей legacy)
+└── release/v2.x (long-lived)
+```
+
+Когда нужно поддерживать несколько versions, но основной workflow continuous deployment.
+
+### GitHub Flow + tagged releases
+
+```
+main (continuous)
+├── feature/* (короткие)
+└── tags v1.0.0, v1.1.0, v1.1.1 (точки в истории main для deploy)
+```
+
+Каждый tag — release. Можно rollback через redeploy старого тега. Без release branches, просто markers в main.
+
+### TBD + emergency branches
+
+```
+main (commits continuously)
+└── hotfix/* (only when urgent prod issues, обычно нет)
+```
+
+В нормальной ситуации всё в main с flags. Hotfix branch — для emergency когда flag-disable не работает (например, security issue в main вне flag).
+
+---
+
+## Как принять решение в новой команде
+
+Если ты junior и присоединился к команде:
+
+1. **Спроси «какой у нас workflow?»**. Tech lead должен ответить.
+
+2. **Читай CONTRIBUTING.md** или docs в репо. Многие команды документируют процесс.
+
+3. **Смотри `git log --graph --oneline -50`**. История покажет паттерн (merge commits vs squash vs linear).
+
+4. **Открой 5-10 recent merged PRs**. Смотри:
+   - Из какой ветки в какую (feature -> main? или -> develop?).
+   - Какой merge type (squash vs merge commit).
+   - Длительность open period.
+
+5. **Спроси у peer**. «Я открыл первый PR — посмотри, делаю правильно?»
+
+Не предполагай — узнавай.
+
+---
+
+## Анти-pattern: cargo cult GitFlow
+
+Junior читает Driessen 2010, копирует в DE-репо: создаёт develop branch, release branches. Команда не понимает зачем, но «junior сказал так делать». Через 3 месяца:
+
+- Merge feature -> develop -> main двойные (forgotten merges).
+- Release branches которые никто не использует, dead.
+- Hotfix flow для regular bugs — overhead.
+- Скорость упала 3x.
+
+Fix: **спроси «зачем»**. Если нет конкретной причины (versioned releases, multiple supported versions, regulatory audit) — не используй GitFlow.
+
+---
+
+## Анти-pattern: cargo cult TBD без infra
+
+Junior читает про Google TBD, копирует: все коммитят в main, нет feature flags, тесты неполные. Через 2 недели:
+
+- Main сломан 3 раза в день.
+- Все коммиты ревертятся, дев в стрессе.
+- Deployment лагает в production.
+
+Fix: **TBD требует infra**. Без comprehensive tests и feature flags TBD не работает. Сначала инвестируй в CI/CD, потом мигрируй.
+
+---
+
+## Killer matrix для DE команды
+
+| Команда | Deploy | Type | Workflow |
+|---|---|---|---|
+| Solo, pet project | manual / auto | anything | Push to main |
+| 2-5 DE, SaaS dbt | daily | continuous | GitHub Flow |
+| 5-15 DE, Airflow corp | hourly | continuous | GitHub Flow |
+| 15-30 DE, data platform | hourly | continuous | GitHub Flow или TBD |
+| 30+ DE, FAANG data team | sub-hourly | continuous | Trunk-Based |
+| Open source DE library | weekly | versioned | GitHub Flow + release branches |
+| Mobile SDK | bi-weekly | versioned | GitFlow или hybrid |
+| Enterprise DE с audit | weekly | versioned | GitFlow |
+
+**Большинство junior DE (90%+) попадут в GitHub Flow setup**. Это твоя primary знание.
+
+---
+
+## Killer takeaway
+
+Decision factors: размер команды, deploy frequency, тип продукта, CI/CD зрелость, junior ratio. **DE в продуктовой компании = почти всегда GitHub Flow** (90% случаев). GitFlow — для versioned products (mobile, library, SDK). Trunk-Based — для mature high-velocity (FAANG-level). Hybrids нормально — pure workflows редко match real world. Junior должен **спросить tech lead** и **изучить commit history**, не предполагать. Cargo cult любого workflow (особенно GitFlow) — anti-pattern: используй то что match-ит **конкретные team needs**.
+
+<KnowledgeCheck quizSlug="12-workflows/04-which-to-choose" />

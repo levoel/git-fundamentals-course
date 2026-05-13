@@ -1,0 +1,433 @@
+---
+title: "rerere и конфликты при rebase"
+description: "Continue, skip, abort при rebase + git rerere для автоматического запоминания решений"
+order: 5
+difficulty: "intermediate"
+estimatedTime: 18
+topics: ["Git", "rebase", "rerere", "conflicts"]
+---
+
+# rerere и конфликты при rebase
+
+Конфликты при rebase отличаются от конфликтов при merge: они возникают **на каждом коммите**, и если у тебя 10 коммитов в ветке — может быть 10 циклов разрешения. Особенно больно, когда после первого rebase ты решил конфликт, а через день делаешь второй rebase и снова решаешь **тот же самый** конфликт.
+
+В этом уроке мы разбираемся, как управлять rebase в процессе (`--continue`, `--skip`, `--abort`), и включаем волшебную штуку — **`git rerere`** (reuse recorded resolution), которая запоминает твои решения и применяет автоматически.
+
+---
+
+## Жизненный цикл rebase с конфликтами
+
+<DiagramContainer title="Контрольный цикл при rebase с конфликтами" color="orange">
+  <FlowColumn className="p-4 gap-3">
+    <Tooltip content="Запускаем rebase, Git начинает применять коммиты по одному">
+      <FlowNode variant="input">git rebase main</FlowNode>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="На каком-то коммите возникает конфликт, Git останавливается">
+      <FlowNode variant="default">CONFLICT</FlowNode>
+    </Tooltip>
+    <Arrow direction="down" />
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Разрешить и продолжить">
+        <FlowNode variant="default">--continue</FlowNode>
+      </Tooltip>
+      <Tooltip content="Пропустить коммит (опасно — теряешь изменения)">
+        <FlowNode variant="default">--skip</FlowNode>
+      </Tooltip>
+      <Tooltip content="Отменить весь rebase, вернуться в исходное состояние">
+        <FlowNode variant="default">--abort</FlowNode>
+      </Tooltip>
+    </FlowRow>
+    <Arrow direction="down" />
+    <Tooltip content="Продолжается с следующего коммита, может снова быть конфликт">
+      <FlowNode variant="output">next commit</FlowNode>
+    </Tooltip>
+  </FlowColumn>
+</DiagramContainer>
+
+---
+
+## `git rebase --continue`: после разрешения
+
+Самый частый сценарий: конфликт -> ты его решил -> `git add` -> продолжить.
+
+```bash
+$ git rebase main
+Auto-merging src/etl.py
+CONFLICT (content): Merge conflict in src/etl.py
+error: could not apply def5678... feat: add etl job
+hint: ...
+```
+
+Что делать:
+
+```bash
+# 1. Открываешь файл, разрешаешь конфликт
+$ vim src/etl.py
+# (или VS Code, мердж-эдитор)
+
+# 2. Отмечаешь разрешённым
+$ git add src/etl.py
+
+# 3. Проверяешь статус
+$ git status
+interactive rebase in progress; onto a1b2c3d
+Last command done (1 command done):
+   pick def5678 feat: add etl job
+Next commands to do (2 remaining commands):
+   pick abc1234 test: add tests
+   pick ghi9999 docs: update readme
+
+# 4. Продолжаешь rebase
+$ git rebase --continue
+```
+
+После `--continue` Git перейдёт к следующему коммиту (`abc1234`). Если на нём тоже будет конфликт — снова цикл. Если нет — Git применит его, потом перейдёт к `ghi9999`, и так до конца.
+
+В конце:
+
+```bash
+Successfully rebased and updated refs/heads/feature/x.
+```
+
+---
+
+## `git rebase --skip`: пропустить коммит
+
+Если ты осознанно хочешь **выбросить** коммит из rebase (например, его изменения уже есть в новой базе):
+
+```bash
+git rebase --skip
+```
+
+Это удалит текущий коммит из rebase и перейдёт к следующему. Никаких изменений из этого коммита в финальной ветке не будет.
+
+<Callout type="danger">
+`--skip` потенциально опасен: ты теряешь весь коммит, не только конфликтные строки. Использовать только когда **точно** знаешь, что делаешь. Признак, когда skip ОК — `git diff` показывает пустой diff (все изменения уже на новой базе).
+</Callout>
+
+Типичный случай для `--skip`:
+
+- Ты делал бэкпорт фикса из release в master.
+- Master уже содержит этот фикс из другого источника.
+- При rebase Git ругается на конфликт — изменения совпадают.
+- `git diff` показывает: no diff to apply.
+- `--skip` — пропустить уже-применённый коммит.
+
+---
+
+## `git rebase --abort`: всё назад
+
+Самая безопасная команда. Возвращает ветку в состояние **до начала rebase**:
+
+```bash
+git rebase --abort
+```
+
+Все промежуточные разрешения конфликтов отбрасываются. Working tree восстанавливается. HEAD возвращается на старую верхушку ветки. Будто rebase и не начинался.
+
+Когда использовать:
+
+- Понял, что rebase не нужен (например, нужен merge).
+- Конфликты слишком сложные — хочешь спросить коллегу.
+- Сделал ошибку (`--skip` лишний раз, неправильное разрешение) — хочешь начать заново.
+
+---
+
+## `git rebase --quit` vs `--abort`
+
+Менее известный флаг — `--quit`:
+
+```bash
+git rebase --quit
+```
+
+В отличие от `--abort`, который восстанавливает старое состояние, `--quit` **просто очищает rebase state** и оставляет тебя там, где ты сейчас. То есть твои уже-применённые коммиты остаются, но rebase прерывается.
+
+Это **редкая операция**. Может быть полезной, если ты в середине rebase решил "и так пойдёт, не буду до конца дотягивать". Но обычно лучше abort.
+
+---
+
+## Где Git хранит состояние rebase
+
+Во время rebase Git создаёт служебную директорию:
+
+```bash
+$ ls .git/rebase-merge/
+done            # уже применённые коммиты
+git-rebase-todo # оставшиеся коммиты (можно редактировать в interactive)
+head-name       # имя ветки, которую rebase'им
+onto            # на какой коммит rebase'им
+patch           # diff текущего коммита
+```
+
+Тебе обычно не нужно туда лезть, но знай: если ты вдруг видишь `.git/rebase-merge/` или `.git/rebase-apply/` и `git status` говорит "rebase in progress" — это сигнал, что у тебя незавершённый rebase. Завершай (`--continue` / `--abort`) перед следующими операциями.
+
+---
+
+## `git rerere`: автоматическое запоминание решений
+
+Теперь к главной фиче этого урока. **`rerere`** = **Re**use **Re**corded **Re**solution. Git может запоминать, как ты разрешил конкретный конфликт, и применять то же решение автоматически в будущем.
+
+### Зачем это нужно
+
+Сценарий, очень частый:
+
+1. Ты сделал feature ветку, поработал.
+2. Запустил `git rebase main`, разрешил 5 конфликтов вручную.
+3. На следующий день в `main` напушили ещё коммитов.
+4. Ты снова делаешь `git rebase main` — те же конфликты возникают снова, потому что rebase каждый раз "пересоздаёт" коммиты ветки.
+5. Тебе приходится разрешать **те же 5 конфликтов второй раз**.
+
+С `rerere` Git запоминает, что в конкретной ситуации (определённый OURS + THEIRS + BASE) ты выбрал такое-то разрешение, и в следующий раз применит его автоматически.
+
+### Включение
+
+```bash
+git config --global rerere.enabled true
+```
+
+И всё. Никакой другой настройки не нужно. Дальше Git сам:
+
+- При каждом конфликте запомнит "снимок" конфликтных блоков и твоего разрешения.
+- При повторном таком же конфликте — применит сохранённое решение.
+
+### Как это работает под капотом
+
+`rerere` хранит данные в `.git/rr-cache/`. Для каждого уникального "набора" конфликтных блоков создаётся директория, в которой:
+
+- `preimage` — снимок конфликтных блоков ДО разрешения (с маркерами).
+- `postimage` — снимок ПОСЛЕ разрешения (твоя версия).
+- `thisimage` — текущая итерация.
+
+Когда Git встречает конфликт, он хэширует preimage и ищет среди записанных. Если находит совпадение — применяет postimage.
+
+<DiagramContainer title="rerere: запомнить и переиспользовать" color="green">
+  <FlowColumn className="p-4 gap-3">
+    <Tooltip content="Первый раз: конфликт, ты решаешь руками, rerere запоминает">
+      <DataBox label="первый rebase" className="border-zinc-500/30 w-full max-w-xl mx-auto">
+        <div className="text-xs space-y-1">
+          <div>1. CONFLICT in src/etl.py</div>
+          <div>2. ты разрешаешь -> git add -> continue</div>
+          <div className="text-green-400">3. rerere: snapshot saved</div>
+        </div>
+      </DataBox>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="Второй раз: тот же конфликт — rerere подставляет твоё прошлое решение">
+      <DataBox label="следующий rebase того же типа" className="border-green-500/30 w-full max-w-xl mx-auto">
+        <div className="text-xs space-y-1">
+          <div>1. CONFLICT in src/etl.py</div>
+          <div className="text-green-400">2. rerere: applied previous resolution</div>
+          <div>3. ты проверяешь -> git add -> continue</div>
+        </div>
+      </DataBox>
+    </Tooltip>
+  </FlowColumn>
+</DiagramContainer>
+
+### Внимательно: rerere не "обнуляет" конфликт
+
+После того как `rerere` применил решение, **Git всё ещё считает файл конфликтным**. Ты должен сделать `git add` явно, чтобы подтвердить, что согласен с применённым решением. Это safety net: что если решение устарело и больше не правильное.
+
+Сценарий:
+
+```bash
+$ git rebase main
+CONFLICT (content): Merge conflict in src/etl.py
+Resolved 'src/etl.py' using previous resolution.
+
+$ git status
+both modified:   src/etl.py
+
+$ cat src/etl.py
+# Файл выглядит как твоё прошлое разрешение, без маркеров
+
+$ git diff
+# Diff покажет что-нибудь? Если rerere точно угадал — пустой diff (нет конфликта)
+# Если diff показывает изменения — посмотри глазами, точно ли правильно
+
+$ git add src/etl.py
+$ git rebase --continue
+```
+
+То есть workflow: смотришь, что rerere применил, убеждаешься что разумно (быстрый `git diff` или просто открыть файл), `git add`, `continue`.
+
+### Когда rerere промахивается
+
+rerere работает по хешу preimage. Если конфликт **точно совпадает** с прошлым (те же строки, те же изменения) — применит. Если хоть на одну строку отличается — нет, будешь разрешать с нуля.
+
+Это означает: rerere помогает в специфическом сценарии "повторный rebase той же ветки", и редко помогает в "разные ветки имеют похожий конфликт".
+
+---
+
+## Полезные команды rerere
+
+### Просмотр кеша
+
+```bash
+$ git rerere status
+src/etl.py
+
+$ git rerere diff
+# показывает diff между preimage и финальным состоянием
+```
+
+### Очистка кеша
+
+```bash
+# Удалить запись для текущего нерешённого конфликта (если запись неправильная)
+git rerere forget src/etl.py
+
+# Очистить весь кеш rerere
+git rerere clear
+
+# Эквивалент
+rm -rf .git/rr-cache
+```
+
+`gc.rerereResolved` и `gc.rerereUnresolved` контролируют, как долго записи живут:
+
+- `rerereResolved` = 60 дней (разрешённые конфликты).
+- `rerereUnresolved` = 15 дней (незавершённые).
+
+Меняется через `git config`, но дефолты обычно ок.
+
+---
+
+## Когда rerere раздражает
+
+Иногда rerere "помогает" не туда. Например, ты раз разрешил конфликт неправильно (выбрал OURS, хотя надо было THEIRS). Теперь rerere будет применять плохое решение.
+
+Решение:
+
+```bash
+# Когда увидел плохое автоматическое разрешение
+git rerere forget src/etl.py
+
+# Разреши правильно вручную
+git checkout --theirs src/etl.py   # или открой и поправь
+git add src/etl.py
+git rebase --continue
+
+# rerere запомнит новое правильное решение, прошлое забудет
+```
+
+---
+
+## Полная картина: best practices
+
+```bash
+# Глобально включить rerere
+git config --global rerere.enabled true
+
+# Глобально включить autostash (на случай если pull-rebase с локальными изменениями)
+git config --global rebase.autoStash true
+
+# Глобально включить autosquash для rebase -i
+git config --global rebase.autoSquash true
+
+# Push по дефолту с includes
+git config --global push.useForceIfIncludes true
+```
+
+С этими настройками rebase становится в разы дружелюбнее.
+
+---
+
+## Сценарий: длинный rebase с rerere
+
+```bash
+# День 1: создаёшь ветку
+git switch -c feature/big-refactor
+# ... 10 коммитов, переименование модулей, рефакторинг...
+git push -u origin feature/big-refactor
+
+# День 2: главный архитектор вмерджил в main много изменений, конфликтующих с твоими
+git fetch origin
+git rebase origin/main
+
+# Первый коммит — CONFLICT
+$ git rebase origin/main
+CONFLICT (content): Merge conflict in src/old_module.py
+
+# Разрешаешь
+$ vim src/old_module.py
+$ git add src/old_module.py
+$ git rebase --continue
+
+# Третий коммит — снова CONFLICT в том же файле
+CONFLICT (content): Merge conflict in src/old_module.py
+Recorded preimage for 'src/old_module.py'
+
+# Разрешаешь снова
+# ... продолжаешь ...
+
+# Пятый, седьмой — тоже конфликт в src/old_module.py
+# Но rerere уже запомнил после первого, и применяет автоматически:
+Resolved 'src/old_module.py' using previous resolution.
+
+# Видишь, проверяешь, git add, continue. Раз в 5 быстрее!
+
+# Финал
+Successfully rebased and updated refs/heads/feature/big-refactor.
+
+# Push с lease
+git push --force-with-lease
+```
+
+Без rerere ты бы решал тот же конфликт 5+ раз. С ним — раз, остальные применятся автоматически.
+
+---
+
+## Попробуй сам
+
+```bash
+# Включи rerere
+git config --global rerere.enabled true
+
+# Создай setup для повторного rebase
+mkdir rerere-demo && cd rerere-demo
+git init -b main
+echo "v0" > app.py && git add . && git commit -m "C0"
+
+# Сделай feature ветку с тремя коммитами, все правят одну строку
+git switch -c feature
+sed -i.bak 's/v0/v1/' app.py && rm app.py.bak
+git commit -am "F1"
+sed -i.bak 's/v1/v2/' app.py && rm app.py.bak
+git commit -am "F2"
+sed -i.bak 's/v2/v3/' app.py && rm app.py.bak
+git commit -am "F3"
+
+# В main внеси конфликтное изменение
+git switch main
+sed -i.bak 's/v0/X/' app.py && rm app.py.bak
+git commit -am "main: X"
+
+# Первый rebase — конфликты на каждом коммите
+git switch feature
+git rebase main
+# CONFLICT — разрешишь по-своему (например, выбираешь THEIRS)
+# git add app.py && git rebase --continue
+# Снова CONFLICT (но на следующем коммите) — то же решение
+# git add app.py && git rebase --continue
+# Третий раз — тот же конфликт
+
+# Теперь в main ещё одно изменение, делаешь rebase снова
+git switch main
+echo "more main work" >> app.py
+git commit -am "main: more"
+git switch feature
+git rebase main
+
+# Теперь rerere применит сохранённое решение автоматически!
+# Проверь diff, git add, continue. Гладко.
+```
+
+---
+
+<KnowledgeCheck
+  question="После включения `rerere.enabled = true` коллега жалуется: 'я разрешил конфликт неправильно, потом понял ошибку, исправил руками, закомитил. На следующем rebase Git автоматически применил мой ПЕРВЫЙ (неправильный) вариант. WTF?' Что произошло, и как починить?"
+  answer="Это классический момент 'rerere помнит дольше, чем ты'. Что произошло: при первом конфликте коллега разрешил его неправильно, сделал `git add` и `git rebase --continue` (или коммит для merge). В этот момент rerere записал в `.git/rr-cache/` (а с глобальным включением — фактически в каждом репо локально) пару (preimage конфликта -> твоё разрешение). Потом коллега 'исправил вручную' — но это уже было обычное редактирование файла, **rerere об этом не узнал**, потому что Git не видел нового конфликта в тот момент. На следующем rebase возник тот же конфликт, rerere нашёл preimage в кэше, применил **старое (неправильное) разрешение** автоматически. Как починить: (1) **При активном конфликте**: `git rerere forget <file>` — удалит запись для текущего нерешённого конфликта. Дальше разрешить правильно вручную: `git add && git rebase --continue`. rerere перезапишет правильным разрешением. (2) **Если rebase уже завершился с неправильным решением**: либо `git rerere clear` (удалит ВЕСЬ кэш rerere — потеряешь все накопленные решения, но безопасно), либо `git rerere forget <file>` после следующего такого конфликта. (3) **Для prevent в будущем**: после каждого `rerere applied previous resolution` обязательно делать `git diff` и/или открывать файл глазами, прежде чем `git add`. rerere — не 'fire and forget', это автоматизация, требующая supervision. (4) **Радикальное решение**: `rm -rf .git/rr-cache` — обнулить кэш. Безопасно, просто на следующем конфликте rerere будет учиться заново. Главный урок: rerere помнит решение **по содержимому preimage**, а не по 'правильности'. Если ты однажды разрешил неправильно, и rerere это записал, оно будет применяться раз за разом, пока ты явно не сбросишь."
+/>

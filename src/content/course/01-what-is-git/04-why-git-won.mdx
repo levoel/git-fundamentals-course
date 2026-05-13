@@ -1,0 +1,232 @@
+---
+title: "Почему Git победил Mercurial, Bazaar и остальных"
+description: "Технические преимущества Git и роль GitHub. Скорость, простая модель данных, дешёвые ветки, сетевой эффект GitHub"
+order: 4
+difficulty: "beginner"
+estimatedTime: 14
+topics: ["Git", "Mercurial", "GitHub", "History", "Branching"]
+---
+
+# Почему Git победил Mercurial, Bazaar и остальных
+
+В 2005 году появились три DVCS почти одновременно: Git (April), Mercurial (April) и Bazaar (March). У всех была distributed-модель, у всех были атомарные коммиты, snapshots и поддержка веток. По многим параметрам Mercurial был **технически приятнее** — у него был чище UI, продуманные команды, лучшая документация.
+
+Но к 2020 году Git занял 90%+ рынка. Mercurial удержали для себя Meta и Mozilla (потом и они мигрировали). Bazaar умер около 2017 года. Почему?
+
+В этом уроке разберём, почему именно Git выиграл — не только технически, но и за счёт удачного стечения обстоятельств.
+
+---
+
+## Технические причины победы Git
+
+### 1. Скорость
+
+Linus Torvalds написал Git с одним требованием: «должен работать с Linux kernel» — а это ~50 тысяч файлов, миллионы коммитов, тысячи параллельных веток. На таких репозиториях Mercurial был **в разы медленнее** Git на большинстве операций.
+
+<DiagramContainer title="Бенчмарки: Git vs Mercurial на больших репозиториях" color="indigo">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="git log -100" tooltip="Linux kernel ~1M commits. Git: ~50ms. Mercurial: ~200ms. На kernel разница уже ощутима">~50ms</DataBox>
+      <DataBox label="hg log -100" tooltip="Та же операция в Mercurial">~200ms</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="git branch -a" tooltip="100+ веток. Git: ~10ms (просто читает файлы из .git/refs/). Mercurial: ~100ms — branch model сложнее">~10ms</DataBox>
+      <DataBox label="hg branches" tooltip="Mercurial branches — встроены в commit metadata. Каждый branch list — это запрос истории">~100ms</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="git checkout branch" tooltip="Mercurial требует обновить рабочую копию и пересчитать состояние веток. Git — атомарный switch указателя">~100ms</DataBox>
+      <DataBox label="hg update" tooltip="Существенно медленнее на kernel">~1-3 sec</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Числа примерные, но порядок верный. На маленьких репо разницы нет. На больших — Git выигрывает на порядок.
+
+Почему? Linus оптимизировал каждую операцию под максимальный throughput. Git написан на C, использует mmap для objects, packfiles для эффективного хранения. Mercurial написан на Python+C, медленнее на старте каждой команды. Bazaar — на Python, ещё медленнее.
+
+### 2. Простая модель данных
+
+Это парадокс: пользовательский интерфейс Mercurial был проще, но **внутренняя модель данных Git была проще**.
+
+В Git всего 4 типа объектов: **blob** (содержимое файла), **tree** (содержимое директории), **commit** (snapshot + metadata), **tag** (именованная ссылка). И всё. Любая операция сводится к чтению/созданию этих объектов.
+
+В Mercurial были revlog (специальный формат хранения с дельтами), manifest (аналог tree), changesets (аналог commit), плюс набор внутренних абстракций для веток. Внутренне сложнее.
+
+<DiagramContainer title="Модель данных — Git vs Mercurial" color="purple">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Git: 4 типа объектов" variant="highlight" tooltip="blob, tree, commit, tag. Все хранятся в .git/objects/ через SHA-1. Inspect через git cat-file">Простая</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="blob" tooltip="Содержимое файла. Только содержимое, без имени">blob</DataBox>
+      <DataBox label="tree" tooltip="Список пар (имя, SHA, mode). Аналог директории">tree</DataBox>
+      <DataBox label="commit" tooltip="Snapshot tree + parent SHA + author + message">commit</DataBox>
+      <DataBox label="tag" tooltip="Указатель на commit с метаданными (использует annotated tags)">tag</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Mercurial: revlog + manifest + changeset" variant="warning" tooltip="Сложнее внутренний формат. Дельта-компрессия в revlog, manifest как separate отображение состояния">Сложнее внутри</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Простая модель Git дала несколько преимуществ. Во-первых, легко писать инструменты: GitHub API, плагины для редакторов, hook-системы — всем легко работать с моделью «4 типа объектов». Во-вторых, легко дебажить: `git cat-file -p <SHA>` показывает содержимое любого объекта. Никаких загадочных бинарных форматов. В-третьих, легко учить: каждая команда Git, разобранная на уровне модели, становится понятной.
+
+### 3. Дешёвые ветки
+
+В Git ветка — это **41 байт**: имя файла = имя ветки, содержимое = SHA коммита + newline. Файл лежит в `.git/refs/heads/`. Создание ветки = создание файла. Переключение = смена HEAD = изменение одного файла.
+
+```bash
+cat .git/refs/heads/main
+# d4eb2c1f8a3b9e7c1f2a5b6c8d9e0f1a2b3c4d5e
+# Это всё содержимое ветки main — один SHA
+```
+
+В Mercurial 0.x ветки были встроены в commit metadata — поле `branch` в каждом коммите. Переключение ветки требовало пересчитать состояние, и переименование ветки было невозможно (это часть истории коммита).
+
+Mercurial 2.x добавил **bookmarks** — лёгкий эквивалент Git-веток. Но к тому времени многие команды уже перешли на Git, потому что в Git ветки «just worked» с самого начала.
+
+<DiagramContainer title="Branching workflow — отличается на порядок" color="emerald">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Git" tooltip="git switch -c feature/auth — ветка создалась мгновенно. Можно создавать 50 веток для экспериментов">Создание = миллисекунды</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Mercurial 1.x" variant="warning" tooltip="hg branch feature/auth — создавалась тяжёлая branch. Переименование невозможно. Удаление невозможно">Тяжёлая операция</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Результат" tooltip="В Git-проектах принято делать feature-branch на каждую задачу. В Mercurial-проектах ветки были редкостью, патчи шли в trunk">Разная культура</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Это привело к радикально разной культуре работы. В Git-проектах создаётся ветка на каждую задачу, и feature-branch workflow стал стандартом. В Mercurial-проектах ветки были редкостью, патчи шли через mq (Mercurial Queues) — отдельный набор инструментов.
+
+### 4. Гибкость и низкоуровневость
+
+У Git есть два класса команд:
+
+- **Plumbing** (низкоуровневые): `git hash-object`, `git cat-file`, `git update-ref`, `git read-tree`, etc.
+- **Porcelain** (высокоуровневые): `git add`, `git commit`, `git log`, etc.
+
+Porcelain — это удобный интерфейс над plumbing. Любую сложную задачу можно решить через plumbing. Это давало гигантскую гибкость: например, **GitHub Desktop**, **Sourcetree**, **GitKraken** — все они под капотом просто вызывают plumbing-команды.
+
+Mercurial был более «всё в одном» — без чёткого разделения plumbing/porcelain. Хорошо для UX, но менее гибко для tooling.
+
+---
+
+## Не-технические причины: GitHub
+
+Если бы решало только техническое превосходство, Mercurial вполне мог бы выжить — он действительно был приятнее в обычном использовании. Но в 2008 году появился **GitHub**, и судьба определилась.
+
+### Что было до GitHub
+
+До 2008 года распределение open-source кода выглядело так:
+
+<DiagramContainer title="Open-source distribution до GitHub" color="rose">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Сайт проекта" tooltip="Например, kernel.org для Linux. На каждом проекте свой сайт со своим стилем">Per-project sites</DataBox>
+      <DataBox label="SourceForge" tooltip="Универсальная платформа для хостинга проектов с 1999 года. Поддерживала CVS, SVN, Git">SourceForge</DataBox>
+      <DataBox label="Mailing lists" tooltip="Патчи отправлялись по email в виде git-format-patch файлов. Maintainer применял через git am">Email patches</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Проблема" variant="warning" tooltip="Каждый проект — отдельная экосистема. Контрибьютор должен изучать инфраструктуру каждого проекта. Нет единой identity">Фрагментация</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Чтобы сконтрибьютить, нужно было: создать аккаунт на сайте проекта, разобраться с их workflow, скачать репозиторий, сделать патч, отправить по email maintainer-у, ждать ответа. Если хочется поправить два проекта — повторить процесс дважды.
+
+### Что сделал GitHub
+
+GitHub запустился в апреле 2008 года. Tom Preston-Werner, PJ Hyett, Chris Wanstrath. Три ключевых идеи:
+
+1. **Unified hosting**: один аккаунт, любое количество репозиториев.
+2. **Fork button**: один клик — у вас есть копия проекта, с которой вы можете работать.
+3. **Pull Request UI**: предложить изменения через веб-интерфейс с обсуждением, code review, статусами CI.
+
+<DiagramContainer title="GitHub workflow vs traditional open-source" color="emerald">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Старый workflow" variant="warning" tooltip="Скачать -> патч -> email -> ждать -> опубликоваться">5-10 дней</DataBox>
+      <Arrow direction="right" label="vs" />
+      <DataBox label="GitHub workflow" tooltip="Fork -> branch -> push -> Pull Request -> обсуждение -> merge" variant="highlight">5-10 минут</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Контрибьюция стала тривиальной. К 2012 году GitHub был крупнейшим хостингом open-source в мире, к 2015 — стандартом де-факто. И GitHub поддерживал только Git.
+
+**Это и решило**. Mercurial-проекты на Bitbucket существовали (Bitbucket изначально был Mercurial-only, потом добавил Git). Но Bitbucket был меньше GitHub раз в пять, а network effect (где больше людей — туда хочется идти) работал на GitHub.
+
+В 2020 году Bitbucket выпилил поддержку Mercurial. В 2024 году даже Meta мигрировала. К 2026 году Mercurial — нишевая система для энтузиастов.
+
+---
+
+## Сетевой эффект и культура
+
+GitHub дал не только хостинг, но и **культуру**: README, lic̄енз, contributing guide, issues, milestones, releases. Все эти концепции стали общими для всего open-source. И все они привязаны к Git.
+
+<DiagramContainer title="GitHub стандартизировал open-source культуру" color="indigo">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="README.md" tooltip="Обязательный файл в корне репозитория. Markdown. Описание проекта. До GitHub каждый проект делал по-своему">Standard</DataBox>
+      <DataBox label="LICENSE" tooltip="Файл с лицензией. GitHub предлагает шаблоны: MIT, Apache, GPL. Все на одном языке">Standard</DataBox>
+      <DataBox label="CONTRIBUTING.md" tooltip="Гайд для новых контрибьюторов">Standard</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Issues" tooltip="Treker задач, привязанный к репо. Tags, assignees, milestones — всё в одном UI">Issue tracker</DataBox>
+      <DataBox label="Pull Requests" tooltip="Code review с inline-комментариями. Стало индустриальным стандартом code review">PR review</DataBox>
+      <DataBox label="Actions/CI" tooltip="GitHub Actions с 2019 — встроенный CI. Покроем в модуле 18">CI/CD</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+К 2020 году новички в IT учились контрибьюции прямо на GitHub, не задумываясь о Git как отдельной технологии. Так и было задумано: GitHub — социальная сеть для кода, Git — её движок.
+
+---
+
+## Альтернативы GitHub в 2026
+
+GitHub доминирует, но не один:
+
+- **GitHub** (Microsoft с 2018) — крупнейший, default для open-source, 100M+ пользователей в 2026
+- **GitLab** — основной конкурент, фокус на enterprise, CI/CD из коробки, можно self-host
+- **Bitbucket** (Atlassian) — менее популярен, но интегрирован с Jira
+- **Gitea / Forgejo** — open-source self-hosted альтернативы (русскоязычные проекты часто хостятся здесь после санкций 2022-2024)
+- **Codeberg** — community-driven, на базе Forgejo
+- **Платформы РФ**: GitFlic, GitVerse (от Сбера). Растут для российской аудитории.
+
+Все они работают с Git. Migrate между ними — это `git clone` + `git remote set-url` + `git push`. Знание Git универсально, привязки к хостингу нет.
+
+В команде, где вы будете работать как Junior DE, скорее всего будет GitHub или GitLab. Иногда self-hosted Gitea. Очень редко — что-то экзотическое.
+
+---
+
+## Что это значит для вас
+
+Вы учите **Git** как технологию, **не GitHub** как сервис. Это правильный фокус. Команды `git push`, `git pull`, `git fetch` работают одинаково на любом хостинге. UI Pull Request на GitHub vs GitLab vs Gitea отличается косметически. Логика та же.
+
+Сам Git как технология останется с нами надолго. Mercurial и Bazaar умерли, но идея distributed VCS оказалась настолько правильной, что её альтернатив не появилось (если не считать экзотики типа Pijul или Sapling). В обозримом будущем Git — это VCS-стандарт.
+
+В следующем модуле будем устанавливать Git и настраивать его — и наконец перейдём от истории и теории к практике.
+
+---
+
+## Попробуй сам
+
+Зайдите на GitHub и посмотрите профили популярных DE-проектов:
+
+- https://github.com/apache/airflow — Airflow
+- https://github.com/dbt-labs/dbt-core — dbt
+- https://github.com/getredash/redash — Redash
+- https://github.com/duckdb/duckdb — DuckDB
+
+Посмотрите вкладки: Code, Issues, Pull Requests, Actions. Изучите README одного проекта. Это та экосистема, в которой вы будете работать.
+
+---
+
+<KnowledgeCheck
+  question="Если Mercurial был технически приятнее Git в обычном использовании, почему он проиграл?"
+  answer="Победа Git — это синергия двух факторов. Технически: Git превосходил Mercurial на больших репозиториях (скорость), имел простую модель данных из 4 объектов (легко строить tooling) и сверх-дешёвые ветки (стимулировало feature-branch культуру). Социально: GitHub запустился в 2008 году и поддерживал ТОЛЬКО Git. Сетевой эффект GitHub (где больше людей — туда хочется) сделал Git стандартом open-source. Mercurial-хостинг Bitbucket был в 5 раз меньше, и даже его отключили в 2020. Когда новички учатся через GitHub, они учат Git, и в команды приходят с Git-навыками. Это feedback loop, который Mercurial не смог переломить. В 2024 даже Meta мигрировала с Mercurial. Технически Mercurial умер не от плохого дизайна — он умер от отсутствия GitHub-эквивалента."
+/>

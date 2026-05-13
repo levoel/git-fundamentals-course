@@ -1,0 +1,74 @@
+{
+  "lessonSlug": "02-install-config/02-git-config",
+  "moduleId": "02-install-config",
+  "_meta": {
+    "idPrefix": "git-m02-02",
+    "description": "Quiz for lesson 2.2 — Настройка Git"
+  },
+  "questions": [
+    {
+      "id": "git-m02-02-q1",
+      "type": "multiple-choice",
+      "question": "Где хранится глобальная конфигурация Git (--global)?",
+      "options": [
+        { "id": "a", "text": "В /etc/gitconfig" },
+        { "id": "b", "text": "В ~/.gitconfig (домашняя директория пользователя)" },
+        { "id": "c", "text": "В .git/config внутри каждого репозитория" },
+        { "id": "d", "text": "В системном реестре" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Уровни конфигурации: system -> /etc/gitconfig (для всех пользователей), global -> ~/.gitconfig (для текущего пользователя), local -> <repo>/.git/config (для конкретного репо). Local перебивает global, global перебивает system. Junior настраивает преимущественно --global. Файлы — текстовые в INI-формате, можно редактировать руками.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m02-02-q2",
+      "type": "multiple-choice",
+      "question": "Какая команда устанавливает default-имя ветки 'main' для всех новых репозиториев?",
+      "options": [
+        { "id": "a", "text": "git config --global default.branch main" },
+        { "id": "b", "text": "git config --global init.defaultBranch main" },
+        { "id": "c", "text": "git default-branch main" },
+        { "id": "d", "text": "git branch --default main" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Команда `git config --global init.defaultBranch main` устанавливает имя default-ветки. После этого `git init` будет создавать ветку с именем main вместо master. С 2020 года main — индустриальный стандарт. GitHub, GitLab, Bitbucket используют main по умолчанию для новых репозиториев.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m02-02-q3",
+      "type": "multiple-choice",
+      "question": "Почему для junior рекомендуется `pull.ff = only` вместо стандартного `pull.rebase = false`?",
+      "options": [
+        { "id": "a", "text": "Это быстрее работает" },
+        { "id": "b", "text": "Это безопаснее: при расходящейся истории git pull выдаёт ошибку и просит решить руками — нет автоматических merge commits, которые засоряют историю" },
+        { "id": "c", "text": "Это требует меньше памяти" },
+        { "id": "d", "text": "Это включает шифрование коммитов" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Дефолт `pull.rebase = false` создаёт merge commit при расхождении истории БЕЗ предупреждения. Junior часто не понимают, что произошло, и в истории появляются мусорные merge commits «Merge branch main of github.com:...». `pull.ff = only` останавливается с ошибкой и заставляет осознанно выбрать: rebase или merge. Это «безопасная» настройка для обучающегося.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m02-02-q4",
+      "type": "multiple-choice",
+      "question": "Команда `git config --list --show-origin` выдаст:",
+      "options": [
+        { "id": "a", "text": "Только настройки --global" },
+        { "id": "b", "text": "Все настройки с указанием файла, из которого они взяты (system, global, local)" },
+        { "id": "c", "text": "Историю коммитов" },
+        { "id": "d", "text": "Список remote-репозиториев" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Опция --show-origin показывает, откуда (из какого файла) пришла каждая настройка. Это полезно при дебаге, когда непонятно, почему Git ведёт себя странно: возможно, какая-то local-настройка перекрывает global. Пример вывода: `file:/Users/ivan/.gitconfig    user.name=Ivan Petrov`.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m02-02-q5",
+      "type": "true-false",
+      "question": "Файл ~/.gitconfig — это бинарный файл, его нельзя редактировать руками.",
+      "correctAnswer": false,
+      "explanation": "Категорически нет. ~/.gitconfig — это обычный текстовый файл в INI-формате с секциями вида [user], [pull], [core] и ключами «name = value». Можно открыть в любом текстовом редакторе и менять руками. Команды git config — это просто удобный CLI поверх этого файла. Многие опытные разработчики редактируют ~/.gitconfig в редакторе напрямую.",
+      "bloomLevel": "conceptual"
+    }
+  ]
+}

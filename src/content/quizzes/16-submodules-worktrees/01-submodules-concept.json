@@ -1,0 +1,63 @@
+{
+  "lessonSlug": "16-submodules-worktrees/01-submodules-concept",
+  "moduleId": "16-submodules-worktrees",
+  "_meta": {
+    "idPrefix": "git-m16-01",
+    "description": "Quiz for lesson 01 of module 16 — submodules concept"
+  },
+  "questions": [
+    {
+      "id": "git-m16-01-q1",
+      "type": "multiple-choice",
+      "question": "Что такое Git submodule с точки зрения хранения?",
+      "options": [
+        { "id": "a", "text": "Копия другого репо в твоём" },
+        { "id": "b", "text": "Ссылка на конкретный commit другого репо. В parent tree хранится gitlink — специальный тип объекта с mode 160000, содержащий SHA. Дополнительно в .gitmodules (text file в корне) — метаданные: имя, path, URL. Submodule репо имеет свою историю отдельно — parent просто pin-ит SHA" },
+        { "id": "c", "text": "Симлинк на папку" },
+        { "id": "d", "text": "Архив другого репо" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Submodule mechanics: (1) В parent .gitmodules: text file вида '[submodule \"name\"] path = ..., url = ...'. Это конфигурация, какой submodule по какому пути. (2) В parent tree: gitlink — специальный объект с mode 160000 (в отличие от blob 100644 или tree 040000). Содержит SHA commit-а submodule-репо. Это и есть 'pin'. (3) Submodule сам по себе — отдельный полноценный Git репо со своей историей, ветками, .git/. Parent просто ссылается на конкретный commit (один SHA). При checkout parent Git идёт в submodule-репо и делает там `git checkout <pinned-SHA>`. Это даёт detached HEAD как побочный эффект (потому что checkout по SHA, не по branch). Технические детали: .git внутри submodule directory — gitfile (text file 'gitdir: ../.git/modules/<name>') указывающий на parent's .git/modules/<name>. Это сделано чтобы parent мог управлять submodule (например, удалить одной командой).",
+      "studyHint": "Повторите урок 01 — раздел 'Mental model: submodule — это pinned reference'",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m16-01-q2",
+      "type": "multiple-choice",
+      "question": "Самый частый footgun submodules при clone — что и как избежать?",
+      "options": [
+        { "id": "a", "text": "Submodule не работает после clone" },
+        { "id": "b", "text": "После обычного `git clone parent` submodule директория ПУСТАЯ. Git не клонирует submodules автоматически. Нужно `git submodule update --init --recursive` или сразу `git clone --recurse-submodules <URL>`. Избежать навсегда: `git config --global submodule.recurse true` — теперь все clone/pull/checkout автоматически работают с submodules" },
+        { "id": "c", "text": "Submodule всегда клонируется автоматически" },
+        { "id": "d", "text": "Submodules нужно удалять перед clone" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Главный footgun submodule: после обычного `git clone parent` parent имеет .gitmodules и gitlink в tree, но реальный submodule НЕ скачан. Директория submodule создаётся, но пуста. Если попытаться запустить код — ImportError, потому что submodule файлов нет. Решения: (1) При clone — `git clone --recurse-submodules <URL>` — clone + submodule init + update в одну команду. (2) Если clone уже сделан без флага — `git submodule update --init --recursive`. --init активирует submodule в .git/config, --update клонирует и checkout на pinned SHA, --recursive для submodules внутри submodules. (3) НАВСЕГДА — `git config --global submodule.recurse true`. Эта global setting включает recursive поведение для clone/pull/checkout/merge. После этого 90% submodule болей исчезают — все pull автоматически обновляют submodules, все checkout автоматически переключают. Это рекомендуемый default для разработчика. В команде это нужно документировать в onboarding doc/README.",
+      "studyHint": "Повторите урок 01 — раздел 'Жизненный цикл: clone parent с submodules'",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m16-01-q3",
+      "type": "multiple-choice",
+      "question": "Когда submodule — правильный выбор, а когда — антипатaerns?",
+      "options": [
+        { "id": "a", "text": "Всегда правильный — это стандарт Git" },
+        { "id": "b", "text": "ПРАВИЛЬНО: shared internal library для нескольких проектов с pinned SHA reproducibility, separate ownership teams (platform team owns lib, DE-teams consume). АНТИПАТАЕРН: data репо (используй DVC), tightly coupled компоненты (используй monorepo), library доступная через pip (используй pip install), много submodules в одном parent (overhead больше пользы)" },
+        { "id": "c", "text": "Только для open-source" },
+        { "id": "d", "text": "Всегда antipattern" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Decision matrix submodule: ПОДХОДИТ когда: (1) Shared internal library — общий код для 3-5 проектов внутри организации, не на PyPI. (2) Pinned versions важны — каждый deploy production должен использовать конкретную version utils, surprise updates неприемлемы. (3) Separate ownership — platform team owns shared library с своими release cycle, DE-teams owns свои pipelines, синхронизация через explicit submodule update. (4) Не часто меняется в обе стороны (mostly read). Реальный пример: airflow-dags с shared-utils submodule для S3/Snowflake connectors, dbt-project с shared-macros submodule. НЕ ПОДХОДИТ когда: (1) Data — используй DVC (модуль 14). Submodule на data-репо — двойной antipattern (бинари + submodule complexity). (2) Tightly coupled — API server + client меняются вместе при каждой фиче -> monorepo, atomic PRs. (3) Public package — есть на PyPI/npm -> pip install. Submodule для library, которая уже distributable — overengineering. (4) Много submodule-ов (5+) — coordination overhead начинает превышать пользу. Лучше — внутренний package server (private PyPI) или monorepo. Альтернативы: pip-package, monorepo (Bazel, Pants, Turborepo), git subtree (урок 03), vendoring.",
+      "studyHint": "Повторите урок 01 — раздел 'Когда submodule — правильный выбор'",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m16-01-q4",
+      "type": "true-false",
+      "question": "В parent tree submodule представлен специальным объектом с mode 160000 (gitlink), который хранит SHA commit-а submodule репо. Это не blob и не tree — отдельный тип объекта в Git.",
+      "correctAnswer": true,
+      "explanation": "Точно. Git tree содержит entries с тремя возможными типами: (1) blob (mode 100644 для regular file, 100755 для executable, 120000 для symlink) — содержимое файла; (2) tree (mode 040000) — sub-directory; (3) commit (mode 160000) — submodule gitlink. Mode 160000 — это submodule. Содержит SHA-1 hash коммита другого репо. Можно посмотреть через `git ls-tree HEAD`: `160000 commit 4cac19622fc3ade9c373d54e8e76e85f7466bcab shared-utils`. При checkout Git видит этот gitlink и делает специальную обработку: идёт в .git/modules/<name>, делает там `git checkout <SHA>`, результат отображается в parent's working tree в директории shared-utils/. С точки зрения parent — это указатель. С точки зрения submodule — обычный checkout (с detached HEAD). Это elegant архитектура, которая позволяет один репо ссылаться на другой без копирования файлов. Минусы — на практике submodules создают много небольших complications, что породило альтернативы (subtree, monorepo).",
+      "bloomLevel": "conceptual"
+    }
+  ]
+}

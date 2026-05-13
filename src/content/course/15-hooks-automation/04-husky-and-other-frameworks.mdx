@@ -1,0 +1,520 @@
+---
+title: "husky, lefthook и другие frameworks: что выбирать"
+description: "Сравнение pre-commit (Python), husky (JS), lefthook (Go, polyglot). Performance, ergonomics, когда какой использовать в DE команде"
+order: 4
+difficulty: "intermediate"
+estimatedTime: 20
+topics: ["pre-commit", "husky", "lefthook", "frameworks", "comparison"]
+---
+
+# husky, lefthook и другие frameworks: что выбирать
+
+`pre-commit` framework — самый популярный для Python projects, но это не единственный игрок. JavaScript-сообщество годами использует `husky`. Polyglot teams (несколько языков в одном репо) часто выбирают `lefthook` — Go-биноря с высокой производительностью. У каждого свои сильные и слабые стороны.
+
+В этом уроке: сравнение трёх главных frameworks, кто что выбирает в индустрии, как выглядит config каждого и production гайдлайны выбора для DE-проектов с разной структурой.
+
+---
+
+## Landscape: три главных игрока
+
+<DiagramContainer title="Три главных hook frameworks" color="blue">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="pre-commit.com — Python framework, лидер в Python экосистеме">
+        <DataBox label="pre-commit" className="border-emerald-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>Python, YAML config</div>
+            <div>Изолированные venvs для hooks</div>
+            <div>Огромный community catalog</div>
+            <div>Для: Python projects (DE/ML/Django)</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Husky — JS/Node экосистема, использует package.json">
+        <DataBox label="husky" className="border-amber-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>Node.js, package.json scripts</div>
+            <div>Простой setup для JS/TS проектов</div>
+            <div>Часто с lint-staged</div>
+            <div>Для: Node, React, frontend</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Lefthook — Go бинарь, polyglot, быстрый">
+        <DataBox label="lefthook" className="border-blue-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>Go binary, YAML config</div>
+            <div>Параллельное выполнение by default</div>
+            <div>Polyglot (Python+JS+Go в одном репо)</div>
+            <div>Для: monorepo, multi-language</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Меньше распространённые: `git-hooks-rs` (Rust), `lefthook-rs`, простые shell-скрипты через `core.hooksPath`. Но в production 90% случаев — один из трёх выше.
+
+---
+
+## pre-commit (Python)
+
+Уже разбирали в уроке 02. Краткий повтор для сравнения.
+
+**Config** (`.pre-commit-config.yaml`):
+
+```yaml
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.5.0
+    hooks:
+      - id: ruff
+        args: ['--fix']
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.10.0
+    hooks:
+      - id: mypy
+```
+
+**Setup**:
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+**Сильные стороны**:
+- Огромный каталог community hooks (~thousands)
+- Изолированные виртуальные окружения per hook — не conflict-ит с твоим venv
+- Pinning versions через `rev:` — reproducibility
+- Лучший для Python: каждый Python tool (ruff, mypy, black, isort) имеет официальный pre-commit hook
+
+**Слабые стороны**:
+- Python dependency — на машине должен быть Python
+- Cold start медленнее (создание venvs)
+- YAML config иногда verbose
+- Для не-Python проектов (Node, Go) — не так удобно
+
+---
+
+## Husky (JS/Node)
+
+Husky — стандарт для JavaScript проектов. Особенно популярен в React/Vue/Angular фронтендах.
+
+**Setup**:
+
+```bash
+# В package.json проекте
+npm install --save-dev husky
+
+# Активировать
+npx husky init
+# Создаст .husky/ и в package.json добавит "prepare": "husky"
+
+# Создать pre-commit hook
+echo "npm test" > .husky/pre-commit
+```
+
+**Config**: нет YAML, hooks — это shell скрипты в `.husky/`:
+
+```bash
+# .husky/pre-commit
+#!/usr/bin/env sh
+
+npm run lint
+npm run test
+```
+
+```bash
+# .husky/commit-msg
+#!/usr/bin/env sh
+
+npx --no-install commitlint --edit "$1"
+```
+
+Часто комбинируется с `lint-staged` (запускает линтеры только на staged файлах):
+
+```json
+// package.json
+{
+  "scripts": {
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{js,ts}": ["eslint --fix", "prettier --write"],
+    "*.{json,md,yml}": ["prettier --write"]
+  },
+  "devDependencies": {
+    "husky": "^9.0.0",
+    "lint-staged": "^15.0.0",
+    "eslint": "^9.0.0",
+    "prettier": "^3.0.0"
+  }
+}
+```
+
+```bash
+# .husky/pre-commit
+#!/usr/bin/env sh
+
+npx lint-staged
+```
+
+**Сильные стороны**:
+- Нативный для JS/TS проектов — всё через npm/yarn
+- Лёгкий — нет дополнительного binary
+- Прозрачные scripts — это просто shell в `.husky/`
+- Интеграция с lint-staged — performant (только staged files)
+
+**Слабые стороны**:
+- Не для Python проектов без npm
+- Нет встроенной системы community hooks (как у pre-commit)
+- Нужно вручную писать скрипты для не-JS-tools
+- Зависит от Node.js
+
+**Когда выбирать**: React/Vue фронтенд для data dashboards, monorepo с TypeScript, чисто Node.js services.
+
+---
+
+## Lefthook (Go, polyglot)
+
+Lefthook — Go binary, который особенно силён в polyglot monorepos (Python + JS + Go в одном репо).
+
+**Setup**:
+
+```bash
+# Установка
+brew install lefthook
+# или
+go install github.com/evilmartians/lefthook@latest
+
+# В корне репо
+lefthook install
+```
+
+**Config** (`lefthook.yml`):
+
+```yaml
+pre-commit:
+  parallel: true   # запускать hooks параллельно (BY DEFAULT)
+  commands:
+    ruff:
+      glob: "*.py"
+      run: ruff check --fix {staged_files}
+
+    ruff-format:
+      glob: "*.py"
+      run: ruff format {staged_files}
+
+    eslint:
+      glob: "*.{js,ts}"
+      run: eslint --fix {staged_files}
+
+    prettier:
+      glob: "*.{json,md,yml}"
+      run: prettier --write {staged_files}
+
+    gitleaks:
+      run: gitleaks protect --staged
+
+commit-msg:
+  commands:
+    commitlint:
+      run: npx commitlint --edit {1}
+```
+
+**Сильные стороны**:
+- **Параллельное выполнение по умолчанию** — самый быстрый из трёх
+- Polyglot — Python + JS + Go в одном конфиге без проблем
+- Single binary — никакого Python/Node dependency
+- `{staged_files}` placeholder — родная поддержка только staged
+- Глобальные exclude/include patterns
+
+**Слабые стороны**:
+- Меньший community catalog (нужно знать команды tools)
+- Каждый коллега должен установить lefthook (binary)
+- Для чисто Python projects pre-commit удобнее (готовые hooks)
+
+**Когда выбирать**: monorepo (Python ETL + Node dashboard + Go service), DE-команда с production требованиями к performance, проекты где важна скорость startup-а (CI runs много).
+
+---
+
+## Прямое сравнение
+
+<DiagramContainer title="Сравнительная таблица" color="indigo">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <DataBox label="Critères" className="border-zinc-500/30 w-72">
+        <div className="text-xs space-y-1">
+          <div>Лучше для DE Python</div>
+          <div>Лучше для JS frontend</div>
+          <div>Лучше для polyglot monorepo</div>
+          <div>Performance</div>
+          <div>Community hooks</div>
+          <div>Установка</div>
+        </div>
+      </DataBox>
+      <DataBox label="pre-commit" className="border-emerald-500/30 w-48">
+        <div className="text-xs space-y-1">
+          <div>{'*****'}</div>
+          <div>{'***'}</div>
+          <div>{'***'}</div>
+          <div>{'***'}</div>
+          <div>{'*****'}</div>
+          <div>pip install</div>
+        </div>
+      </DataBox>
+      <DataBox label="husky" className="border-amber-500/30 w-48">
+        <div className="text-xs space-y-1">
+          <div>{'**'}</div>
+          <div>{'*****'}</div>
+          <div>{'***'}</div>
+          <div>{'****'}</div>
+          <div>{'***'}</div>
+          <div>npm install</div>
+        </div>
+      </DataBox>
+      <DataBox label="lefthook" className="border-blue-500/30 w-48">
+        <div className="text-xs space-y-1">
+          <div>{'****'}</div>
+          <div>{'****'}</div>
+          <div>{'*****'}</div>
+          <div>{'*****'}</div>
+          <div>{'***'}</div>
+          <div>binary</div>
+        </div>
+      </DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+---
+
+## Выбор для типичных DE сценариев
+
+### Сценарий 1: Чисто Python ETL проект
+
+```
+my-de-project/
+├── airflow/dags/
+├── etl/
+├── notebooks/
+├── tests/
+├── requirements.txt
+```
+
+**Выбор: pre-commit**. Все tools (ruff, mypy, nbstripout, gitleaks, sqlfluff) имеют официальные pre-commit hooks. Conventional commits через commitlint hook. Community catalog богат для Python.
+
+### Сценарий 2: Monorepo Python + dbt + React dashboard
+
+```
+acme/
+├── airflow/                  (Python DAGs)
+├── dbt-project/              (SQL models + YAML)
+├── dashboard/                 (React + TypeScript)
+├── shared-lib/                (Python pip-package)
+```
+
+**Выбор: lefthook**. Polyglot — нужно прогнать ruff на Python, eslint на JS, sqlfluff на SQL. Lefthook делает это параллельно одним конфигом. pre-commit и husky тоже могут, но менее эргономично.
+
+### Сценарий 3: Маленький data dashboard на React/Streamlit
+
+```
+dashboard/
+├── streamlit_app.py
+├── public/
+├── src/...
+```
+
+**Выбор: husky** (если основной язык JS/TS) или pre-commit (если Python). Зависит от пропорции. Для Streamlit-heavy — pre-commit, для React — husky.
+
+### Сценарий 4: Open-source dbt-package
+
+```
+dbt-utils-acme/
+├── macros/
+├── models/
+├── dbt_project.yml
+├── tests/
+```
+
+**Выбор: pre-commit**. Стандарт в dbt-сообществе. Включить sqlfluff (lint+format SQL), commitlint, gitleaks.
+
+---
+
+## Hybrid setups: можно ли комбинировать?
+
+В polyglot проектах иногда комбинируют. Например, husky + pre-commit:
+
+```
+# .husky/pre-commit
+#!/usr/bin/env sh
+
+# JS hooks через lint-staged
+npx lint-staged
+
+# Python hooks через pre-commit
+pre-commit run --hook-stage manual python-checks
+```
+
+Это рабочая комбинация, но добавляет complexity. Lefthook решает то же одним конфигом, поэтому рекомендую сначала рассмотреть его.
+
+---
+
+## Practical recommendation для Junior DE 2026
+
+1. **Если ваш стек только Python** — `pre-commit`. Стандарт индустрии для DE, огромный catalog, лучшая Python integration.
+
+2. **Если есть и Python и frontend** — `lefthook`. Polyglot, быстрый, один конфиг.
+
+3. **Husky выбирай только если** основная часть проекта на Node/TS, и Python — побочный.
+
+4. **Не пиши свои hooks в `.git/hooks/`** — это antipattern в team workflow.
+
+5. **Что бы ни выбрал — pin versions** (`rev:` в YAML, `version:` в package.json).
+
+6. **Belt + suspenders**: hooks для quick local feedback + CI для guaranteed enforcement.
+
+---
+
+## Migrationные сценарии
+
+### От `.git/hooks/` к pre-commit
+
+```bash
+# 1. Установить framework
+pip install pre-commit
+
+# 2. Создать .pre-commit-config.yaml с эквивалентом твоих текущих hooks
+# (см. урок 02 для примера)
+
+# 3. Активировать
+pre-commit install
+
+# 4. Удалить старые скрипты
+rm .git/hooks/pre-commit
+
+# 5. Commit YAML
+git add .pre-commit-config.yaml
+git commit -m "chore: migrate to pre-commit framework"
+
+# 6. Команде сделать pre-commit install после pull
+```
+
+### От husky к lefthook
+
+```bash
+# 1. Установить lefthook
+brew install lefthook
+
+# 2. Создать lefthook.yml с переводом твоих .husky/* скриптов в команды
+# 3. lefthook install — заменит husky hooks в .git/hooks/
+
+# 4. Удалить husky
+npm uninstall husky
+rm -rf .husky/
+
+# 5. Commit + onboarding обновить
+```
+
+Миграции обычно занимают пол дня + перенастройка CI. Делается раз в годы при revisit-е инфраструктуры.
+
+---
+
+## Setup checklist для нового DE проекта
+
+```
+[ ] Выбрать framework (pre-commit для Python, lefthook для polyglot)
+[ ] Создать config (.pre-commit-config.yaml или lefthook.yml)
+[ ] Добавить базовые hooks:
+    [ ] Format/lint (ruff, eslint, sqlfluff)
+    [ ] Type check (mypy, tsc)
+    [ ] Secrets scan (gitleaks)
+    [ ] Large files block (check-added-large-files)
+    [ ] Notebook outputs strip (nbstripout)
+[ ] commit-msg hook для conventional commits (commitlint)
+[ ] Pin all versions
+[ ] Документация в README по setup
+[ ] Makefile/task с командой setup
+[ ] CI workflow для запуска тех же hooks
+[ ] Branch protection rule "require status checks"
+```
+
+Этот checklist — каноничный setup инфраструктуры для нового DE репо в 2026. Время на полную настройку — 2-3 часа в первый раз, потом копируется между репо.
+
+---
+
+## Hands-on: настроить lefthook
+
+```bash
+# Установить
+brew install lefthook
+# или
+go install github.com/evilmartians/lefthook@latest
+
+# В тестовом репо
+mkdir lefthook-demo && cd lefthook-demo
+git init
+echo "x = 1" > main.py
+pip install ruff
+
+# Lefthook init
+lefthook install
+
+# Создать конфиг
+cat > lefthook.yml <<'EOF'
+pre-commit:
+  parallel: true
+  commands:
+    ruff:
+      glob: "*.py"
+      run: ruff check --fix {staged_files}
+
+    ruff-format:
+      glob: "*.py"
+      run: ruff format {staged_files}
+
+    block-large-files:
+      run: |
+        for f in {staged_files}; do
+          size=$(stat -f %z "$f" 2>/dev/null || stat -c %s "$f")
+          if [ $size -gt 1048576 ]; then
+            echo "File $f exceeds 1MB"
+            exit 1
+          fi
+        done
+EOF
+
+# Commit + test
+git add main.py lefthook.yml
+git commit -m "test"
+
+# Вывод:
+# lefthook v1.x.x  hook: pre-commit
+# ┃  ruff (ok) │
+# ┃  ruff-format (ok) │
+# ┃  block-large-files (ok) │
+# Summary: (done in 0.31 seconds)
+```
+
+Скорость заметна — lefthook параллелит hooks. На больших конфигах разница с pre-commit заметна.
+
+---
+
+## Cross-link
+
+- **Урок 01** — основы git hooks
+- **Урок 02** — pre-commit framework deep dive
+- **Урок 03** — conventional commits через commitlint hook
+- **Модуль 17** — secrets scanning через гитleaks (поверх любого framework)
+- **Модуль 18** — CI/CD; pre-commit/lefthook integration в GitHub Actions
+
+---
+
+<KnowledgeCheck
+  question="Ваша компания имеет monorepo: airflow DAGs (Python), dbt models (SQL+YAML), small React dashboard (TypeScript), и Go-сервис для streaming. Все 4 части в одном репо. Какой framework выбрать и почему именно его?"
+  answer="Lefthook — однозначно. Причины: (1) Polyglot — нужны hooks для 4 разных стеков (Python + SQL + JS/TS + Go). pre-commit имеет лучшие Python hooks, но для Go и TypeScript менее удобно (нужно ставить hooks для каждого). husky хорошо для Node, но Python требует workarounds. Lefthook нативно polyglot через YAML config. (2) Performance — lefthook параллелит hooks by default, что критично для большого монорепо. На 4 стека и десятки файлов разница 'sequential vs parallel' = секунды vs минуты на каждом commit. (3) Один config — `lefthook.yml` с секциями `pre-commit:` для каждого стека: ruff for Python, sqlfluff для SQL, eslint/prettier для TS, gofmt/golangci-lint для Go. (4) Native staged_files placeholder — каждый command получает только relevant файлы (Python инструменты не запускаются на TS файлах). Альтернативы: pre-commit можно использовать с трудом (есть hooks для всех языков, но менее эргономично; в больших монорепо медленнее). husky плохо подходит для не-JS частей (нужно npm scripts для Python tools — antipattern). Setup: `brew install lefthook && lefthook install && commit lefthook.yml`. После этого каждый коллега получает идентичные проверки автоматически (lefthook install создаёт .git/hooks). В CI — `lefthook run pre-commit --all-files` для guaranteed enforcement. Bonus: lefthook.yml поддерживает `tags`/`exclude`, можно делить configs между разработчиками (бекендеры запускают только Python+Go, фронтенды только TS), что для большого монорепо удобно."
+/>

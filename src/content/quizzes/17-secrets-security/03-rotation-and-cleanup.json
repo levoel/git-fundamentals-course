@@ -1,0 +1,73 @@
+{
+  "lessonSlug": "17-secrets-security/03-rotation-and-cleanup",
+  "moduleId": "17-secrets-security",
+  "_meta": {
+    "idPrefix": "git-m17-03"
+  },
+  "questions": [
+    {
+      "id": "git-m17-03-q1",
+      "type": "multiple-choice",
+      "question": "Утечка AWS-ключа в public репо. Какой ПЕРВЫЙ шаг junior должен сделать?",
+      "options": [
+        {"id": "a", "text": "Удалить файл из истории через git filter-repo и сделать force push"},
+        {"id": "b", "text": "Зайти в AWS Console и rotate/revoke leaked ключ — IAM update-access-key --status Inactive"},
+        {"id": "c", "text": "Сделать git revert последнего коммита"},
+        {"id": "d", "text": "Удалить репо с GitHub и создать заново"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Правило: ROTATE FIRST, cleanup later. Боты могут начать использовать ключ за минуты — пока ты чистишь историю, аккаунт уже теряет деньги. Чистка истории не отзывает ключ — он остаётся валидным на стороне AWS. Только rotate (revoke + create new) делает ключ бесполезным для атакующего. Cleanup истории — это косметика и compliance, делается ПОТОМ. Удаление репо тоже не помогает — у атакующего уже есть копия. Revert создаёт новый commit, но старые blobs в истории остаются доступны.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m17-03-q2",
+      "type": "multiple-choice",
+      "question": "Какой инструмент является современным стандартом для переписывания истории Git с целью удаления секретов?",
+      "options": [
+        {"id": "a", "text": "git filter-branch — встроен в Git, не требует установки"},
+        {"id": "b", "text": "git filter-repo — официальная замена filter-branch, быстрее и безопаснее"},
+        {"id": "c", "text": "git rebase -i — позволяет редактировать commits в интерактивном режиме"},
+        {"id": "d", "text": "git rm --cached — удаляет файл из tracking, не из истории"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "git filter-repo (от Elijah Newren) — официально рекомендованная замена git filter-branch с 2018-2020 года. filter-branch deprecated, Git 2.30+ выдаёт warning при попытке использовать. filter-repo: быстрее (Rust ускорения), безопаснее (защита от ошибок типа auto-removal origin remote), более выразительный (regex paths, callbacks). BFG Repo-Cleaner — альтернатива (Java), особенно для больших файлов, но менее гибкий. git rebase не подходит для секретов в старых коммитах. git rm --cached работает с tracking, не с историей.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m17-03-q3",
+      "type": "multiple-choice",
+      "question": "Junior сделал git filter-repo и force push, чтобы удалить секрет из main. Какое поведение коллег ПРАВИЛЬНО для восстановления синхронизации?",
+      "options": [
+        {"id": "a", "text": "git pull — Git автоматически разрешит ситуацию"},
+        {"id": "b", "text": "git pull --rebase — пересажит локальные изменения на новую историю"},
+        {"id": "c", "text": "git fetch origin && git reset --hard origin/main — отказаться от локальной истории в пользу новой remote"},
+        {"id": "d", "text": "git merge origin/main --strategy=theirs — взять всё с remote"}
+      ],
+      "correctAnswer": "c",
+      "explanation": "После filter-repo SHA всех коммитов изменились. Локальная история коллеги (старые SHA) и remote (новые SHA) — несовместимые истории. Обычный git pull сделает merge — это попытается слить две истории, что либо создаст конфликты, либо ВЕРНЁТ секрет обратно в историю. git pull --rebase попытается rebase локальных commits на новый main — может породить много конфликтов. Правильно: git fetch + git reset --hard origin/main — отказаться от локального main, принять новую историю. Если есть локальные uncommitted изменения — git stash перед reset. Все локальные feature ветки тоже нужно пере-branch на новый main.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m17-03-q4",
+      "type": "true-false",
+      "question": "Если запушенный секрет был отозван (rotated) в провайдере, history cleanup необязателен — секрет уже невалиден и атакующему бесполезен. Можно жить с 'historical secret' в репо.",
+      "correctAnswer": true,
+      "explanation": "Это реалистичный подход в 2026: rotate отменяет валидность ключа на стороне сервиса, бот его уже не использует. История репо хранит невалидный ключ — это audit trail, не security risk. Многие команды НЕ делают cleanup потому что: (1) cleanup ломает workflow всей команды на день; (2) open PR-ы сломаются; (3) forks/clone уже у людей — full cleanup невозможен. Cleanup обоснован: compliance требования (PCI-DSS, HIPAA), очень крупный secret (root credentials), reputation issue для public репо. Иначе — focus на rotate + prevention.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m17-03-q5",
+      "type": "multiple-choice",
+      "question": "Junior хочет сделать force push после filter-repo. Какой флаг должен использовать вместо --force и почему?",
+      "options": [
+        {"id": "a", "text": "--force-with-lease — отказывает в push, если remote-ref изменился с момента последнего fetch (защита от перезаписи чужого push)"},
+        {"id": "b", "text": "--force-strict — Git проверяет, что все checks пройдены"},
+        {"id": "c", "text": "--no-force — Git выполнит обычный push"},
+        {"id": "d", "text": "--force-quiet — push без сообщений в output"}
+      ],
+      "correctAnswer": "a",
+      "explanation": "--force-with-lease — safe force push. Перед перезаписью Git проверяет, что remote ref совпадает с тем, что ты последний раз fetch-ил. Если кто-то pushed что-то в эту ветку (например, другой инженер тоже работал) — push отказывается, защищая от потери чужой работы. Это важно для shared branches. --force без with-lease — слепое overwrite. Для force push после filter-repo на main — обычно нужен явный --force (так как все SHA изменились, with-lease может не сработать). Но для feature branches с PR — всегда --force-with-lease. --force-strict, --no-force, --force-quiet — не существующие/неподходящие флаги.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

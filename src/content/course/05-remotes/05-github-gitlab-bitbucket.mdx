@@ -1,0 +1,312 @@
+---
+title: "GitHub, GitLab, Bitbucket и self-hosted альтернативы"
+description: "Обзор хостингов Git: что общего, чем отличаются, что используют в data-инженерии"
+order: 5
+difficulty: "beginner"
+estimatedTime: 18
+topics: ["GitHub", "GitLab", "Bitbucket", "Gitea", "Forgejo"]
+---
+
+# GitHub, GitLab, Bitbucket и self-hosted альтернативы
+
+Сам Git — это локальная утилита и протокол. Чтобы команда могла работать вместе, нужен **хостинг** Git-репозиториев. Это сервис, который держит "официальную копию" кода, предоставляет UI для review, issue-трекер, CI, права доступа.
+
+В 2026 году рынок поделён между несколькими игроками: GitHub доминирует (особенно в open-source), GitLab силён в self-hosted и в больших корпорациях, Bitbucket живёт в Atlassian-экосистеме, плюс набирающие популярность open-source альтернативы Gitea/Forgejo. В этом уроке мы разбираемся, что общего у всех, чем они отличаются, и что встречает junior Data Engineer в реальности.
+
+---
+
+## Что общего
+
+Несмотря на различия в UI и фичах, все эти платформы делают одно и то же:
+
+<DiagramContainer title="Что предоставляет любой Git-хостинг" color="blue">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Git-репозиторий на сервере (bare repo) с поддержкой SSH/HTTPS">
+        <DataBox label="Git hosting" className="border-blue-500/30 w-44">
+          <div className="text-xs">push / pull / clone</div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="UI для просмотра кода, истории, веток">
+        <DataBox label="Web UI" className="border-blue-500/30 w-44">
+          <div className="text-xs">browse, history, diff</div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Code review через PR/MR">
+        <DataBox label="PR / MR" className="border-blue-500/30 w-44">
+          <div className="text-xs">review, approve, merge</div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Багтрекер / задачи, дискуссии">
+        <DataBox label="Issues" className="border-green-500/30 w-44">
+          <div className="text-xs">bug tracking, tasks</div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Continuous Integration: запуск тестов на push/PR">
+        <DataBox label="CI/CD" className="border-green-500/30 w-44">
+          <div className="text-xs">Actions / Pipelines</div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Защита веток: required reviews, status checks">
+        <DataBox label="Branch protection" className="border-green-500/30 w-44">
+          <div className="text-xs">rules, approvals</div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Базовая модель совпадает:
+
+- **Repositories** — контейнеры для кода.
+- **Branches** — параллельные линии разработки.
+- **Pull Request (GitHub, Bitbucket) / Merge Request (GitLab)** — предложение влить ветку в другую через code review.
+- **Issues / Tasks** — задачи и баги.
+- **CI/CD** — автоматизация тестов, билдов, deploy.
+- **Branch protection** — правила: например, "в `main` можно только через PR с двумя апрувами".
+
+Это означает: **если ты освоил GitHub, переход на GitLab или Bitbucket — это вопрос пары часов**, чтобы понять "где у них кнопка". Концепции те же.
+
+---
+
+## GitHub: де-факто стандарт
+
+GitHub — самый большой хостинг в мире. Принадлежит Microsoft с 2018 года. Доминирует:
+
+- В open-source (миллионы публичных репо).
+- В стартапах и продуктовых компаниях.
+- В data-инженерии: Airflow, Spark, dbt, Kafka — всё на GitHub.
+
+**Сильные стороны:**
+
+- Самое большое community, огромная sample size touched codebases.
+- **GitHub Actions** — нативная CI/CD, бесплатно для public репо, частые свежие features.
+- **Copilot** — встроенный AI assistant.
+- **GitHub Codespaces** — облачный dev environment.
+- Огромный ecosystem интеграций (Slack, Linear, PagerDuty, что угодно).
+
+**Слабые стороны:**
+
+- Self-hosted версия (**GitHub Enterprise Server**) есть, но дорогая и не такая фичастая, как cloud.
+- Cloud — централизованный, всё в AWS US. Для российских/китайских компаний с compliance это проблема.
+
+**Cost model для команд:**
+
+- Public repo: бесплатно безлимитно.
+- Private repo: бесплатно до 3 collaborators, дальше — $4-21/user/month.
+
+В data-инженерии **подавляющее большинство open-source DE-инструментов хостятся на GitHub** — Airflow, dbt, Spark, Flink, Kafka, Delta Lake, Iceberg. Если будешь контрибьютить — будешь работать с GitHub PR flow.
+
+---
+
+## GitLab: self-hosted-первый
+
+GitLab — главный конкурент GitHub. Изначально был **self-hosted**, а cloud-версия (gitlab.com) появилась позже. Это до сих пор отражается в DNA продукта.
+
+**Сильные стороны:**
+
+- **Бесплатная Community Edition** (CE) — можно поднять на своём сервере. Часто корпорации с compliance / data residency используют именно self-hosted GitLab.
+- **GitLab CI** — мощный, гибкий, описывается одним `.gitlab-ci.yml` файлом. Многие считают его сильнее GitHub Actions для сложных pipelines.
+- **Embedded DevOps** — issue tracker, CI, container registry, package registry, security scanning, monitoring — всё в одном продукте.
+- Merge Request (MR) интерфейс часто хвалят за детальность.
+
+**Слабые стороны:**
+
+- Community меньше, чем у GitHub. Меньше public репо.
+- UI сложнее — много features, требует время освоить.
+- Перформанс self-hosted на больших установках требует tuning.
+
+**Cost model:**
+
+- Self-hosted CE: бесплатно (open-source AGPL).
+- Cloud gitlab.com Free: до 5 пользователей в private проект.
+- Premium / Ultimate: $29-99/user/month — features типа advanced security, value stream analytics.
+
+В data-инженерии GitLab встречается:
+
+- В банках, телекомах, госкорпорациях — где compliance требует "наш код на нашем сервере".
+- В российских корпорациях после 2022 — массовый исход с GitHub в self-hosted GitLab.
+- В организациях, где DevOps platform = GitLab (один продукт на всё).
+
+<Callout type="tip">
+Если устраиваешься в банк / телеком в 2026 — с высокой вероятностью будешь работать в self-hosted GitLab. UI отличается, но концепции те же.
+</Callout>
+
+---
+
+## Bitbucket: для Atlassian-стека
+
+Bitbucket — Git-хостинг от Atlassian. Тесно интегрирован с Jira и Confluence. Существует в двух формах:
+
+- **Bitbucket Cloud** — облачная версия.
+- **Bitbucket Data Center** (бывший Bitbucket Server) — self-hosted.
+
+**Сильные стороны:**
+
+- **Глубокая интеграция с Jira** — комментарий в PR с `PROJ-123` автоматически связывается с тикетом. Mature.
+- **Bitbucket Pipelines** — встроенная CI/CD, простая в настройке.
+- Естественный выбор, если компания живёт на Atlassian-стеке.
+
+**Слабые стороны:**
+
+- Community и ecosystem заметно меньше, чем у GitHub/GitLab.
+- В open-source практически не используется.
+- В 2020 Bitbucket Cloud прекратил поддержку Mercurial — обиделась куча пользователей.
+- Atlassian с 2024 переориентировал Bitbucket на enterprise клиентов; для small teams варианты сужаются.
+
+В data-инженерии встречается:
+
+- В корпорациях с долгой историей Atlassian — банки, страховые, телекомы.
+- Куда меньше распространён в DE, чем GitHub/GitLab.
+
+---
+
+## Self-hosted open-source: Gitea, Forgejo
+
+С ростом цен на коммерческие хостинги и опасений по data sovereignty всё популярнее **open-source self-hosted решения**:
+
+### Gitea
+
+- Лёгкий Git-хостинг, написан на Go.
+- Похож на ранний GitHub в UI.
+- Одиночный binary — можно поднять на VPS за 5 минут.
+- Хорошо подходит для personal / small team.
+
+### Forgejo
+
+- **Hard fork Gitea** с октября 2022 (после того, как Gitea Ltd. стала коммерческой компанией).
+- Поддерживается Codeberg e.V. (некоммерческая организация).
+- Те же features, но гарантированно open-source forever (Apache 2.0 + community governance).
+- Активно развивается. В 2025-2026 многие переходят с Gitea на Forgejo.
+
+В data-инженерии встречается:
+
+- В стартапах с фокусом на cost optimization (вместо GitHub Enterprise за десятки тысяч в месяц).
+- В академии, исследовательских лабораториях.
+- У individual contributors, которые хотят свой сервер.
+
+<Callout type="note">
+Если в твоей будущей компании используют Gitea/Forgejo — не пугайся. UI похож на GitHub, рабочие потоки идентичны: branch -> PR -> review -> merge.
+</Callout>
+
+---
+
+## Pull Request vs Merge Request: одно и то же
+
+Терминология иногда путает джунов. На самом деле это синонимы:
+
+| Платформа | Термин |
+|-----------|--------|
+| GitHub | Pull Request (PR) |
+| Bitbucket | Pull Request (PR) |
+| Gitea / Forgejo | Pull Request (PR) |
+| GitLab | Merge Request (MR) |
+
+**Почему разные имена?** GitHub назвал PR потому, что ты "просишь принять (pull) твои изменения". GitLab выбрал MR — "просишь смерджить твою ветку". Семантически одно и то же.
+
+Workflow тоже идентичен:
+
+<DiagramContainer title="PR/MR lifecycle на любой платформе" color="purple">
+  <FlowColumn className="p-4 gap-3">
+    <Tooltip content="1. Создал ветку feature/x от main">
+      <FlowNode variant="input">1. branch</FlowNode>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="2. Запушил ветку в свой fork или прямо в репо">
+      <FlowNode variant="default">2. push</FlowNode>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="3. Открыл PR/MR через UI: from feature/x to main">
+      <FlowNode variant="default">3. open PR / MR</FlowNode>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="4. CI запустил тесты, ревьюер посмотрел код">
+      <FlowNode variant="default">4. CI + review</FlowNode>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="5. После approve и зелёных тестов — merge">
+      <FlowNode variant="output">5. merge</FlowNode>
+    </Tooltip>
+  </FlowColumn>
+</DiagramContainer>
+
+---
+
+## Branch protection: общая фича
+
+На всех платформах есть **защита веток** — правила, без которых merge невозможен. Типичные правила для `main`:
+
+- Required reviews — минимум N апрувов от коллег.
+- Required status checks — все CI checks должны быть зелёными.
+- Restrict pushes — никаких прямых пушей, только через PR.
+- Prevent force push — нельзя `--force` в `main`.
+- Require linear history — нельзя merge commits, только rebase or squash.
+
+Terminology чуть разная (на GitHub это **Branch Rulesets** с 2023+, на GitLab — **Protected Branches**, на Bitbucket — **Branch Permissions**), но идея одна.
+
+<Callout type="warning">
+Если в проекте branch protection строгий, и ты не понимаешь, почему `git push` не работает в `main` — это не баг. Это feature: команда хочет, чтобы всё шло через PR. Создай ветку, пуш её, открой PR.
+</Callout>
+
+---
+
+## Что встречает junior Data Engineer в реальности
+
+Статистика по российскому/русскоязычному DE-рынку 2026 (приблизительно):
+
+- **GitHub / GitHub Enterprise Cloud** — 35-45%. Стартапы, продуктовые компании, любители open-source.
+- **GitLab self-hosted** — 35-45%. Банки, телекомы, госкорпорации, крупный enterprise. После 2022 года доля выросла.
+- **Bitbucket** — 10-15%. Компании с Atlassian-стеком, legacy установки.
+- **Forgejo / Gitea / другие** — 5%. Стартапы с cost focus, индивидуальные команды.
+
+Если ты осваиваешь GitHub — на остальных платформах разберёшься за один день. Концепции, команды Git, PR flow — везде одинаковые.
+
+---
+
+## CI/CD различия (короткий обзор)
+
+| Платформа | CI/CD продукт | Config файл |
+|-----------|----------------|-------------|
+| GitHub | GitHub Actions | `.github/workflows/*.yml` |
+| GitLab | GitLab CI | `.gitlab-ci.yml` |
+| Bitbucket | Bitbucket Pipelines | `bitbucket-pipelines.yml` |
+| Gitea / Forgejo | Forgejo Actions (Gitea Actions) | `.forgejo/workflows/*.yml` |
+
+Forgejo Actions совместима с GitHub Actions syntax — можно почти точь-в-точь переносить workflows.
+
+В модуле 18 курса мы детально разбираем GitHub Actions для DE: запуск dbt тестов, deploy DAG-ов в Airflow, проверка SQL стиля.
+
+---
+
+## Попробуй сам
+
+Зарегистрируй аккаунты на нескольких платформах (все бесплатны для public репо):
+
+```bash
+# 1. GitHub аккаунт у тебя уже должен быть
+# 2. Регистрация на GitLab
+# https://gitlab.com/users/sign_up
+
+# 3. Регистрация на Codeberg (Forgejo)
+# https://codeberg.org/user/sign_up
+
+# 4. Создай один и тот же тестовый репо на каждой
+# 5. Создай SSH ключ (если ещё нет) и добавь на все три
+# 6. Склонируй каждый и посмотри URL
+git clone git@github.com:your-name/test.git
+git clone git@gitlab.com:your-name/test.git
+git clone git@codeberg.org:your-name/test.git
+
+# 7. Сравни UI: branches, issues, settings
+```
+
+После этого упражнения у тебя в голове сложится: "О, везде одно и то же, просто разная упаковка".
+
+---
+
+<KnowledgeCheck
+  question="Тебя приняли на стажировку в банк. В первый день говорят: 'весь код у нас в self-hosted GitLab, через VPN, по адресу git.bank.internal'. Что отличается от твоего опыта с GitHub, и что — нет?"
+  answer="Что НЕ отличается (90% работы): концепция веток, коммитов, history; команды `git clone/fetch/pull/push` идентичны; merge request на GitLab — это то же, что pull request на GitHub (review, approve, merge); branch protection правила работают так же; SSH ключи и HTTPS+токены — те же концепции (на GitLab токены называются Personal Access Tokens или Project/Group Access Tokens). Что отличается: (1) URL имеет вид `git@git.bank.internal:team/project.git` или `https://git.bank.internal/team/project.git`; (2) доступ только через VPN — нужно подключиться к корпоративной сети сначала; (3) CI описывается в `.gitlab-ci.yml` (а не `.github/workflows/*.yml`); (4) UI: вкладки Issues, Merge Requests, CI/CD, Wiki выглядят чуть иначе, иерархия Group -> Subgroup -> Project (GitHub использует Organization -> Repository); (5) поиск, права доступа, права на проектах группы — у GitLab более развитая модель Groups/Subgroups. Учиться заново не нужно — это adjustment в 1-2 дня. Концепции Git, на которых ты в курсе фокусируешься, переносятся 1:1."
+/>

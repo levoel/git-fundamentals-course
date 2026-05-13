@@ -1,0 +1,346 @@
+---
+title: "SSH-ключи: ed25519 вместо RSA"
+description: "Зачем нужны SSH-ключи для Git, генерация ed25519, ssh-agent, ~/.ssh/config, добавление в GitHub/GitLab, проверка через ssh -T"
+order: 3
+difficulty: "beginner"
+estimatedTime: 18
+topics: ["Git", "SSH", "ed25519", "ssh-agent", "GitHub"]
+---
+
+# SSH-ключи: ed25519 вместо RSA
+
+При работе с GitHub, GitLab или любым другим хостингом Git вам нужна аутентификация. Когда вы делаете `git push`, сервер должен знать «это действительно Иван Петров, а не злоумышленник». Способов два: HTTPS с паролем (или токеном) и SSH с ключом. Этот урок — про второй. SSH удобнее: настроили один раз, и всё работает без ввода пароля.
+
+После урока у вас будет: сгенерированный SSH-ключ ed25519 (современный стандарт), он добавлен в ssh-agent и в GitHub-аккаунт, и команда `git push` работает без ввода паролей.
+
+---
+
+## Зачем SSH-ключи
+
+Когда вы делаете `git clone git@github.com:user/repo.git`, протокол SSH. Когда `git clone https://github.com/user/repo.git`, протокол HTTPS. С точки зрения Git операции одинаковые. Отличие в аутентификации.
+
+<DiagramContainer title="HTTPS vs SSH для Git" color="indigo">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="HTTPS" tooltip="git clone https://github.com/... При каждом push требует токен (как пароль). GitHub удалил password-auth в 2021 — теперь только Personal Access Token. Токены истекают">https://...</DataBox>
+      <Arrow direction="right" label="каждый push" />
+      <DataBox label="Запрос токена" tooltip="Менеджер паролей кеширует, но изначально требует ввести. Токен можно случайно слить" variant="warning">Token каждый push</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="SSH" variant="highlight" tooltip="git clone git@github.com:... Аутентификация через приватный ключ на вашей машине. Один раз настроили — работает молча">git@github.com:...</DataBox>
+      <Arrow direction="right" label="каждый push" />
+      <DataBox label="Без запроса" tooltip="Если ssh-agent кеширует ключ — push проходит молча. Это безопаснее и удобнее">Тихо</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+SSH удобнее. Один раз настроили — и все операции с GitHub проходят без ввода паролей. Безопаснее, потому что приватный ключ никогда не покидает вашу машину.
+
+---
+
+## Что такое SSH-ключ
+
+SSH использует **асимметричную криптографию**. У вас два файла:
+
+- **Приватный ключ** — большое число, хранится у вас на машине, никогда никому не показывается
+- **Публичный ключ** — производный от приватного, можно делиться, отдаётся серверу
+
+Когда вы подключаетесь по SSH, сервер посылает вам случайный challenge. Вы подписываете его приватным ключом. Сервер проверяет подпись публичным. Если подпись валидна — это вы.
+
+<DiagramContainer title="Как работает SSH-аутентификация" color="emerald">
+  <SequenceDiagram>
+    <SequenceLifeline actor="Client" tooltip="Ваш ноутбук с приватным ключом в ~/.ssh/id_ed25519" />
+    <SequenceLifeline actor="Server" tooltip="GitHub, GitLab или любой SSH-сервер. У него ваш публичный ключ" />
+
+    <SequenceMessage from="Client" to="Server" tooltip="git clone git@github.com:user/repo.git. SSH-handshake начинается">SSH connect</SequenceMessage>
+    <SequenceMessage from="Server" to="Client" tooltip="Сервер генерирует случайные данные и отправляет их">Challenge (random)</SequenceMessage>
+    <SequenceMessage from="Client" to="Server" tooltip="Клиент подписывает challenge приватным ключом. Подпись — это математическая функция от challenge и приватного ключа">Signed challenge</SequenceMessage>
+    <SequenceMessage from="Server" to="Client" tooltip="Сервер проверяет подпись публичным ключом. Если валидна — пропускает. Если нет — disconnect">OK / reject</SequenceMessage>
+  </SequenceDiagram>
+</DiagramContainer>
+
+Гениальность: ваш приватный ключ никогда не передаётся по сети. Только подписи. Перехватить трафик и притвориться вами невозможно (без приватного ключа подпись не сделать).
+
+---
+
+## ed25519 vs RSA: какой алгоритм
+
+Раньше стандартом был **RSA 2048** (потом 4096). Современный стандарт — **ed25519** (Edwards-curve, эллиптическая криптография). В чём разница:
+
+<DiagramContainer title="ed25519 vs RSA — сравнение" color="purple">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="ed25519" variant="highlight" tooltip="Современный алгоритм на эллиптических кривых. Стандарт с 2014 года. Поддерживается GitHub, GitLab, всеми основными SSH-серверами">Рекомендуется</DataBox>
+      <DataBox label="Размер ключа" tooltip="~256 бит. Приватный ключ — короткий, помещается в одну строку. Удобно копировать и хранить">~256 bits</DataBox>
+      <DataBox label="Безопасность" tooltip="Эквивалент RSA-3000+. Защищён от атак, известных в 2026">Высокая</DataBox>
+      <DataBox label="Скорость" tooltip="Подпись/верификация в 5-10 раз быстрее RSA-4096">Быстрый</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="RSA 4096" tooltip="Старый стандарт. Всё ещё работает, всё ещё поддерживается, но устаревает" variant="warning">Legacy</DataBox>
+      <DataBox label="Размер ключа" tooltip="4096 бит. Приватный ключ — длинный многострочный файл">~4096 bits</DataBox>
+      <DataBox label="Безопасность" tooltip="Безопасен, но если квантовые компьютеры станут практичны через 10-20 лет — RSA первый под удар">Средняя</DataBox>
+      <DataBox label="Скорость" tooltip="Медленнее ed25519. На каждый git push разница незаметна, но в массовых операциях ощутима">Медленнее</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+**Что выбрать в 2026 году?** Однозначно **ed25519**. Никаких причин использовать RSA, если у вас не легаси-сервер на старом OpenSSH < 6.5 (2014 год — таких уже нет). GitHub, GitLab, Bitbucket — все поддерживают ed25519 с 2017-2018 годов.
+
+---
+
+## Генерация ключа
+
+Команда:
+
+```bash
+ssh-keygen -t ed25519 -C "ivan.petrov@example.com"
+```
+
+Разбор:
+
+- `-t ed25519` — тип ключа
+- `-C "ivan.petrov@example.com"` — комментарий (обычно email), помогает идентифицировать ключ, особенно если у вас несколько
+
+Программа задаст три вопроса:
+
+```text
+Enter file in which to save the key (/Users/ivan/.ssh/id_ed25519): [Enter]
+Enter passphrase (empty for no passphrase): [пароль или Enter для пустого]
+Enter same passphrase again: [пароль ещё раз]
+```
+
+<Callout type="warning">
+Пустой passphrase — удобно (не вводить при каждом подключении), но менее безопасно. Если ваш ноутбук украдут — у вора будет доступ к вашему GitHub. Passphrase — это второй фактор. На macOS и Linux passphrase легко кешируется через ssh-agent + Keychain, поэтому реально вводите редко. Рекомендую ставить.
+</Callout>
+
+После выполнения у вас в `~/.ssh/` появится два файла:
+
+```bash
+ls -la ~/.ssh/
+# id_ed25519       — приватный ключ (НИКОМУ не показывайте)
+# id_ed25519.pub   — публичный ключ (можно делиться)
+```
+
+Содержимое публичного ключа:
+
+```bash
+cat ~/.ssh/id_ed25519.pub
+# ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGxV6...   ivan.petrov@example.com
+```
+
+Одна строка. Это и есть то, что вы дадите GitHub.
+
+---
+
+## Добавление в ssh-agent
+
+ssh-agent — фоновый процесс, который держит расшифрованный приватный ключ в памяти, чтобы не вводить passphrase при каждом подключении.
+
+### macOS
+
+```bash
+# Запустить ssh-agent (обычно уже запущен)
+eval "$(ssh-agent -s)"
+
+# Добавить ключ с автоматическим запоминанием passphrase в Keychain
+ssh-add --apple-use-keychain ~/.ssh/id_ed25519
+```
+
+Для постоянного эффекта добавьте в `~/.ssh/config`:
+
+```text
+Host *
+  AddKeysToAgent yes
+  UseKeychain yes
+  IdentityFile ~/.ssh/id_ed25519
+```
+
+После этого passphrase будет запрошен один раз при первом использовании, дальше macOS Keychain хранит его.
+
+### Linux
+
+```bash
+eval "$(ssh-agent -s)"
+ssh-add ~/.ssh/id_ed25519
+```
+
+ssh-agent держит ключ до выхода из сессии. Для постоянности используйте `keychain` (утилита, не путать с macOS Keychain) или настройте автозапуск agent в `.bashrc` / `.zshrc`.
+
+### WSL2 / Windows
+
+Если в WSL2 — работает как Linux. Если используете Git for Windows — там встроенный OpenSSH:
+
+```powershell
+# В PowerShell
+Start-Service ssh-agent
+ssh-add C:\Users\Name\.ssh\id_ed25519
+```
+
+---
+
+## Добавление публичного ключа в GitHub
+
+1. Скопируйте содержимое `id_ed25519.pub` в буфер:
+
+```bash
+# macOS
+pbcopy < ~/.ssh/id_ed25519.pub
+
+# Linux (нужен xclip или wl-copy)
+xclip -selection clipboard < ~/.ssh/id_ed25519.pub
+
+# Просто посмотреть и скопировать руками
+cat ~/.ssh/id_ed25519.pub
+```
+
+2. На GitHub: Settings -> SSH and GPG keys -> New SSH key
+3. Title: что-нибудь узнаваемое, например «MacBook Pro M3 2025»
+4. Key type: Authentication Key
+5. Key: вставьте содержимое
+6. Add SSH key (потребует подтверждения паролем)
+
+На GitLab аналогично: Preferences -> SSH Keys -> Add new key.
+
+---
+
+## Проверка подключения
+
+```bash
+ssh -T git@github.com
+```
+
+При первом подключении SSH попросит подтвердить fingerprint GitHub-сервера:
+
+```text
+The authenticity of host 'github.com (140.82.121.3)' can't be established.
+ED25519 key fingerprint is SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU.
+Are you sure you want to continue connecting (yes/no/[fingerprint])?
+```
+
+Этот fingerprint — публично известный отпечаток ключа GitHub-серверов. Сверьтесь с https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints — там список актуальных. На май 2026:
+
+- ED25519: `SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU`
+- RSA: `SHA256:uNiVztksCsDhcc0u9e8BujQXVUpKZIDTMczCvj3tD2s`
+
+Если совпадает — `yes`, Enter. Дальше:
+
+```text
+Hi ivan-petrov! You've successfully authenticated, but GitHub does not provide shell access.
+```
+
+Это и есть «всё работает». Вы успешно аутентифицировались. Команда `git push` теперь будет работать молча.
+
+<Callout type="tip">
+Сообщение «GitHub does not provide shell access» — это нормально. SSH-протокол по умолчанию открывает shell, но GitHub не пускает в shell — он только обрабатывает Git-команды. Вы аутентифицировались, на этом успех.
+</Callout>
+
+---
+
+## ~/.ssh/config — настройка множественных хостов
+
+Если у вас несколько GitHub-аккаунтов (личный и рабочий), или вы работаете и с GitHub, и с GitLab — `~/.ssh/config` облегчает жизнь.
+
+```text
+# ~/.ssh/config
+
+# Личный GitHub
+Host github.com
+  HostName github.com
+  User git
+  IdentityFile ~/.ssh/id_ed25519_personal
+  AddKeysToAgent yes
+  UseKeychain yes
+
+# Рабочий GitHub (используем алиас github-work)
+Host github-work
+  HostName github.com
+  User git
+  IdentityFile ~/.ssh/id_ed25519_work
+  AddKeysToAgent yes
+  UseKeychain yes
+
+# Корпоративный GitLab
+Host gitlab.bigcorp.com
+  HostName gitlab.bigcorp.com
+  User git
+  Port 22
+  IdentityFile ~/.ssh/id_ed25519_work
+```
+
+Использование:
+
+```bash
+# Личный
+git clone git@github.com:ivan-personal/repo.git
+
+# Рабочий — используем алиас github-work
+git clone git@github-work:bigcorp/internal-repo.git
+```
+
+Удобно для людей с несколькими работами / контрактами / open-source.
+
+---
+
+## Если что-то пошло не так
+
+### `Permission denied (publickey)`
+
+Самая частая ошибка. Возможные причины:
+
+1. **Публичный ключ не добавлен на GitHub.** Проверьте Settings -> SSH and GPG keys.
+2. **Используется не тот ключ.** Проверьте: `ssh-add -l` показывает текущие ключи в агенте.
+3. **Файл ключа имеет неправильные права.**
+
+Права должны быть строго:
+
+```bash
+chmod 700 ~/.ssh
+chmod 600 ~/.ssh/id_ed25519
+chmod 644 ~/.ssh/id_ed25519.pub
+chmod 644 ~/.ssh/config
+```
+
+SSH откажется использовать ключ, если права слишком открыты (например, 644 на приватный ключ). Это защита от того, что другой пользователь на машине прочитает ваш ключ.
+
+### Debug подключения
+
+Если непонятно, что не так:
+
+```bash
+ssh -vT git@github.com
+```
+
+Флаг `-v` (verbose) показывает каждый шаг handshake. Можно увидеть, какой ключ Git пытается использовать, что говорит сервер.
+
+---
+
+## Попробуй сам
+
+1. Сгенерируйте ed25519-ключ (если ещё не сделали):
+
+```bash
+ssh-keygen -t ed25519 -C "ваш-email@example.com"
+```
+
+2. Посмотрите публичный ключ:
+
+```bash
+cat ~/.ssh/id_ed25519.pub
+```
+
+3. Добавьте на GitHub (Settings -> SSH and GPG keys -> New SSH key).
+
+4. Проверьте подключение:
+
+```bash
+ssh -T git@github.com
+```
+
+5. Если получилось «Hi username!» — поздравляю, SSH работает. В следующих модулях будем клонировать репозитории через SSH.
+
+---
+
+<KnowledgeCheck
+  question="Почему публичный ключ можно безопасно показывать (выкладывать на GitHub, отправлять по email), а приватный — категорически нельзя?"
+  answer="Это математическое свойство асимметричной криптографии. Публичный ключ можно вывести из приватного (это часть его определения), но обратное — нет. По публичному ключу нельзя восстановить приватный за разумное время (для ed25519 — оценочно миллиарды лет с современными компьютерами). Публичный ключ нужен серверу, чтобы проверить вашу подпись, но не нужен для её создания. Приватный ключ нужен ВАМ для создания подписи. Если приватный ключ утечёт — любой может притвориться вами, подписывая запросы. Поэтому: публичный — share свободно (на сайтах, в репозиториях, в email-подписях). Приватный — храните строго в ~/.ssh/ с правами 600 и никогда никому не показывайте. Если случайно сгенерировался коммит, в котором приватный ключ — тут же отзывайте все access tokens, генерируйте новый ключ, и переписывайте историю (модуль 17 про секреты)."
+/>

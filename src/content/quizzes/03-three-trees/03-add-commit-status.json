@@ -1,0 +1,74 @@
+{
+  "lessonSlug": "03-three-trees/03-add-commit-status",
+  "moduleId": "03-three-trees",
+  "_meta": {
+    "idPrefix": "git-m03-03",
+    "description": "Quiz for lesson 3.3 — add, commit, status, diff"
+  },
+  "questions": [
+    {
+      "id": "git-m03-03-q1",
+      "type": "multiple-choice",
+      "question": "Junior сделал git commit -am 'add new feature', но в коммит не попал новый файл new_feature.py. Почему?",
+      "options": [
+        { "id": "a", "text": "git commit -am коммитит только текстовые файлы" },
+        { "id": "b", "text": "Флаг -a добавляет ТОЛЬКО изменения уже отслеживаемых файлов (modified/deleted), но не untracked. new_feature.py — новый, поэтому остался без коммита" },
+        { "id": "c", "text": "Нужно ставить точку: git commit -am '. add new feature'" },
+        { "id": "d", "text": "Файл должен быть в .gitignore" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Это классическая ошибка junior. Флаг -a в `git commit -am` добавляет только изменения отслеживаемых файлов (modified, deleted). Untracked файлы (новые) -a НЕ добавляет. Правильные варианты: 1) `git add new_feature.py && git commit -m '...'`, 2) `git add -A && git commit -m '...'` (-A добавит и untracked). Запомните: -am = commit с автоматическим add только tracked файлов.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m03-03-q2",
+      "type": "multiple-choice",
+      "question": "Что показывает `git status -s` в формате 'MM file.py'?",
+      "options": [
+        { "id": "a", "text": "Файл modified дважды" },
+        { "id": "b", "text": "Файл изменён в Index (первая колонка M) и в Working tree после этого (вторая колонка M). То есть две разные версии одновременно — одна в Index, другая в WT" },
+        { "id": "c", "text": "Файл merged" },
+        { "id": "d", "text": "Файл marked для удаления" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "git status -s использует две колонки: первая — HEAD vs Index (что в Index относительно HEAD), вторая — Index vs Working tree. Коды: M=modified, A=added, D=deleted, R=renamed, ??=untracked. MM означает: в Index есть модификация ОТНОСИТЕЛЬНО HEAD (первая M), и в WT ещё одна модификация ОТНОСИТЕЛЬНО Index (вторая M). То есть две разных версии файла одновременно.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m03-03-q3",
+      "type": "multiple-choice",
+      "question": "Что делает `git add -p file.py`?",
+      "options": [
+        { "id": "a", "text": "Добавляет файл с особыми правами" },
+        { "id": "b", "text": "Добавляет файл, но в режиме принудительного типа" },
+        { "id": "c", "text": "Запускает интерактивный режим: Git показывает каждый hunk (кусок изменений) и спрашивает y/n. Позволяет добавлять не весь файл, а отдельные куски — отличный инструмент для создания чистых логических коммитов" },
+        { "id": "d", "text": "Добавляет файл в .gitignore" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "Флаг -p (--patch) запускает интерактивный режим. Git делит изменения файла на hunks и показывает каждый отдельно. Для каждого можно ответить: y (yes, добавить), n (no, пропустить), q (quit), a (add all), d (done), s (split — разбить hunk на меньшие), e (edit — править вручную). Это мощный инструмент: один файл с двумя разными логическими изменениями можно разнести по двум коммитам. Опытные DE используют ежедневно.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m03-03-q4",
+      "type": "multiple-choice",
+      "question": "Junior сделал коммит, через 5 секунд заметил опечатку в сообщении. Как исправить, если коммит ЕЩЁ НЕ запушен?",
+      "options": [
+        { "id": "a", "text": "Нельзя исправить, нужно делать новый коммит" },
+        { "id": "b", "text": "git commit --amend -m 'правильное сообщение' — это создаст новый коммит с обновлённым сообщением вместо последнего" },
+        { "id": "c", "text": "git delete-commit HEAD" },
+        { "id": "d", "text": "Удалить .git/ и заново" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`git commit --amend` правит последний коммит: можно изменить сообщение, добавить файлы в коммит, или и то и другое. Технически создаётся НОВЫЙ коммит с новым SHA, старый остаётся в reflog. Если коммит ещё не запушен — amend безопасен. Если уже запушен — amend поломает синхронизацию с remote, потребует force push. Правило: amend только до push.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m03-03-q5",
+      "type": "true-false",
+      "question": "Команда `git add .` добавит ВСЕ изменения во всём репозитории, включая удалённые файлы.",
+      "correctAnswer": false,
+      "explanation": "Нет. `git add .` добавит новое и изменённое В ТЕКУЩЕЙ директории и её поддиректориях. Удалённые файлы — НЕ обрабатывает. Если вы хотите «всё-всё во всём репо включая удаления» — используйте `git add -A`. Если хотите «только изменения уже отслеживаемых файлов, включая удаления, но без untracked» — `git add -u`. Различия важны: git add . оставит удаления необработанными, что часто вводит в заблуждение.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

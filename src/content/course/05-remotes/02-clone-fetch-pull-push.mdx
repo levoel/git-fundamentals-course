@@ -1,0 +1,410 @@
+---
+title: "clone, fetch, pull, push: четыре глагола"
+description: "Анатомия clone и трёх команд синхронизации с remote — что они делают и чем отличаются"
+order: 2
+difficulty: "beginner"
+estimatedTime: 22
+topics: ["Git", "clone", "fetch", "pull", "push"]
+---
+
+# clone, fetch, pull, push: четыре глагола
+
+Эти четыре команды покрывают 95% твоих взаимодействий с remote. Но за каждой стоит несколько шагов, и непонимание этих шагов приводит к классическим ошибкам джунов: "куда делись мои локальные изменения после `git pull`?", "почему `git push` не работает?", "зачем нужен `fetch`, если есть `pull`?".
+
+В этом уроке мы разбираем каждую команду по операциям: что именно происходит с `.git/`, working tree, remote-tracking branches и сетевыми запросами.
+
+---
+
+## `git clone`: что под капотом
+
+`git clone <url>` — единственная команда, которая создаёт репо "с нуля" из remote. Это удобный wrapper над четырьмя операциями:
+
+<DiagramContainer title="git clone = init + remote add + fetch + checkout" color="blue">
+  <FlowColumn className="p-4 gap-3">
+    <Tooltip content="Создаётся пустая .git/ директория">
+      <FlowNode variant="input">1. git init</FlowNode>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="Добавляется remote с именем origin">
+      <FlowNode variant="default">2. git remote add origin URL</FlowNode>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="Скачиваются все объекты и refs с сервера">
+      <FlowNode variant="default">3. git fetch origin</FlowNode>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="Создаётся локальная main, делается checkout, заполняется working tree">
+      <FlowNode variant="output">4. git checkout main</FlowNode>
+    </Tooltip>
+  </FlowColumn>
+</DiagramContainer>
+
+Можно сделать это руками, и результат будет тот же:
+
+```bash
+mkdir myrepo && cd myrepo
+git init
+git remote add origin git@github.com:acme/repo.git
+git fetch origin
+git checkout -b main origin/main
+```
+
+Этот рецепт полезен в одном случае: когда нужны нестандартные параметры (например, `--bare` репо, или установка hooks до первого checkout).
+
+### Полезные флаги `clone`
+
+```bash
+# Клон только последних 50 коммитов (быстрее, легче)
+git clone --depth 50 git@github.com:acme/big-repo.git
+
+# Клон только одной ветки
+git clone --branch develop --single-branch git@github.com:acme/repo.git
+
+# Клон без working tree (только .git/)
+git clone --bare git@github.com:acme/repo.git
+
+# Клон с подмодулями сразу
+git clone --recurse-submodules git@github.com:acme/repo.git
+```
+
+`--depth 50` создаёт **shallow clone** — без полной истории. Это типично для CI/CD: раннеру не нужны 10 лет коммитов, только последний снимок и пара родителей.
+
+<Callout type="warning">
+Shallow clone имеет ограничения: нельзя сделать `git log` глубже depth, нельзя пушить ветки, у которых базовый коммит обрезан. Если случайно склонировал shallow, а нужна полная история: `git fetch --unshallow`.
+</Callout>
+
+### Что появилось локально
+
+После `git clone`:
+
+```bash
+$ ls -a
+.  ..  .git  README.md  src
+
+$ ls .git/refs/heads/
+main
+
+$ ls .git/refs/remotes/origin/
+HEAD  develop  feature-x  main
+```
+
+Заметь: локальная ветка только одна — `main`. Все остальные ветки с сервера лежат как **remote-tracking branches** (`origin/develop`, `origin/feature-x`). Они не "переключаемы" в обычном смысле — это снимки. Чтобы начать работать в `develop`, нужно `git switch develop` (Git автоматически создаст локальную ветку из `origin/develop`).
+
+---
+
+## `git fetch`: безопасное обновление
+
+`git fetch` — самая безопасная сетевая команда в Git. Она:
+
+1. Идёт на сервер.
+2. Скачивает все новые **объекты** (коммиты, деревья, файлы).
+3. Обновляет **remote-tracking branches** (`origin/main`, `origin/develop`...).
+4. **Не трогает** ни working tree, ни твою локальную ветку.
+
+<DiagramContainer title="git fetch обновляет ТОЛЬКО remote-tracking refs" color="green">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-4 justify-center flex-wrap">
+      <DataBox label="до fetch" className="border-zinc-500/30 w-56">
+        <div className="text-xs space-y-1">
+          <div>main -> C5 (мой)</div>
+          <div>origin/main -> C4</div>
+          <div>working tree -> C5</div>
+        </div>
+      </DataBox>
+      <Tooltip content="fetch только тянет данные с сервера в .git/">
+        <FlowNode variant="default">git fetch</FlowNode>
+      </Tooltip>
+      <DataBox label="после fetch" className="border-green-500/30 w-56">
+        <div className="text-xs space-y-1">
+          <div>main -> C5 (не трогается)</div>
+          <div>origin/main -> C7 (обновлён)</div>
+          <div>working tree -> C5 (не трогается)</div>
+        </div>
+      </DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+```bash
+$ git fetch
+remote: Enumerating objects: 23, done.
+remote: Counting objects: 100% (23/23), done.
+remote: Compressing objects: 100% (12/12), done.
+Unpacking objects: 100% (15/15), done.
+From github.com:acme/data-pipelines
+   a1b2c3d..f4e5d6c  main       -> origin/main
+   abc1234..def5678  develop    -> origin/develop
+ * [new branch]      feature/x  -> origin/feature/x
+```
+
+Вывод читается так: на сервере `main` ушёл с `a1b2c3d` на `f4e5d6c`. Локально `origin/main` теперь указывает на `f4e5d6c`. Появилась новая ветка `feature/x` от коллеги.
+
+### Сравнить что нового
+
+После `fetch` ты можешь спокойно посмотреть, что коллеги напушили, ничего не сливая:
+
+```bash
+# Что есть в origin/main, чего нет у меня
+git log main..origin/main
+
+# Diff что изменилось
+git diff main origin/main
+
+# Графически
+git log --oneline --graph --all
+```
+
+<Callout type="tip">
+`git fetch` — это операция чтения. Делай её часто, без страха. Полезный habit перед началом работы — `git fetch` и посмотреть, что насчпило за ночь.
+</Callout>
+
+### `git fetch --prune`
+
+Со временем на сервере удаляются ветки (после мерджа PR). У тебя локально `origin/feature-old` продолжает висеть. Чтобы Git удалял мёртвые remote-tracking branches:
+
+```bash
+$ git fetch --prune
+ - [deleted]         (none)     -> origin/feature-merged
+ - [deleted]         (none)     -> origin/hotfix-old
+```
+
+Хорошая идея сделать prune дефолтным:
+
+```bash
+git config --global fetch.prune true
+```
+
+---
+
+## `git pull`: fetch + интеграция
+
+`git pull` — это `git fetch` плюс интеграция полученных изменений в твою текущую ветку. По умолчанию интеграция через **merge**.
+
+```
+git pull origin main
+  ==
+git fetch origin
+git merge origin/main
+```
+
+<DiagramContainer title="git pull = fetch + merge (по дефолту)" color="orange">
+  <FlowColumn className="p-4 gap-3">
+    <Tooltip content="Шаг 1: тянем изменения с сервера">
+      <FlowNode variant="input">git fetch origin</FlowNode>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="Шаг 2: мерджим origin/main в текущую ветку">
+      <FlowNode variant="default">git merge origin/main</FlowNode>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="Working tree обновлён, могут появиться конфликты">
+      <FlowNode variant="output">working tree updated</FlowNode>
+    </Tooltip>
+  </FlowColumn>
+</DiagramContainer>
+
+### Сценарии `pull`
+
+**Сценарий 1: Fast-forward.** У тебя локально C5, в `origin/main` — C5 + 3 новых коммита. Git просто двигает указатель твоей `main` вперёд на C8. Никаких merge коммитов, всё чисто.
+
+```bash
+$ git pull
+Updating a1b2c3d..f4e5d6c
+Fast-forward
+ src/etl.py | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+```
+
+**Сценарий 2: Divergent histories.** У тебя локальный коммит C6, в `origin/main` — параллельный коммит C7 на той же базе C5. Git создаёт merge commit C8 с двумя родителями.
+
+```bash
+$ git pull
+Merge made by the 'ort' strategy.
+ src/etl.py | 5 +++++
+ 1 file changed, 5 insertions(+)
+```
+
+Это считается "грязной" историей — merge commits внутри feature work, без явного намерения. Поэтому многие команды настраивают **rebase-based pull**:
+
+```bash
+# Глобально для всех веток
+git config --global pull.rebase true
+
+# Или явно для конкретного pull
+git pull --rebase
+```
+
+Тогда `pull` = `fetch + rebase`: твои коммиты "переставляются" поверх `origin/main`, история остаётся линейной.
+
+### `pull.ff = only` — safety net для джунов
+
+Самый защищённый режим — разрешать только fast-forward:
+
+```bash
+git config --global pull.ff only
+```
+
+Тогда `git pull` либо сделает fast-forward (всё ок), либо упадёт с ошибкой:
+
+```
+fatal: Not possible to fast-forward, aborting.
+```
+
+И ты явно решаешь: rebase или merge. Это лучше, чем случайно создать merge commit в `main`.
+
+<Callout type="tip">
+Рекомендация для начинающих: `pull.ff = only` глобально + явно вызывать `git pull --rebase` или `git merge origin/main` когда нужно. Это убирает класс ошибок "случайно намерджил".
+</Callout>
+
+---
+
+## `git push`: отправить локальное на сервер
+
+`git push` обновляет ветки на remote, отправляя коммиты, которые есть у тебя, но нет на сервере.
+
+```bash
+$ git push
+Enumerating objects: 7, done.
+Counting objects: 100% (7/7), done.
+Delta compression using up to 8 threads
+Compressing objects: 100% (4/4), done.
+Writing objects: 100% (4/4), 612 bytes | 612.00 KiB/s, done.
+To github.com:acme/data-pipelines.git
+   a1b2c3d..f4e5d6c  main -> main
+```
+
+### Условие: fast-forward only
+
+Git разрешает `push` только если remote-ветка может быть **fast-forwarded** к твоей версии. То есть твои коммиты — это надстройка над тем, что уже есть на сервере.
+
+Если за время твоей работы кто-то напушил в `main` свои коммиты, твой push провалится:
+
+```bash
+$ git push
+To github.com:acme/data-pipelines.git
+ ! [rejected]        main -> main (non-fast-forward)
+error: failed to push some refs to 'github.com:acme/data-pipelines.git'
+hint: Updates were rejected because the tip of your current branch is behind
+hint: its remote counterpart. Integrate the remote changes (e.g.
+hint: 'git pull ...') before pushing again.
+```
+
+Это **защита от потери чужой работы**. Если Git бы просто перезаписал `main` на сервере твоей версией, коммиты коллеги исчезли бы из истории.
+
+Правильный путь:
+
+```bash
+git fetch
+git rebase origin/main   # или git merge origin/main
+git push
+```
+
+### Первый push новой ветки
+
+Когда ты пушишь новую локальную ветку, Git не знает, куда её отправить. Нужен upstream:
+
+```bash
+$ git push
+fatal: The current branch feature/x has no upstream branch.
+To push the current branch and set the remote as upstream, use
+
+    git push --set-upstream origin feature/x
+```
+
+Или короче — `-u`:
+
+```bash
+git push -u origin feature/x
+```
+
+Флаг `-u` (`--set-upstream`) делает две вещи: пушит ветку И настраивает её tracking. После этого `git push` и `git pull` без аргументов будут работать на этой ветке.
+
+### `--force` и `--force-with-lease`
+
+Иногда `push` нужно сделать "поверх" — например, после `rebase`. Тогда нужен force:
+
+```bash
+# ОПАСНО: перезатирает удалённую ветку без проверок
+git push --force
+
+# БЕЗОПАСНО: перезатирает, только если remote выглядит как ты ожидаешь
+git push --force-with-lease
+```
+
+`--force-with-lease` проверяет: совпадает ли текущая `origin/main` с тем, что ты в последний раз `fetch`нул. Если за это время кто-то напушил — push отклонится. Это спасает от ситуации, когда ты случайно затираешь коммит коллеги.
+
+<Callout type="danger">
+**Никогда** не делай `git push --force` в `main`/`master` или другие shared branches без острой необходимости и согласования с командой. На своей feature ветке до PR — нормально. На общей — катастрофа: коллеги получат конфликты, их работа может пропасть.
+</Callout>
+
+---
+
+## Полный жизненный цикл
+
+Типичный день работы джуна:
+
+```bash
+# Утро — синхронизация
+git switch main
+git pull --rebase             # или просто git pull, если ff-only
+
+# Создаю ветку для задачи
+git switch -c feature/add-spark-job
+
+# Работаю, коммичу
+echo "code" > src/job.py
+git add src/job.py
+git commit -m "feat: add spark aggregation job"
+
+# Пушу новую ветку (первый раз - с -u)
+git push -u origin feature/add-spark-job
+
+# Через час — ещё один коммит
+git add src/job.py
+git commit -m "fix: handle null partition keys"
+git push                       # uпstream уже настроен
+
+# Перед PR — синхронизируюсь с main
+git fetch origin
+git rebase origin/main         # перенёс свои коммиты поверх свежего main
+git push --force-with-lease    # после rebase нужен force
+
+# Открыл PR в UI GitHub
+```
+
+---
+
+## Попробуй сам
+
+```bash
+# 1. Создай локально пустой репо
+mkdir push-demo && cd push-demo
+git init
+echo "v1" > file.txt
+git add . && git commit -m "init"
+
+# 2. Создай на GitHub пустой репо (без README)
+# 3. Подключи как origin
+git remote add origin git@github.com:your-name/push-demo.git
+git push -u origin main
+
+# 4. Сделай новую ветку и запушь
+git switch -c feature/v2
+echo "v2" >> file.txt
+git commit -am "v2"
+git push -u origin feature/v2
+
+# 5. Удали локально и склонируй заново
+cd ..
+rm -rf push-demo
+git clone git@github.com:your-name/push-demo.git
+cd push-demo
+git branch -a   # увидишь main + remotes/origin/feature/v2
+```
+
+---
+
+<KnowledgeCheck
+  question="Ты работаешь на ветке `feature/x`. Запускаешь `git fetch origin`, видишь что в `origin/main` появились 5 новых коммитов от коллеги. Делаешь `git status` — он показывает 'nothing to commit, working tree clean'. Где эти 5 коммитов и почему `git status` ничего не сказал?"
+  answer="Коммиты лежат в `.git/objects/`, и ref `refs/remotes/origin/main` указывает на новый верхний коммит. То есть данные у тебя локально есть, но они привязаны к `origin/main`, а не к твоей `feature/x`. `git status` сравнивает твою текущую ветку (`feature/x`) с её upstream (например, `origin/feature/x`), а не с `origin/main`. Чтобы увидеть, что 5 коммитов на `origin/main` тебя обогнали, нужно: `git log HEAD..origin/main` или `git log --graph --all --oneline`. Сами коммиты применятся к твоей ветке только если ты сделаешь `git merge origin/main` или `git rebase origin/main`."
+/>

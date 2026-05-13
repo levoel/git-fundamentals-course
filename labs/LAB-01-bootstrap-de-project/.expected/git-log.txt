@@ -1,0 +1,22 @@
+Пример того, как должна выглядеть финальная история (git log --oneline --graph --all):
+
+* a4f2c1d (HEAD -> feat/initial-pipeline, origin/feat/initial-pipeline) feat: add skeleton orders_etl DAG
+* 1b8e7a3 (origin/main, main) chore: bootstrap project with gitignore, pre-commit, pyproject
+
+Вариант с дополнительным форматирующим коммитом (после ruff):
+
+* a4f2c1d (HEAD -> feat/initial-pipeline, origin/feat/initial-pipeline) feat: add skeleton orders_etl DAG
+* 9c0d5e2 (origin/main, main) style: apply ruff formatting
+* 1b8e7a3 chore: bootstrap project with gitignore, pre-commit, pyproject
+
+Ключевое:
+- ветка main существует и имеет хотя бы один коммит "bootstrap".
+- ветка feat/initial-pipeline отделилась от main и добавила orders_etl DAG.
+- origin содержит обе ветки.
+- сообщения коммитов в Conventional Commits стиле (chore:, feat:, style:).
+
+Чего НЕ должно быть в истории:
+- коммитов с сообщениями вроде "wip", "fix", "asdf".
+- одного большого коммита "initial commit" на 50 файлов.
+- коммитов от случайных email-ов (проверь git log --pretty=fuller).
+- закоммиченных .env, *.parquet, __pycache__/ — pre-commit и .gitignore это должны были отсеять.

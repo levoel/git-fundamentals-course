@@ -1,0 +1,447 @@
+---
+title: "Объектная модель Git: blob, tree, commit, tag"
+description: "4 типа объектов в Git: blob (содержимое), tree (директория), commit (snapshot+metadata), tag. SHA-1 хеши, content-addressable storage. git hash-object, git ls-tree"
+order: 5
+difficulty: "beginner"
+estimatedTime: 22
+topics: ["Git", "Objects", "Blob", "Tree", "Commit", "Tag", "SHA-1"]
+---
+
+# Объектная модель Git: blob, tree, commit, tag
+
+В уроке 1 модуля 1 мы прошли content-addressable storage концептуально: Git хранит каждый объект по его SHA-1 хешу. В уроке 4 этого модуля мы посмотрели commit-объект изнутри. Теперь финальный кусок пазла: какие вообще типы объектов есть в Git, и как они связаны.
+
+Это самый «низкоуровневый» урок курса. Junior может пропустить и продолжать работать с Git — миллион людей делают это. Но если вы прочитали и поняли — у вас будет ментальная модель, которая делает Git кристально прозрачным. Любая команда, любая ошибка, любое странное состояние — вы будете понимать «что произошло на уровне объектов».
+
+---
+
+## 4 типа объектов
+
+В Git ровно 4 типа объектов:
+
+<DiagramContainer title="Объектная модель Git" color="indigo">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="blob" variant="highlight" tooltip="Содержимое файла. Просто байты. Не знает, как называется файл, в какой директории лежит, какие у него права. Только содержимое">blob</DataBox>
+      <DataBox label="tree" variant="highlight" tooltip="Snapshot директории. Список записей: mode, тип (blob/tree), SHA, имя">tree</DataBox>
+      <DataBox label="commit" variant="highlight" tooltip="Snapshot tree + metadata (author, committer, parent, message). Образует историю через parent-ссылки">commit</DataBox>
+      <DataBox label="tag" variant="highlight" tooltip="Annotated tag — именованный указатель с метаданными (автор тега, сообщение). Lightweight tags — это просто ref, не объект">tag</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="ВСЁ" tooltip="Любая операция Git сводится к чтению/созданию этих 4 типов. Других объектов нет. Это и есть «простая модель данных», давшая Git преимущество над Mercurial">4 типа = вся модель</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Каждый объект:
+
+1. Имеет один из этих типов
+2. Хранится в `.git/objects/<первые-2-hex>/<остальные-38-hex>`
+3. Адресуется по SHA-1 хешу от своего содержимого (с заголовком: `<type> <size>\0<content>`)
+4. **Immutable** — никогда не меняется. Если меняется содержимое, создаётся новый объект с новым SHA
+
+Разберём каждый тип в деталях.
+
+---
+
+## blob: содержимое файла
+
+`blob` — это просто **последовательность байт**. Содержимое файла, без имени, без прав, без даты.
+
+```bash
+echo "hello world" | git hash-object --stdin
+# 3b18e512dba79e4c8300dd08aeb37f8e728b8dad
+```
+
+Это SHA blob-объекта, чьё содержимое — «hello world\n» (echo добавляет newline). Этот SHA одинаков на любой машине в мире — детерминированная функция содержимого.
+
+Если вы хотите создать blob в реальном репо (без файла):
+
+```bash
+git init my-repo && cd my-repo
+
+# Создать blob из stdin (с записью в objects/)
+echo "hello world" | git hash-object --stdin -w
+# 3b18e512dba79e4c8300dd08aeb37f8e728b8dad
+
+# Проверить, что объект создан
+ls .git/objects/3b/
+# 18e512dba79e4c8300dd08aeb37f8e728b8dad
+
+# Посмотреть содержимое
+git cat-file -p 3b18e512dba79e4c8300dd08aeb37f8e728b8dad
+# hello world
+
+# Узнать тип
+git cat-file -t 3b18e512dba79e4c8300dd08aeb37f8e728b8dad
+# blob
+
+# Размер
+git cat-file -s 3b18e512dba79e4c8300dd08aeb37f8e728b8dad
+# 12
+```
+
+<Callout type="note">
+Этот SHA `3b18e512...` — это «hello world\n» в Git навсегда. Создайте файл с таким содержимым в любом репозитории — у его blob будет ТОТ ЖЕ SHA. Это и есть content-addressable storage.
+</Callout>
+
+### Почему blob не знает имя
+
+Тот же blob может быть в разных файлах:
+
+```bash
+echo "hello world" > foo.txt
+echo "hello world" > bar.txt
+git add foo.txt bar.txt
+git commit -m "Two files"
+
+# В objects/ создан ОДИН blob для обоих файлов
+git ls-tree HEAD
+# 100644 blob 3b18e512... foo.txt
+# 100644 blob 3b18e512... bar.txt
+```
+
+Оба файла имеют один blob. Хранится **один раз**, на него ссылаются два пути в tree. Это и есть автоматическая дедупликация.
+
+Имя файла, права, mtime — всё это хранится в **tree-объекте**, не в blob.
+
+---
+
+## tree: snapshot директории
+
+`tree` — это **снимок директории**. Список записей вида:
+
+```text
+<mode> <type> <SHA>    <name>
+```
+
+Пример:
+
+```bash
+git cat-file -p HEAD^{tree}
+# 100644 blob 3b18e512dba79e4c8300dd08aeb37f8e728b8dad    foo.txt
+# 100644 blob 3b18e512dba79e4c8300dd08aeb37f8e728b8dad    bar.txt
+# 100755 blob 7a4e5f6c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a    run.sh
+# 040000 tree d2c3b4a5f6e7d8c9b0a1f2e3d4c5b6a7e8f9c0d1    src
+```
+
+Записи:
+
+- `100644` mode — обычный файл, не executable
+- `100755` mode — обычный файл, executable (есть бит исполнения, скрипт)
+- `040000` mode — директория (ссылка на другой tree)
+- `120000` mode — symbolic link
+- `160000` mode — submodule (ссылка на другой репозиторий)
+
+Tree описывает **директорию рекурсивно**: подкаталоги — это ссылки на другие tree-объекты. Корень репозитория — один tree, который ссылается на blobs (файлы корня) и trees (поддиректории), те ссылаются на свои blobs/trees, и так до листьев.
+
+<DiagramContainer title="Tree описывает директорию рекурсивно" color="purple">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="root tree" variant="highlight" tooltip="Корневой tree-объект всего репозитория. На него ссылается commit">tree A</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="README.md" tooltip="Файл в корне. Mode 100644, ссылка на blob">blob</DataBox>
+      <DataBox label="src/" tooltip="Поддиректория. Mode 040000, ссылка на другой tree">tree B</DataBox>
+      <DataBox label="LICENSE" tooltip="Файл в корне">blob</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="src/main.py" tooltip="Файл в src/">blob</DataBox>
+      <DataBox label="src/utils/" tooltip="Ещё поддиректория">tree C</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="src/utils/io.py" tooltip="Файл в src/utils/">blob</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+### Команда git ls-tree
+
+Для удобного просмотра tree:
+
+```bash
+git ls-tree HEAD                  # tree коммита HEAD
+git ls-tree HEAD src/             # tree подкаталога
+git ls-tree -r HEAD               # рекурсивно весь tree
+git ls-tree -r --name-only HEAD   # только имена
+```
+
+Рекурсивный вывод покажет всю «плоскую» структуру файлов:
+
+```bash
+git ls-tree -r HEAD
+# 100644 blob 3b... foo.txt
+# 100644 blob 7a... src/main.py
+# 100644 blob 8b... src/utils/io.py
+```
+
+---
+
+## commit: snapshot + history
+
+`commit` мы разбирали в предыдущем уроке. Кратко: commit содержит SHA tree (snapshot), SHA parent (или несколько), author, committer, message.
+
+```bash
+git cat-file -p HEAD
+# tree 3a79be23c0d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8
+# parent a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
+# author Ivan Petrov <ivan@example.com> 1715600000 +0300
+# committer Ivan Petrov <ivan@example.com> 1715600000 +0300
+#
+# Add OAuth flow
+```
+
+Каждый commit указывает на:
+
+1. **tree** — состояние всех файлов в этой версии
+2. **parent commit** — предыдущая версия в истории
+
+Через цепочку parent-ссылок образуется **история** репозитория. Это DAG (directed acyclic graph) — направленный граф без циклов.
+
+---
+
+## tag: именованный указатель
+
+`tag` бывает двух типов:
+
+### Lightweight tag
+
+Это **просто ref** — файл в `.git/refs/tags/` с SHA коммита. Никакого объекта нет, никаких метаданных.
+
+```bash
+git tag v1.0  # lightweight tag
+cat .git/refs/tags/v1.0
+# a1b2c3d4...   ← SHA коммита
+```
+
+### Annotated tag
+
+Это **объект** типа `tag` в `.git/objects/`. Содержит метаданные:
+
+```bash
+git tag -a v1.1 -m "Version 1.1 release"
+
+# Файл refs/tags/v1.1 указывает на TAG-объект, не на commit
+cat .git/refs/tags/v1.1
+# t1u2v3...   ← SHA tag-объекта
+
+git cat-file -t t1u2v3...
+# tag
+
+git cat-file -p t1u2v3...
+# object a1b2c3d4...   ← на какой commit указывает
+# type commit
+# tag v1.1
+# tagger Ivan Petrov <ivan@example.com> 1715600000 +0300
+# 
+# Version 1.1 release
+```
+
+Annotated tag — это полноценный объект, как commit. Имеет SHA, может быть подписан GPG/SSH. Используется для официальных релизов.
+
+<Callout type="tip">
+Правило: для официальных релизов — annotated tags. Для временных пометок (например, deployment marker) — lightweight. На практике 95% production-релизов помечают annotated, и многие проекты считают best practice использовать только annotated.
+</Callout>
+
+Подробно про теги — модуль 10.
+
+---
+
+## Полный граф объектов
+
+Вот как четыре типа связаны на типичном репозитории:
+
+<DiagramContainer title="Граф объектов в репозитории" color="emerald">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="HEAD" tooltip="Ссылка (не объект) на текущую ветку">ref</DataBox>
+      <Arrow direction="right" label="" />
+      <DataBox label="refs/heads/main" tooltip="Файл с SHA коммита (не объект)">ref</DataBox>
+      <Arrow direction="right" label="указывает на" />
+      <DataBox label="commit C" variant="highlight" tooltip="Последний commit на ветке main">commit</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="commit C" tooltip="tree -> snapshot, parent -> commit B">commit</DataBox>
+      <Arrow direction="right" label="tree" />
+      <DataBox label="tree X" tooltip="Snapshot состояния файлов в commit C">tree</DataBox>
+      <Arrow direction="right" label="" />
+      <DataBox label="blobs + trees" tooltip="Деревья и blob-ы, образующие полную структуру файлов">blob/tree</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="commit C" tooltip="parent ->">commit</DataBox>
+      <Arrow direction="right" label="parent" />
+      <DataBox label="commit B" tooltip="Предыдущий коммит">commit</DataBox>
+      <Arrow direction="right" label="parent" />
+      <DataBox label="commit A" tooltip="Root commit (без parent)">commit</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="refs/tags/v1.0" tooltip="Tag-ref указывает на annotated tag-объект">ref</DataBox>
+      <Arrow direction="right" label="" />
+      <DataBox label="tag T" tooltip="Annotated tag с метаданными">tag</DataBox>
+      <Arrow direction="right" label="object ->" />
+      <DataBox label="commit B" tooltip="Tag указывает на конкретный коммит">commit</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Важно понимать:
+
+- **refs** (HEAD, branches, tags) — это **указатели**, не объекты. Файлы в `.git/refs/` и `.git/HEAD`.
+- **objects** — это **бессмертное** содержимое в `.git/objects/`. По SHA.
+- Refs могут двигаться (например, ветка main двигается при каждом коммите). Objects никогда не меняются.
+
+---
+
+## Команды для работы с объектами
+
+Plumbing-команды (низкоуровневые), полезные для дебага:
+
+```bash
+# Содержимое объекта
+git cat-file -p <SHA>
+
+# Тип объекта
+git cat-file -t <SHA>
+
+# Размер
+git cat-file -s <SHA>
+
+# Проверка существования
+git cat-file -e <SHA> && echo "exists"
+
+# Создать blob из файла
+git hash-object <file>          # только хеш, не пишет
+git hash-object -w <file>       # пишет в objects/
+
+# Содержимое tree
+git ls-tree <SHA>
+git ls-tree -r <SHA>            # рекурсивно
+
+# Конвертация ref -> SHA
+git rev-parse HEAD              # SHA коммита HEAD
+git rev-parse main              # SHA коммита main
+git rev-parse HEAD^{tree}       # SHA tree коммита HEAD
+git rev-parse HEAD~3            # SHA коммита 3 поколения назад
+
+# Все объекты в репо
+find .git/objects -type f       # увидите все объекты как файлы
+git cat-file --batch-all-objects --batch-check
+# выведет SHA + тип + размер для каждого объекта
+```
+
+---
+
+## Packfiles: оптимизация хранения
+
+После `git gc` или `git push`, Git сжимает «loose objects» (один файл на объект) в **packfile** (один большой файл, содержащий много объектов с дельта-компрессией).
+
+```bash
+ls .git/objects/pack/
+# pack-abc123.idx     ← индекс
+# pack-abc123.pack    ← собственно packfile
+```
+
+Подробности packfile-формата выходят за рамки junior-курса. Главное знать:
+
+1. Это **оптимизация storage**, не изменение модели
+2. Логически объекты остаются те же (blob, tree, commit, tag), SHA те же
+3. `git cat-file` работает прозрачно — может читать loose objects и packfiles одинаково
+
+После `git gc` директории `objects/<2hex>/` могут оказаться пустыми (объекты ушли в pack). Это нормально.
+
+---
+
+## Garbage collection и unreachable objects
+
+Когда commit становится недоступным (нет ветки, тега, reflog, который на него указывает) — Git помечает его как «unreachable». При `git gc` такие объекты УДАЛЯЮТСЯ.
+
+Это и есть способ Git «забывать» что-то. Если вы:
+
+1. Сделали коммит
+2. `git reset --hard HEAD~1` (откатили его)
+3. Никакая ветка/тег на этот коммит не указывает
+4. Прошло > 30 дней
+5. Запустился `git gc`
+
+-> Объект удаляется навсегда.
+
+Но **до этого** объект жив в reflog. Можно восстановить (модуль 09). Это и есть «безопасный» Git: ничто не удаляется сразу, всё доступно через reflog некоторое время.
+
+---
+
+## Попробуй сам
+
+1. Создайте репозиторий и сделайте несколько коммитов:
+
+```bash
+mkdir -p ~/git-sandbox/lesson-03-objects
+cd ~/git-sandbox/lesson-03-objects
+git init
+
+echo "hello" > a.txt
+mkdir src && echo "print('hi')" > src/main.py
+git add .
+git commit -m "Initial"
+
+# Меняем
+echo "hello again" > a.txt
+git add . && git commit -m "Update"
+```
+
+2. Посмотрите все объекты:
+
+```bash
+find .git/objects -type f
+```
+
+3. Вскройте каждый и определите тип:
+
+```bash
+for f in $(find .git/objects -type f); do
+  SHA=$(echo $f | sed 's|.git/objects/||' | tr -d '/')
+  echo "=== $SHA ($(git cat-file -t $SHA)) ==="
+  git cat-file -p $SHA
+  echo
+done
+```
+
+4. Найдите blob с содержимым «hello\n» и убедитесь, что он один на оба коммита (где a.txt не менялся, хотя в этом примере менялся):
+
+```bash
+echo "hello" | git hash-object --stdin
+# и проверьте есть ли такой SHA в objects/
+```
+
+5. Посмотрите tree коммита:
+
+```bash
+git ls-tree HEAD
+git ls-tree -r HEAD
+```
+
+6. Вскройте tree последнего коммита через rev-parse:
+
+```bash
+TREE_SHA=$(git rev-parse HEAD^{tree})
+git cat-file -p $TREE_SHA
+```
+
+---
+
+## Что это всё даёт
+
+Понимание объектной модели даёт практическую пользу:
+
+1. **Дебаг странного состояния** — если что-то непонятное, всегда можно `git cat-file -p` на любой SHA и посмотреть, что Git реально знает.
+2. **Восстановление потерянных коммитов** — даже если ветка удалена, объект коммита всё ещё в `.git/objects/`. Через `git fsck --lost-found` или `git reflog` можно найти и восстановить.
+3. **Понимание команд** — каждая команда становится «вот что я делаю с какими объектами». `git reset` двигает refs. `git commit` создаёт commit-объект. `git checkout` обновляет working tree из tree-объекта.
+4. **Доверие к Git** — Git не магия. Это 4 типа объектов в `.git/objects/` + указатели в `.git/refs/`. Всё видимо. Всё инспектируется.
+
+В этот момент Junior, который понял этот урок, перестаёт бояться Git. Можно дальше — модули 04-20 будут даваться на порядок легче.
+
+---
+
+<KnowledgeCheck
+  question="Вы сделали `git reset --hard HEAD~1` и потеряли последний коммит. На следующий день вспомнили его SHA: a1b2c3d. Сможете ли вы восстановить коммит и его содержимое?"
+  answer="Скорее всего да, если прошло меньше 30 дней (стандартный grace period для unreachable объектов до git gc). Содержимое коммита всё ещё хранится в `.git/objects/` как objects типа commit, tree, blob — content-addressable storage не удаляет объекты при reset, только перемещает refs. Восстановление: 1) `git cat-file -t a1b2c3d` — убедиться, что объект существует. 2) `git cat-file -p a1b2c3d` — посмотреть содержимое коммита (tree, parent, message). 3) `git checkout a1b2c3d` — переключиться на этот коммит (detached HEAD). 4) `git switch -c restored-branch` — создать ветку на этом коммите для безопасности. Или быстрее: `git reflog` (модуль 09) покажет журнал последних движений HEAD, можно сделать `git reset --hard a1b2c3d` чтобы вернуться. Объект жив, пока на него есть хоть одна ссылка (включая reflog) или пока не прошёл grace period."
+/>

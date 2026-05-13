@@ -1,0 +1,625 @@
+---
+title: ".env, secrets backends, direnv — где хранить секреты правильно"
+description: ".env в .gitignore, .env.example коммитим. direnv для auto-load. AWS Secrets Manager, HashiCorp Vault, 1Password CLI, doppler — secrets вообще не на диске. Для DE: Airflow secrets backend (Secrets Manager), не Variables UI hardcode. dbt env_var() для profiles."
+order: 4
+difficulty: "beginner"
+estimatedTime: 30
+topics: ["env-files", "gitignore", "direnv", "secrets-manager", "vault", "airflow", "dbt", "doppler"]
+---
+
+# .env, secrets backends, direnv — где хранить секреты правильно
+
+В предыдущих уроках мы выяснили: секрет в Git — катастрофа, prevention дешевле cleanup. Логичный вопрос: **а где** хранить ключи и пароли, если не в репо?
+
+Ответ зависит от среды и зрелости команды. Самый простой подход — `.env` файл локально, и `.gitignore`. Следующий уровень — `direnv` для auto-load. Production-уровень — централизованный secrets backend (AWS Secrets Manager, HashiCorp Vault, doppler, 1Password CLI). Каждый — со своими плюсами и DE-специфичными нюансами.
+
+В этом уроке разберём по уровням, от минимума до production-grade, с конкретными примерами для Airflow и dbt.
+
+---
+
+## Уровень 0: hardcode в коде (плохо)
+
+```python
+# dags/etl.py
+postgres_password = "SuperSecret123"  # ← НИКОГДА
+aws_key = "AKIAIOSFODNN7..."           # ← НИКОГДА
+```
+
+Понятно почему плохо: секрет в commit, gitleaks ловит, история навсегда. Это **не вариант**.
+
+---
+
+## Уровень 1: .env файл + .gitignore
+
+Классика для локальной разработки. `.env` — файл в корне проекта с переменными:
+
+```bash
+# .env (НЕ КОММИТИТЬ!)
+AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+POSTGRES_PASSWORD=local_dev_password
+SNOWFLAKE_USER=dbt_local
+SNOWFLAKE_PASSWORD=local_password_123
+SLACK_WEBHOOK=https://hooks.slack.com/services/T0/B0/xyz
+```
+
+В коде загружаем:
+
+```python
+import os
+from dotenv import load_dotenv
+
+load_dotenv()  # читает .env из текущей директории
+
+aws_key = os.environ["AWS_ACCESS_KEY_ID"]
+postgres_pwd = os.environ["POSTGRES_PASSWORD"]
+```
+
+`.gitignore`:
+
+```gitignore
+# Secrets — никогда не коммитим
+.env
+.env.local
+.env.*.local
+*.pem
+*.p8
+*.key
+
+# IDE-shadow конфиги, которые могут содержать секреты
+.vscode/launch.json
+.idea/workspace.xml
+
+# Direnv state
+.direnv/
+.envrc.cache
+```
+
+### .env.example — что коммитим
+
+Чтобы новый член команды знал, **какие** переменные нужны, не зная значений — `.env.example` (или `.env.template`):
+
+```bash
+# .env.example (КОММИТИМ)
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+POSTGRES_PASSWORD=
+SNOWFLAKE_USER=
+SNOWFLAKE_PASSWORD=
+SLACK_WEBHOOK=
+```
+
+Junior клонирует репо:
+
+```bash
+$ git clone repo && cd repo
+$ cp .env.example .env
+$ # редактирует .env, вставляет свои dev-credentials
+```
+
+<Callout type="tip">
+В `.env.example` иногда полезно положить **тестовые / dummy** значения, которые работают для unit-тестов: `POSTGRES_PASSWORD=test`. Это даёт «нулевой setup» — клонировал, сразу пускаются tests против локального docker-postgres с тем же паролем.
+</Callout>
+
+### Проверка: .env не в commit
+
+После clone и редактирования `.env`:
+
+```bash
+$ git status
+On branch main
+nothing to commit, working tree clean
+```
+
+Если `.env` в `.gitignore`, Git его **не видит**. Если видишь его в `git status` — значит, gitignore сломан, проверь правила.
+
+<Callout type="warning">
+`.gitignore` работает только для **untracked** файлов. Если ты однажды закоммитил `.env` (даже случайно), добавление его в `.gitignore` **не уберёт** его из истории. Сначала `git rm --cached .env`, потом изменение нужно закоммитить, и только потом gitignore начнёт работать. И в истории старая версия останется — см. урок 03 (cleanup).
+</Callout>
+
+---
+
+## Уровень 2: direnv — auto-load переменных
+
+`direnv` — shell-расширение, которое **автоматически** загружает `.envrc` файл, когда ты `cd`-аешь в директорию, и **выгружает** когда уходишь. Удобство — не нужно вручную делать `source .env` или думать о виртуальном окружении.
+
+Установка:
+
+```bash
+# macOS
+$ brew install direnv
+
+# Linux
+$ sudo apt install direnv  # или curl-script
+
+# Подключаем к shell (для zsh)
+$ echo 'eval "$(direnv hook zsh)"' >> ~/.zshrc
+$ source ~/.zshrc
+```
+
+Использование:
+
+```bash
+$ cd ~/projects/my-de-project
+
+# Создаём .envrc
+$ cat > .envrc << 'EOF'
+# Загрузить .env как переменные среды
+dotenv
+
+# Активировать venv
+source .venv/bin/activate
+
+# Установить AWS_PROFILE для этого проекта
+export AWS_PROFILE=de-team-prod
+
+# Set PYTHONPATH для проекта
+export PYTHONPATH="$PWD/src:$PYTHONPATH"
+EOF
+
+# direnv требует явного разрешения для каждого .envrc — защита от malicious
+$ direnv allow
+direnv: loading ~/projects/my-de-project/.envrc
+direnv: export +AWS_PROFILE +PYTHONPATH ...
+
+# Теперь автоматически:
+$ echo $AWS_PROFILE
+de-team-prod
+
+$ cd ~  # ушли из директории
+direnv: unloading
+$ echo $AWS_PROFILE
+# (пусто)
+```
+
+### Что коммитим, что нет
+
+```gitignore
+# .envrc структура — коммитим
+# .envrc — содержит логику (dotenv, source, etc), не сами секреты
+# .env — содержит секреты, не коммитим
+.env
+.direnv/
+```
+
+`.envrc` коммитим — он не содержит секретов, только инструкции **откуда** их загрузить. `.env` всё ещё в gitignore.
+
+<Callout type="tip">
+direnv хорошо комбинируется с команд `pyenv` и `nodenv`. В `.envrc` можно `use python 3.13`, и при `cd` автоматически активируется правильная версия Python. Для DE — особенно полезно, когда работаешь с разными версиями PySpark / Airflow.
+</Callout>
+
+### Почему `direnv allow` — критично
+
+`.envrc` — это shell-script, который выполняется. Если кто-то закоммитил malicious `.envrc` (`rm -rf $HOME`), он бы выполнился при `cd`. Поэтому direnv требует **явное разрешение** для каждого `.envrc` файла, и **переразрешение**, если файл изменился. Это защита от supply-chain атаки.
+
+---
+
+## Уровень 3: централизованный secrets backend
+
+`.env` хорош для локальной разработки. Для **production** — нет:
+
+- Если у команды 10 инженеров — 10 копий `.env` с разными паролями. Кто-то отстаёт по обновлениям.
+- Если меняется production пароль — нужно обновить везде вручную.
+- `.env` файл на CI runner — кто его положил туда? Кто видит его в logs?
+- Compliance: PCI-DSS требует логировать **кто и когда** доставал secret.
+
+Решение — централизованный secrets backend.
+
+### AWS Secrets Manager
+
+Стандарт для AWS-проектов. Секрет хранится в AWS, доступ — через IAM (роль, не ключ).
+
+```python
+import boto3
+import json
+
+def get_secret(secret_name: str) -> dict:
+    client = boto3.client("secretsmanager", region_name="us-east-1")
+    response = client.get_secret_value(SecretId=secret_name)
+    return json.loads(response["SecretString"])
+
+# В DAG / скрипте
+db = get_secret("prod/postgres/dbt_runner")
+postgres_pwd = db["password"]
+```
+
+Плюсы:
+- Никаких `.env` на production.
+- Rotation: AWS может **автоматически** менять пароль раз в N дней.
+- Audit: CloudTrail логирует каждый `GetSecretValue` — кто, когда, откуда IP.
+- IAM: разные роли видят разные секреты (`prod/*` — только prod, `dev/*` — dev).
+
+Минусы:
+- Стоит денег ($0.40 / секрет / месяц + $0.05 / 10k requests).
+- Vendor lock-in.
+
+### HashiCorp Vault
+
+Open-source, multi-cloud. Запускается локально / в Kubernetes.
+
+```bash
+$ vault kv get -mount=secret prod/postgres
+====== Data ======
+Key         Value
+---         -----
+host        prod-db.internal
+user        dbt_runner
+password    ***
+```
+
+Через API:
+
+```python
+import hvac
+
+client = hvac.Client(url="https://vault.company.local:8200", token=os.environ["VAULT_TOKEN"])
+secret = client.secrets.kv.read_secret_version(path="prod/postgres", mount_point="secret")
+postgres_pwd = secret["data"]["data"]["password"]
+```
+
+Плюсы:
+- Бесплатный (open source).
+- Поддерживает dynamic secrets (auto-generate DB credentials per session — выдан, использован, отозван).
+- Multi-cloud, on-prem.
+
+Минусы:
+- Сложнее в setup и operations (kuber-стек).
+
+### doppler
+
+SaaS, простая UI. Хорошо для маленьких команд.
+
+```bash
+$ doppler setup
+$ doppler run -- python dag.py
+# Все секреты из Doppler автоматически в env-vars
+```
+
+Плюсы:
+- Простой setup (5 минут).
+- Хорошая UI, audit log.
+- Бесплатный тariff для команд до 5 человек.
+
+Минусы:
+- Vendor lock-in.
+- Платно для production team scale.
+
+### 1Password CLI (op)
+
+Для маленьких команд / соло-developer. Использует общий 1Password vault.
+
+```bash
+$ eval $(op signin)
+$ export AWS_KEY=$(op read "op://Engineering/aws-prod/access_key")
+```
+
+Хорошо, когда команда уже использует 1Password для паролей — не нужен отдельный tool.
+
+---
+
+## DE-специфика: Airflow Connections и Variables
+
+Airflow имеет **два механизма** хранения secret-like values:
+
+1. **Connections** — для подключения к базам/API (host + login + password + extras JSON).
+2. **Variables** — для конфигов (например, S3 bucket name).
+
+И **три способа** хранить их:
+
+### (a) В Airflow UI / metadata DB (плохо)
+
+Junior часто видит этот туториал: «зайди в Admin -> Connections, добавь postgres_default с паролем». Это работает, но:
+
+- Пароль лежит в Airflow metadata DB (Postgres).
+- Кто имеет доступ к Airflow UI — видит пароль (через Edit, в зависимости от Airflow версии).
+- Backup metadata DB — содержит пароли.
+- Невозможно rotate централизованно.
+
+**OK для очень маленьких setup-ов**, не для production.
+
+### (b) Environment variables (лучше)
+
+Airflow умеет читать Connection из env-var с префиксом `AIRFLOW_CONN_`:
+
+```bash
+$ export AIRFLOW_CONN_POSTGRES_DEFAULT="postgres://dbt_runner:password@prod-db.internal/main"
+```
+
+В DAG:
+
+```python
+from airflow.providers.postgres.hooks.postgres import PostgresHook
+
+hook = PostgresHook(postgres_conn_id="postgres_default")
+# Airflow прочитает из AIRFLOW_CONN_POSTGRES_DEFAULT
+```
+
+Плюсы: пароль не в metadata DB. Env-var задаётся при старте контейнера из secret-источника (Kubernetes Secret, ECS Task Definition).
+
+Минусы: пароль всё ещё «на диске» в виде env, видим `ps -e environ`. Лучше — secrets backend.
+
+### (c) Secrets backend (production)
+
+Airflow поддерживает Secrets Backend для Connections и Variables:
+
+```bash
+# airflow.cfg
+[secrets]
+backend = airflow.providers.amazon.aws.secrets.secrets_manager.SecretsManagerBackend
+backend_kwargs = {"connections_prefix": "airflow/connections", "variables_prefix": "airflow/variables", "profile_name": null}
+```
+
+В AWS Secrets Manager создаём:
+
+```
+airflow/connections/postgres_default = "postgres://dbt_runner:***@prod-db.internal/main"
+airflow/variables/s3_bucket = "company-de-prod"
+```
+
+В DAG ничего не меняем:
+
+```python
+hook = PostgresHook(postgres_conn_id="postgres_default")
+bucket = Variable.get("s3_bucket")
+```
+
+Airflow сам пойдёт в Secrets Manager -> достанет -> закеширует. Junior пишет тот же код, что и в (a), но безопасность production-grade. Это правильный путь.
+
+<DiagramContainer title="Airflow Connection resolution с Secrets Backend">
+  <FlowColumn>
+    <FlowNode tooltip="DAG задаёт connection_id">{'PostgresHook(postgres_conn_id="postgres_default")'}</FlowNode>
+    <Arrow direction="down" />
+    <FlowNode tooltip="Airflow ищет в порядке: env -> secrets backend -> metadata DB">{'Airflow resolver chain'}</FlowNode>
+    <FlowRow>
+      <FlowNode tooltip="1. Env var AIRFLOW_CONN_POSTGRES_DEFAULT">{'env vars'}</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="2. Configured backend (Secrets Manager / Vault)">{'secrets backend'}</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="3. Fallback: airflow.connections таблица">{'metadata DB'}</FlowNode>
+    </FlowRow>
+    <Arrow direction="down" />
+    <FlowNode tooltip="Connection возвращается из первого источника, где найдено">{'Resolved connection'}</FlowNode>
+  </FlowColumn>
+</DiagramContainer>
+
+---
+
+## DE-специфика: dbt profiles.yml
+
+`profiles.yml` содержит credentials для подключения к warehouse. Никогда не коммитим. Но как тогда CI/CD?
+
+### env_var() — основной механизм
+
+```yaml
+# profiles.yml
+my_project:
+  outputs:
+    prod:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      password: "{{ env_var('SNOWFLAKE_PASSWORD') }}"
+      database: analytics
+      warehouse: transforming
+      schema: prod
+  target: prod
+```
+
+`env_var()` — Jinja-функция dbt, читает из переменных среды. Подставляется в runtime, не сохраняется на диск.
+
+CI/CD передаёт env-vars из secrets backend:
+
+```yaml
+# GitHub Actions
+- name: Run dbt
+  env:
+    SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+  run: dbt build
+```
+
+Локально — из `.env` через direnv или `dotenv`:
+
+```bash
+$ source .env
+$ dbt build
+```
+
+### env_var с дефолтом
+
+```yaml
+password: "{{ env_var('SNOWFLAKE_PASSWORD', 'default_for_local_dev') }}"
+```
+
+Если env-var не задана — берётся default. Удобно для dev: новый член команды клонировал, не настроил env — сразу видит fallback.
+
+### Key-pair authentication
+
+В 2026 многие DE-команды переходят с password auth на key-pair (Snowflake / Snowpipe):
+
+```yaml
+my_project:
+  outputs:
+    prod:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      private_key_path: "{{ env_var('SNOWFLAKE_KEY_PATH') }}"
+      private_key_passphrase: "{{ env_var('SNOWFLAKE_KEY_PASSPHRASE') }}"
+```
+
+`.p8` файл — секрет, никогда не коммитим. В CI — генерируется на лету из secret-store:
+
+```yaml
+- name: Setup Snowflake key
+  run: |
+    echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/key.p8
+    chmod 600 /tmp/key.p8
+  env:
+    SNOWFLAKE_KEY_PATH: /tmp/key.p8
+```
+
+---
+
+## Универсальный setup для нового DE-проекта
+
+Recipe, который подходит на 80% случаев:
+
+**1. `.gitignore` (стандартный для DE-проекта)**:
+
+```gitignore
+# Secrets
+.env
+.env.local
+*.pem
+*.p8
+*.key
+profiles.yml
+dbt_project_secrets.yml
+
+# Direnv
+.direnv/
+
+# IDE
+.vscode/launch.json
+.idea/
+
+# Python
+__pycache__/
+.venv/
+*.pyc
+*.egg-info/
+
+# Data files
+*.parquet
+*.duckdb
+*.sqlite
+
+# OS
+.DS_Store
+```
+
+**2. `.env.example`**:
+
+```bash
+# Snowflake credentials (получи у тимлида)
+SNOWFLAKE_ACCOUNT=
+SNOWFLAKE_USER=
+SNOWFLAKE_PASSWORD=
+
+# AWS (для S3 staging)
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+AWS_REGION=us-east-1
+
+# Slack для алертов (получи webhook у devops)
+SLACK_WEBHOOK_URL=
+```
+
+**3. `.envrc` (direnv)**:
+
+```bash
+dotenv
+source .venv/bin/activate
+export PYTHONPATH="$PWD/src:$PYTHONPATH"
+
+# Защита: предупреждаем если .env пустой
+if [ ! -f .env ] || ! grep -q "SNOWFLAKE_USER=." .env; then
+    echo "WARNING: .env is missing or incomplete. Copy from .env.example."
+fi
+```
+
+**4. `.pre-commit-config.yaml`** (из урока 02):
+
+```yaml
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+```
+
+**5. README onboarding section**:
+
+```markdown
+## Setup
+
+1. Clone the repo
+2. `cp .env.example .env` and fill in values (ask tech lead for production credentials)
+3. `direnv allow` (or `source .env` if no direnv)
+4. `uv sync` to install dependencies
+5. `pre-commit install` to enable secret scanning hook
+
+NEVER commit `.env`, `*.p8`, or `profiles.yml`. The pre-commit hook will block it.
+```
+
+Это — production-ready минимум для junior DE на день 1.
+
+---
+
+## Попробуй сам
+
+Создадим mini-DE-проект с правильным setup:
+
+```bash
+$ mkdir my-de-project && cd my-de-project
+$ git init
+
+# .gitignore
+$ cat > .gitignore << 'EOF'
+.env
+.env.local
+*.p8
+.direnv/
+__pycache__/
+EOF
+
+# .env.example (коммитим)
+$ cat > .env.example << 'EOF'
+POSTGRES_HOST=
+POSTGRES_USER=
+POSTGRES_PASSWORD=
+EOF
+
+# Свой .env (НЕ коммитим — gitignore)
+$ cp .env.example .env
+$ echo "POSTGRES_HOST=localhost" >> .env
+$ echo "POSTGRES_USER=dev" >> .env
+$ echo "POSTGRES_PASSWORD=dev-password" >> .env
+
+$ git add .
+$ git status
+# .env НЕ должен быть в списке
+
+$ git commit -m "Initial DE project structure"
+
+# Создаём DAG, использующий env-vars
+$ mkdir dags
+$ cat > dags/etl.py << 'EOF'
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+POSTGRES_HOST = os.environ["POSTGRES_HOST"]
+POSTGRES_USER = os.environ["POSTGRES_USER"]
+POSTGRES_PASSWORD = os.environ["POSTGRES_PASSWORD"]
+
+# Используем переменные, не hardcode
+print(f"Connecting to {POSTGRES_USER}@{POSTGRES_HOST}")
+EOF
+
+$ python dags/etl.py
+# Должен напечатать "Connecting to dev@localhost"
+
+# Проверяем gitleaks
+$ gitleaks detect --source . --verbose
+# Должен сказать "no leaks found"
+```
+
+---
+
+## Killer takeaway
+
+Hierarchy безопасности secrets для DE: (1) `.env` в `.gitignore` + `.env.example` коммитим — минимум для всех; (2) `direnv` — auto-load и удобство; (3) централизованный secrets backend — production. В Airflow используй secrets backend (AWS Secrets Manager / Vault), **не** Connections в UI с hardcoded паролями. В dbt — `env_var()` в `profiles.yml`, никогда не commit реальный `profiles.yml`. В CI — secrets через GitHub Secrets -> env-vars -> процесс. Главный принцип: **секреты не на диске Git**. Каждый шаг вверх по уровню увеличивает safety и удобство rotate-операций.
+
+<KnowledgeCheck quizSlug="17-secrets-security/04-env-files-best-practices" />

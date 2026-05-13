@@ -1,0 +1,95 @@
+{
+  "lessonSlug": "19-recovery/_exam",
+  "moduleId": "19-recovery",
+  "examTitle": "Экзамен: Восстановление сломанного репозитория",
+  "passThreshold": 70,
+  "_meta": {
+    "idPrefix": "git-m19-exam"
+  },
+  "questions": [
+    {
+      "id": "git-m19-exam-q1",
+      "type": "multiple-choice",
+      "question": "Hierarchy recovery options (от most preferred к least) для случая, когда junior потерял work после reset --hard:",
+      "options": [
+        {"id": "a", "text": "1) git reflog -> HEAD@{1}; 2) git fsck --lost-found если reflog пуст; 3) clone с remote если push был; 4) bundle от коллеги; 5) OS-level undelete (Time Machine)"},
+        {"id": "b", "text": "1) перезагрузить компьютер; 2) попросить в чате; 3) переписать"},
+        {"id": "c", "text": "1) git filter-repo; 2) git push --force"},
+        {"id": "d", "text": "1) Удалить .git/; 2) git init"}
+      ],
+      "correctAnswer": "a",
+      "explanation": "Правильный порядок recovery options по приоритету: (1) reflog — простейшее, работает в 90% случаев в первые 30 дней; (2) git fsck --lost-found — когда reflog не показывает (старый reset, или manually expired); (3) git clone — если работа была пушена в remote; (4) bundle от коллеги (`git bundle create` + scp) — если у коллеги локально есть копия; (5) OS-level undelete — Time Machine snapshot, btrfs snapshot. От most local/fast к most desperate. Скорость спасения работы важна — не жди, делай прямо сейчас.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m19-exam-q2",
+      "type": "multiple-choice",
+      "question": "Reflog хранит записи в течение скольки дней?",
+      "options": [
+        {"id": "a", "text": "Forever — никогда не expire"},
+        {"id": "b", "text": "gc.reflogExpire=90.days.ago for reachable refs, gc.reflogExpireUnreachable=30.days.ago for unreachable. После git gc — старые записи удаляются"},
+        {"id": "c", "text": "1 неделя"},
+        {"id": "d", "text": "Зависит от размера репо"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Default: reachable entries (есть путь от какого-то ref) — 90 дней, unreachable (orphans) — 30 дней. После gc Git purge-ит просроченные записи. Это значит: если 2 месяца назад junior сделал reset --hard и забыл — потерянные commits **точно** unreachable, **точно** старше 30 дней, **точно** удалены gc. Recovery невозможен через reflog. Можно настроить дольше: `git config gc.reflogExpire 365.days.ago` для critical репо. Главный takeaway: не жди с recovery.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m19-exam-q3",
+      "type": "multiple-choice",
+      "question": "Команда `git push --force-with-lease` vs `git push --force`. Какая защита первой?",
+      "options": [
+        {"id": "a", "text": "Никакой — это синонимы"},
+        {"id": "b", "text": "--force-with-lease отклоняет push, если remote ref сменился с момента последнего fetch (кто-то ещё запушил в эту ветку). --force — слепо overwrite. with-lease защищает от потери чужой работы на shared branch"},
+        {"id": "c", "text": "--force-with-lease быстрее в 2x"},
+        {"id": "d", "text": "--force-with-lease только для public репо"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "--force-with-lease — pillar безопасного force push. Сценарий: ты сделал rebase на feature/x, готов push. Параллельно коллега pushed fix в feature/x. Если ты `--force` — стираешь его commit без warning. Если `--force-with-lease` — Git проверяет, что remote feature/x = твоему последнему fetch-у; если кто-то ещё push-нул — refuse. Тебя надо сделать fetch, увидеть его changes, decide как merge, тогда повторить. Защита от inadvertent destruction. Best practice: всегда --force-with-lease вместо --force на любых shared branches.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m19-exam-q4",
+      "type": "multiple-choice",
+      "question": "На большом DE-репо `git clone` качает 8GB, jobs тормозят. Какие подходы для уменьшения?",
+      "options": [
+        {"id": "a", "text": "(1) Анализ через `git rev-list --objects --all | git cat-file ...` для нахождения largest blobs; (2) git lfs migrate import — для legitimate больших файлов; (3) git filter-repo --invert-paths — для случайно закоммиченных data files; (4) shallow clone --depth 50 для CI; (5) partial clone --filter=blob:none для read-only access"},
+        {"id": "b", "text": "Купить более мощный сервер"},
+        {"id": "c", "text": "Использовать только small репо"},
+        {"id": "d", "text": "Удалить старые branches"}
+      ],
+      "correctAnswer": "a",
+      "explanation": "Реальный production approach. (1) Diagnostic — что весит больше всего; (2) LFS — for legitimate big files (model checkpoints, sample data); (3) filter-repo — remove accidentally committed (production parquet, sqlite); (4) Shallow clone для CI — `--depth 50` не качает всю историю, достаточно для build/test; (5) Partial clone — `--filter=blob:none` качает дерево, blobs по требованию. Удаление branches — minor optimization (refs весят мало, blobs — все место). Все эти подходы можно combine для maximum effect.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m19-exam-q5",
+      "type": "multiple-choice",
+      "question": "Тебе сказали: `.git/objects/` corrupted, multiple loose objects bad. PRACTICAL action plan (junior level)?",
+      "options": [
+        {"id": "a", "text": "Часы дебага corrupted objects"},
+        {"id": "b", "text": "(1) backup uncommitted: copy локальные изменения в /tmp; (2) git stash или git diff > /tmp/changes.patch; (3) cd .. && mv repo repo.dead && git clone <remote> — clean copy с remote; (4) apply backup; (5) git fsck --full проверка нового clone"},
+        {"id": "c", "text": "Удалить весь репо и попросить tech lead"},
+        {"id": "d", "text": "rm -rf .git/ && git init"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Reasonable junior approach: re-clone — самое быстрое и надёжное. (1) Спасти local work (НЕ Git-tracked uncommitted). (2) Backup путём stash или diff патча. (3) Удалить broken repo, clone fresh. (4) Apply uncommitted поверх. (5) Verify integrity. 10 минут полного цикла. Не геройствуй с corrupted objects — это могут быть hours of debug без guarantees of success. Senior делает то же самое. Главное urok: push regular, чтобы uncommitted work не было критической.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m19-exam-q6",
+      "type": "multiple-choice",
+      "question": "`git maintenance start --global` для DE devbox — что это даёт и какие риски?",
+      "options": [
+        {"id": "a", "text": "Дает: автоматический weekly gc, daily incremental-repack, hourly commit-graph cache + prefetch (быстрее git pull) для ВСЕХ репо пользователя. Риск: фоновые tasks могут забрать CPU/IO в момент работы (минимальный, tasks niced)"},
+        {"id": "b", "text": "Никакого пользу, только tools зря работают"},
+        {"id": "c", "text": "Удаляет всё Git history"},
+        {"id": "d", "text": "Это для system maintenance Linux, не Git"}
+      ],
+      "correctAnswer": "a",
+      "explanation": "git maintenance — пытался replace ручной gc в proactive form. --global регистрирует tasks для всех репо пользователя (через ~/.gitconfig). Tasks: commit-graph (быстрая навигация по графу commits), prefetch (auto-fetch remote refs без update local — следующий git pull быстрее), loose-objects (упаковка), repack (incremental). Запускаются background через OS scheduler (launchd/systemd/Task Scheduler). niced (низкий приоритет). Riskи минимальны: иногда disk I/O в background при заняты CPU, но обычно незаметно. Recommended для DE devbox, где много репо. Disable: `git maintenance stop`.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "lessonSlug": "03-three-trees/04-anatomy-of-commit",
+  "moduleId": "03-three-trees",
+  "_meta": {
+    "idPrefix": "git-m03-04",
+    "description": "Quiz for lesson 3.4 — Анатомия коммита"
+  },
+  "questions": [
+    {
+      "id": "git-m03-04-q1",
+      "type": "multiple-choice",
+      "question": "Какие поля содержит commit-объект в Git?",
+      "options": [
+        { "id": "a", "text": "tree, parent (или несколько), author, committer, message" },
+        { "id": "b", "text": "diff, files, message" },
+        { "id": "c", "text": "branch, sha, files" },
+        { "id": "d", "text": "Только timestamp и сообщение" }
+      ],
+      "correctAnswer": "a",
+      "explanation": "Commit-объект содержит: tree (SHA tree-объекта — snapshot всего дерева файлов), parent (SHA предыдущего коммита, может быть несколько для merge commit, или ни одного для root commit), author (кто написал, имя+email+timestamp), committer (кто создал commit-объект, обычно тот же), message (произвольный текст с subject и body). Никакого diff в commit нет — это снимок, не разница.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m03-04-q2",
+      "type": "multiple-choice",
+      "question": "Junior сделал rebase ветки коллеги Alice. После этого видит, что в `git log --format=fuller` Author: Alice, Committer: Junior. Это нормально?",
+      "options": [
+        { "id": "a", "text": "Нет, это баг — должен быть Junior во всех полях" },
+        { "id": "b", "text": "Да, нормально. Author — кто НАПИСАЛ изменения (Alice, она писала код, её атрибуция сохраняется). Committer — кто СОЗДАЛ commit-объект (Junior, технически собрал новый коммит при rebase)" },
+        { "id": "c", "text": "Нет, нужно сделать git config user.name 'Alice'" },
+        { "id": "d", "text": "Это значит коммит подделан" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Это by design. Author = кто написал код (сохраняется при cherry-pick, rebase — Alice не теряет атрибуцию работы). Committer = кто технически создал commit-объект (Junior при rebase, GitHub-bot при веб-редактировании, maintainer при git am). AuthorDate тоже сохраняется (когда работа была сделана), CommitDate обновляется (когда коммит обрёл текущий SHA). В git shortlog (статистика контрибьюторов) считается Author — credit идёт правильному человеку.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m03-04-q3",
+      "type": "multiple-choice",
+      "question": "Сколько parent-ов у merge commit?",
+      "options": [
+        { "id": "a", "text": "Один — как у обычного коммита" },
+        { "id": "b", "text": "Ноль — это root commit" },
+        { "id": "c", "text": "Два или больше: первый parent — куда мержили (например, main), второй и далее — что мержили (feature/x, possibly more для octopus merge)" },
+        { "id": "d", "text": "Зависит от настроек" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "Merge commit имеет два parent-а (или больше для octopus merge — слияния 3+ веток). Первый parent — целевая ветка (та, в которую делается merge), второй — исходная ветка (которую мержат). Это и образует ветвление в DAG истории. Когда `git log` идёт по «first parent only» (флаг --first-parent), он идёт по основной линии главной ветки, игнорируя merge commit-ы из feature-веток.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m03-04-q4",
+      "type": "multiple-choice",
+      "question": "Какая команда покажет commit-объект изнутри со всеми полями (tree, parent, author, committer)?",
+      "options": [
+        { "id": "a", "text": "git log -1" },
+        { "id": "b", "text": "git show HEAD" },
+        { "id": "c", "text": "git cat-file -p HEAD — выведет содержимое commit-объекта в сыром виде" },
+        { "id": "d", "text": "git status HEAD" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "`git cat-file -p <SHA>` показывает содержимое любого объекта Git в человеко-читаемом виде. Для commit-объекта выведет: tree SHA, parent SHA, author с email и timestamp, committer, message. Это plumbing-команда. Альтернатива — `git log --format=raw -1`, которая показывает примерно то же самое, плюс строку commit <SHA> сверху. `git show HEAD` показывает коммит + diff с предыдущим, но не сырое содержимое объекта.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m03-04-q5",
+      "type": "true-false",
+      "question": "Можно создать commit без изменений (пустой commit) — это валидная операция в Git.",
+      "correctAnswer": true,
+      "explanation": "Да. `git commit --allow-empty -m 'Trigger CI'` создаёт коммит без изменений в файлах. Tree этого коммита — тот же, что у parent. Полезно для: триггерить CI rebuild без изменения кода, отметить milestone в истории, проверить, что push работает (на пустом коммите). С точки зрения объектной модели — это валидный commit-объект, ничего особенного.",
+      "bloomLevel": "conceptual"
+    }
+  ]
+}

@@ -1,0 +1,89 @@
+{
+  "moduleId": "13-gitignore-attributes",
+  "title": "Module 13 Exam — .gitignore и .gitattributes",
+  "passThreshold": 70,
+  "_meta": {
+    "idPrefix": "git-m13-exam",
+    "description": "6-question integrated exam for Module 13"
+  },
+  "questions": [
+    {
+      "id": "git-m13-exam-q1",
+      "type": "multiple-choice",
+      "question": "Полный синтаксис .gitignore: за что отвечают trailing slash, leading slash, ! и **?",
+      "options": [
+        { "id": "a", "text": "Это всё синонимы для glob-матчинга" },
+        { "id": "b", "text": "Trailing slash (`logs/`) — матчит только директорию, не файл с таким именем. Leading slash (`/config.py`) — якорит к корню репо, паттерн не матчит файлы в поддиректориях. `!.env.example` — отрицание предыдущего ignore (порядок важен). `**` — рекурсия по любой глубине директорий (`data/**/raw/` найдёт raw на любом уровне)" },
+        { "id": "c", "text": "Trailing slash для файлов, leading slash для папок" },
+        { "id": "d", "text": "Только `*` поддерживается, остальное игнорируется" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Четыре ключевые тонкости синтаксиса .gitignore: (1) Trailing slash (`logs/`) ограничивает паттерн только директориями — `logs.py` (файл) НЕ совпадёт. Без слеша (`logs`) совпадёт и файл, и директория. (2) Leading slash (`/config.py`) якорит к корню — НЕ совпадёт `data/config.py`. Без leading slash паттерн матчит на любой глубине. (3) `!` отменяет ignore — порядок важен: сначала `.env*`, потом `!.env.example`. Если родительская папка уже игнорируется (через trailing slash), `!` для внутренних файлов не работает. (4) `**` для явной рекурсии — `data/**/raw/` найдёт raw на любом уровне; без `**` Git строже трактует пути с `/`.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m13-exam-q2",
+      "type": "multiple-choice",
+      "question": "У тебя в репо случайно закоммитили .env с production-паролем. Какой полный алгоритм исправления?",
+      "options": [
+        { "id": "a", "text": "Добавить .env в .gitignore — этого достаточно" },
+        { "id": "b", "text": "(1) Немедленно ротировать пароли (старые скомпрометированы — кто-то мог склонить); (2) Добавить `.env` в .gitignore; (3) `git rm --cached .env` чтобы убрать из индекса; (4) Commit; (5) Для очистки ИСТОРИИ — `git filter-repo --path .env --invert-paths` (модуль 17) + force-push + предупредить команду пересоздать клоны. Без шагов 1 и 5 секреты остаются в git log forever" },
+        { "id": "c", "text": "Удалить весь репозиторий и создать новый" },
+        { "id": "d", "text": "`git push --force` исправит" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Полный алгоритм: (1) РОТИРУЙ секреты ПЕРВЫМ ДЕЛОМ — если репо публичный или внутренний с многими людьми, старые пароли уже считают скомпрометированными. (2) Добавь файл в .gitignore. (3) `git rm --cached .env` — убирает из индекса, но оставляет на диске. (4) `git commit -m 'chore: untrack .env'`. (5) Это убирает только из текущего коммита. Старые коммиты по-прежнему содержат секреты — `git log -- .env` покажет их. (6) Для очистки истории — `git filter-repo --path .env --invert-paths` (или BFG repo cleaner) и `git push --force-with-lease`. (7) Уведомить команду пересоздать клоны (force-push переписывает SHA). Подробно в модуле 17. Главное правило: первым шагом ВСЕГДА ротация секретов, не очистка.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m13-exam-q3",
+      "type": "multiple-choice",
+      "question": "Команда `git check-ignore -v file` молчит, но `git status` НЕ показывает файл. В чём может быть причина?",
+      "options": [
+        { "id": "a", "text": "Файл уже tracked в Git — `git status` показывает изменения только если они есть, отсутствие в выводе означает 'не модифицирован', а не 'не tracked'. `git check-ignore` молчит потому что игнор не применяется к tracked файлам. Проверь через `git ls-files | grep file`" },
+        { "id": "b", "text": ".gitignore не работает" },
+        { "id": "c", "text": "Файл не существует" },
+        { "id": "d", "text": "Git сломан" }
+      ],
+      "correctAnswer": "a",
+      "explanation": "Главная путаница: `git status` показывает три категории — modified (изменённые tracked), staged (в индексе), untracked (новые). НЕизменённые tracked файлы не показываются — их просто 'нет в новостях'. `git check-ignore` молчит потому что .gitignore просто не применяется к tracked файлам (он влияет только на untracked). Чтобы понять состояние конкретного файла: (1) `git ls-files | grep file` — показывает все tracked файлы; если файл есть — он tracked. (2) `git status` без аргументов — текущие изменения. (3) `git status --ignored` — все включая ignored. (4) Если файл tracked и не модифицирован — он 'invisible' в git status, это нормально. Это часто ловит junior-ов на сценарии 'я добавил .env в gitignore, но git status его не показывает' — ответ: он tracked, всё работает корректно, просто не модифицирован сейчас.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m13-exam-q4",
+      "type": "multiple-choice",
+      "question": "В чём фундаментальная разница между .gitignore и .gitattributes, и какие проблемы решает каждый?",
+      "options": [
+        { "id": "a", "text": "Это один и тот же файл" },
+        { "id": "b", "text": ".gitignore — список файлов, которые Git ИГНОРИРУЕТ (не tracked, не commit-ятся). Решает: не пускать секреты, build-артефакты, OS-мусор в репо. .gitattributes — конфигурация поведения Git для tracked файлов: line endings (text/eol), merge стратегии (для notebooks, lock-файлов), diff drivers (Python function names в hunk header), linguist метки (что считать generated/vendored для GitHub stats), export-ignore (для git archive)" },
+        { "id": "c", "text": ".gitignore для папок, .gitattributes для файлов" },
+        { "id": "d", "text": ".gitignore — синтаксис, .gitattributes — семантика" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Два разных файла с разными задачами. .gitignore — фильтр на входе: что вообще не пускать в Git. .gitattributes — поведение для тех, что уже внутри. Юзкейсы .gitignore: секреты (.env), сгенерированное (__pycache__, dist/), данные (data/raw/), OS-мусор (.DS_Store). Юзкейсы .gitattributes: (1) `* text=auto eol=lf` — нормализация line endings для cross-platform команд; (2) `*.ipynb merge=jupyter` — кастомный merge для Jupyter; (3) `*.py diff=python` — function names в hunk headers; (4) `target/ linguist-generated=true` — скрыть generated SQL из GitHub language stats; (5) `tests/ export-ignore` — не включать тесты в git archive релиза. Оба файла commit-ятся в репо, работают совместно. .gitattributes реже трогают, но в правильно настроенном репо обычно есть оба.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m13-exam-q5",
+      "type": "multiple-choice",
+      "question": "Какое лучшее решение для проблемы 'мой PR показывает 500 changed files, хотя я изменил только 1'?",
+      "options": [
+        { "id": "a", "text": "Откатить все изменения через `git reset --hard`" },
+        { "id": "b", "text": "Это line endings (CRLF/LF) — обычно из-за Windows-разработчика без правильных настроек или редактора, который пересохранил файлы. Решение: (1) В корне репо `.gitattributes` с `* text=auto eol=lf` + binary-исключения; (2) `git add --renormalize .` + commit нормализации; (3) После этого все клиенты дают одинаковый результат независимо от ОС; (4) Дополнить `.editorconfig` с `end_of_line = lf` чтобы редакторы создавали правильные файлы изначально" },
+        { "id": "c", "text": "Изменения некорректны — пересоздать ветку" },
+        { "id": "d", "text": "Это нормально для больших PR" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Это классический симптом разных line endings. Сценарий: коллега-Windows открыл файл в Notepad (или другом инструменте без правильной настройки), сохранил с CRLF (Windows default). Git видит каждый байт перехода строки разным — отсюда 'все строки изменены' хотя реально 1. Решение в `.gitattributes`: (1) `* text=auto eol=lf` — все text-файлы нормализуются в LF в storage; (2) Конкретные правила для бинарей (`*.png binary`) и Windows-only (`*.bat text eol=crlf`); (3) `git add --renormalize .` применяет правила ко всем уже tracked файлам — это создаст один 'normalize' commit; (4) После этого diff-ы становятся чистыми. Дополнение — `.editorconfig` с `end_of_line = lf` чтобы редакторы (VS Code, JetBrains) создавали файлы сразу с LF. .gitattributes переопределяет per-user `core.autocrlf`, поэтому работает одинаково на всех машинах.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m13-exam-q6",
+      "type": "true-false",
+      "question": "Правильный гигиенический setup нового Python DE проекта включает: (1) `.gitignore` с шаблоном с gitignore.io + project-specific правила (.env, data/); (2) `.gitattributes` с `* text=auto eol=lf` + binary исключения; (3) `.editorconfig` с `end_of_line = lf`. Эти три файла — инфраструктурная основа, commit-ятся в первый коммит репо.",
+      "correctAnswer": true,
+      "explanation": "Да, это canonical setup 2026. Три файла, каждый решает свою задачу: .gitignore — что НЕ tracked (секреты, артефакты, данные); .gitattributes — поведение Git для tracked (line endings, merge, diff, linguist); .editorconfig — настройки редакторов (LF, indent, charset) кросс-IDE. Все три commit-ятся в первый коммит вместе с README.md — это инфраструктурная основа репо. Стандартный workflow для нового проекта: `mkdir my-project && cd my-project && git init`, далее создать четыре файла (README + три config), `git add . && git commit -m 'chore: initial scaffold'`. После этого можно начинать писать код. Junior, который автоматизирует этот checklist, экономит часы дебага cross-platform проблем и language stats недоразумений в течение жизни проекта.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

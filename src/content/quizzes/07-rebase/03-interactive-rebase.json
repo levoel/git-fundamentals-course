@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "07-rebase/03-interactive-rebase",
+  "moduleId": "07-rebase",
+  "_meta": { "idPrefix": "git-m07-03" },
+  "questions": [
+    {
+      "id": "git-m07-03-q1",
+      "type": "multiple-choice",
+      "question": "В чём разница между командами `squash` и `fixup` в interactive rebase?",
+      "options": [
+        { "id": "a", "text": "Никакой разницы — синонимы" },
+        { "id": "b", "text": "squash объединяет коммит с предыдущим и предлагает редактировать объединённое сообщение; fixup объединяет, но игнорирует сообщение текущего коммита (берёт только сообщение предыдущего)" },
+        { "id": "c", "text": "squash для feature ветки, fixup для main" },
+        { "id": "d", "text": "squash удаляет коммит, fixup сохраняет" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Обе команды объединяют коммит с предыдущим. Разница в обработке сообщения: (1) **`squash`** открывает редактор с обоими сообщениями, ты их объединяешь. Полезно когда оба коммита несут смысл (например, 'feat: add X' + 'feat: add tests for X'). (2) **`fixup`** игнорирует сообщение текущего коммита, берёт только сообщение предыдущего. Полезно когда текущий коммит — мелкий фикс без самостоятельного смысла ('fix typo', 'lint'). В быту fixup используется чаще: 90% fixup-коммитов — это 'oops, fix something в предыдущем коммите', и сообщение не нужно.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m07-03-q2",
+      "type": "true-false",
+      "question": "`git commit --fixup=<sha>` создаёт специальный fixup-коммит, который автоматически распознаётся и сквашится при `git rebase --autosquash`.",
+      "correctAnswer": "true",
+      "explanation": "`git commit --fixup=abc1234` создаёт коммит с сообщением `fixup! <original-message>`. При последующем `git rebase --autosquash HEAD~N` Git автоматически: (1) переставляет fixup-коммит сразу после оригинального, (2) помечает его как `fixup` в плане. Тебе остаётся только сохранить план — Git выполнит. Это **самый быстрый** workflow для подготовки чистого PR: делаешь основные коммиты, потом мелкие fixup'ы с `--fixup`, в конце один `rebase --autosquash`. Включи `git config --global rebase.autoSquash true` — тогда `rebase -i` всегда с autosquash.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m07-03-q3",
+      "type": "multiple-choice",
+      "question": "У тебя 5 коммитов на PR ветке, ты хочешь объединить их в 2 логичных. Какой инструмент Git использовать?",
+      "options": [
+        { "id": "a", "text": "git merge --squash" },
+        { "id": "b", "text": "git rebase -i HEAD~5 — открыть редактор, использовать pick/fixup/squash/reword для каждого коммита" },
+        { "id": "c", "text": "git commit --combine" },
+        { "id": "d", "text": "git reset --soft HEAD~5 && git commit" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`git rebase -i HEAD~5` — стандартный инструмент для переписывания истории. Откроется редактор с планом: `pick` для каждого коммита. Меняешь команды на нужные: `pick` для первого основного, `fixup`/`squash` для тех, что объединить с предыдущим, `reword` для переименования. Сохраняешь — Git выполнит план. Вариант D (`git reset --soft + commit`) работает только для линейного 'все в один', не для 'разбить на 2 группы'. `git merge --squash` для объединения целой ветки в один коммит в другой ветке, не для перепаковки своей истории.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m07-03-q4",
+      "type": "multiple-choice",
+      "question": "Команда `edit` в interactive rebase делает что?",
+      "options": [
+        { "id": "a", "text": "Открывает редактор для изменения commit message" },
+        { "id": "b", "text": "Применяет коммит и останавливается, давая тебе изменить файлы / git commit --amend / git split — потом git rebase --continue" },
+        { "id": "c", "text": "Запускает GUI текстовый редактор" },
+        { "id": "d", "text": "Удаляет коммит" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`edit` применяет коммит и останавливает rebase. В этом состоянии ты можешь: (1) поправить файлы и сделать `git add` + `git commit --amend` — добавить изменения в этот коммит, (2) или сделать `git commit` для создания новых коммитов после этого (split одного коммита на несколько), (3) или просто проверить, что после коммита всё ок. Когда готов — `git rebase --continue` идёт дальше. Это полезно для: 'я забыл добавить файл в коммит', 'хочу разделить большой коммит на 3 атомарных', 'хочу поправить опечатку в коде'.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m07-03-q5",
+      "type": "multiple-choice",
+      "question": "Какие настройки делают interactive rebase удобнее в повседневной работе?",
+      "options": [
+        { "id": "a", "text": "rebase.autoSquash=true (автоматически распознаёт fixup!), rebase.autoStash=true (прячет локальные изменения), rerere.enabled=true (запоминает разрешения конфликтов)" },
+        { "id": "b", "text": "Отключить autoStash" },
+        { "id": "c", "text": "Использовать только vim как редактор" },
+        { "id": "d", "text": "Запретить interactive rebase" }
+      ],
+      "correctAnswer": "a",
+      "explanation": "Полезный setup: (1) **rebase.autoSquash=true** — `rebase -i` автоматически с `--autosquash`, fixup-коммиты сами становятся в правильное место. (2) **rebase.autoStash=true** — если у тебя есть локальные uncommitted изменения, rebase автоматически их stash'нет, выполнится, и pop'нет обратно. Без этого rebase ругнётся 'cannot rebase: you have unstaged changes'. (3) **rerere.enabled=true** — запоминает твои решения конфликтов и применяет в следующий раз (об этом следующий урок). С этим набором rebase из 'опасной техники' превращается в 'обычный инструмент работы'.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "10-stash-tags-cherry-pick/02-tags-lightweight-vs-annotated",
+  "moduleId": "10-stash-tags-cherry-pick",
+  "_meta": { "idPrefix": "git-m10-02" },
+  "questions": [
+    {
+      "id": "git-m10-02-q1",
+      "type": "multiple-choice",
+      "question": "Главная разница lightweight и annotated tag — что хранится в .git/objects?",
+      "options": [
+        { "id": "a", "text": "Они одинаковы по содержимому" },
+        { "id": "b", "text": "Lightweight = просто файл в .git/refs/tags/ с хэшем коммита (как ветка). Annotated = отдельный tag-object в .git/objects, содержащий tagger (имя+email), date, message, опциональную GPG signature, и ссылку на коммит. Annotated — full Git object, lightweight — просто алиас" },
+        { "id": "c", "text": "Lightweight быстрее" },
+        { "id": "d", "text": "Annotated работает только локально" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Lightweight — это просто .git/refs/tags/v1.0.0 файл с одной строкой (хэш коммита). Никаких метаданных, никакого history кто/когда. Annotated создаёт отдельный object в .git/objects (тип 'tag'), хранящий tagger, date, message, signature. Это full first-class Git object — как commit, tree, blob. Можно git cat-file -p v1.0.0 чтобы увидеть содержимое.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m10-02-q2",
+      "type": "multiple-choice",
+      "question": "Когда обязательно annotated tag, а не lightweight?",
+      "options": [
+        { "id": "a", "text": "Никогда — lightweight всегда работает" },
+        { "id": "b", "text": "Для production releases, external distributions (библиотеки, Docker images), для тегов которые видят другие люди. Annotated имеет метаданные (кто/когда/зачем), может быть GPG signed для верификации. Lightweight только для локальных закладок ('запомнить коммит для debug')" },
+        { "id": "c", "text": "Только для main ветки" },
+        { "id": "d", "text": "Annotated не работает с CI" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Production-правило: любой тег, который видят другие или используется системами (CI, deployment, package managers) — annotated. Метаданные критичны для аудита и changelog. Lightweight приемлемы только для private bookmarks. Many tools (включая git describe, GitHub Releases) специально работают с annotated. В DE команде: для версионирования Airflow DAGs / dbt models / Spark jobs — annotated only.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m10-02-q3",
+      "type": "multiple-choice",
+      "question": "Как запушить теги в origin?",
+      "options": [
+        { "id": "a", "text": "git push отправляет теги автоматически" },
+        { "id": "b", "text": "Один тег: git push origin v1.0.0. Все: git push origin --tags. Только annotated: git push --follow-tags. По умолчанию git push НЕ пушит теги (намеренно — чтобы не накапливать локальные). Best practice — git config --global push.followTags true чтобы annotated tags пушились автоматически с git push" },
+        { "id": "c", "text": "git push -t" },
+        { "id": "d", "text": "Tags не пушаются" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Push tags — explicit. Это защита от накопления локальных experimental tags в shared remote. Variants: --tags (всё), --follow-tags (только annotated, reachable из push-нутых коммитов), v1.0.0 (один). Если хочешь auto-push annotated tags: git config push.followTags true. Многие CI/CD пайплайны триггерятся на push tag (релиз-deployment), так что 'забыть push tag' = 'не задеплоить релиз'.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m10-02-q4",
+      "type": "multiple-choice",
+      "question": "Что означают части SemVer 2.3.1 -> 3.0.0?",
+      "options": [
+        { "id": "a", "text": "Просто инкремент" },
+        { "id": "b", "text": "MAJOR.MINOR.PATCH: 3.0.0 — MAJOR bump, означает breaking change без обратной совместимости (изменили API, удалили deprecated, поменяли schema БД требующую миграции). MINOR (2.3 -> 2.4) — новые features обратно совместимо. PATCH (2.3.1 -> 2.3.2) — bug fix" },
+        { "id": "c", "text": "Минорное обновление" },
+        { "id": "d", "text": "Только косметическое изменение" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Semantic Versioning (semver.org) стандарт: MAJOR.MINOR.PATCH. MAJOR — breaking. MINOR — backward-compat features. PATCH — backward-compat bug fixes. Pre-release suffix: -alpha.1, -beta.2, -rc.1. В DE-репо (dbt, Airflow DAGs) применимость SemVer варьирует: некоторые соблюдают строго (это библиотеки/SDK), некоторые свободнее (это application code). Но дисциплина MAJOR-bump на breaking changes критична для downstream consumers — они знают что готовиться к миграции.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m10-02-q5",
+      "type": "true-false",
+      "question": "После публикации v1.0.0 на проде безопасно удалить и заново поставить тег с тем же именем на другой коммит.",
+      "correctAnswer": false,
+      "explanation": "Нет, это плохая практика. Если кто-то fetch-нул v1.0.0 (CI/CD, customer, Docker registry) — у них одна версия. После git tag -d + git push --delete + git tag -a заново -> у других людей будет старая v1.0.0, у новых — новая. Несоответствия в проде, невоспроизводимые баги. SemVer диктует: published — immutable. Если ошибся — выпусти v1.0.1 (PATCH bump) с корректным контентом. На GitHub branch protection часто запрещает удаление тегов.",
+      "bloomLevel": "analytical"
+    }
+  ]
+}

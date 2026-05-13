@@ -1,0 +1,412 @@
+---
+title: "Анатомия коммита: author, committer, parent, tree"
+description: "Что такое commit-объект изнутри: author, committer (разное!), timestamps, parent SHA, tree SHA, message. git cat-file -p HEAD, git log --format=raw"
+order: 4
+difficulty: "beginner"
+estimatedTime: 18
+topics: ["Git", "Commit", "Author", "Committer", "Parent", "Tree"]
+---
+
+# Анатомия коммита: author, committer, parent, tree
+
+Когда вы делаете `git commit -m "fix"`, Git создаёт **commit-объект**. Это не «маркер» в каком-то журнале — это конкретный файл в `.git/objects/`, в строго определённом формате, с конкретными полями. В этом уроке мы вскроем commit и посмотрим, что внутри.
+
+Это нужно для нескольких практических задач: понимать, чем `Author` отличается от `Committer` (особенно после rebase), правильно читать `git log`, дебажить странные коммиты (когда timestamp скачет или метаданные не сходятся).
+
+---
+
+## Commit как объект
+
+В уроке про three trees мы видели, что `.git/objects/` содержит файлы по SHA. Один из них — commit. Содержимое можно посмотреть через `git cat-file -p`:
+
+```bash
+git cat-file -p HEAD
+```
+
+Вывод примерно такой:
+
+```text
+tree 3a79be23c0d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8
+parent a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
+author Ivan Petrov <ivan@example.com> 1715600000 +0300
+committer Ivan Petrov <ivan@example.com> 1715600000 +0300
+
+Add OAuth flow
+
+When user fails primary auth, try OAuth2 with refresh token.
+```
+
+Это commit-объект. Простой текстовый формат с полями. Разберём построчно.
+
+<DiagramContainer title="Структура commit-объекта" color="indigo">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="tree SHA" tooltip="Ссылка на tree-объект — snapshot всего дерева файлов на момент коммита. Самое важное поле — оно определяет, какие файлы в этом коммите" variant="highlight">tree</DataBox>
+      <DataBox label="parent SHA" tooltip="Ссылка на предыдущий commit. Это и образует историю — цепочку коммитов через указатели. Merge commit имеет 2+ parent">parent</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="author" tooltip="Кто НАПИСАЛ код. Имя + email + timestamp. Сохраняется при rebase/cherry-pick (не меняется)">author</DataBox>
+      <DataBox label="committer" tooltip="Кто СОЗДАЛ коммит. После rebase это вы, даже если author — другой. Имя + email + timestamp">committer</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="message" tooltip="Сообщение коммита. Первая строка — subject, дальше — body. Может содержать любой текст">message</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+---
+
+## tree: snapshot файлов
+
+Поле `tree` — это SHA-объекта типа `tree`, который описывает snapshot **всего дерева директорий на момент коммита**.
+
+```bash
+git cat-file -p 3a79be23c0d4...   # просмотр tree
+```
+
+Вывод:
+
+```text
+100644 blob 2e65efe2a145dda7ee51d1741299f848e5bf752e    a.txt
+100644 blob 5b1c4e6c2f3d4e5f6...                        b.txt
+040000 tree 7c8d9e0f1a2b3c4d5...                        src
+```
+
+Tree содержит список записей: `mode`, `тип объекта`, `SHA объекта`, `имя`.
+
+- `100644 blob ... a.txt` — файл a.txt (mode 100644 = regular file, не executable), его содержимое — blob с указанным SHA
+- `040000 tree ... src` — поддиректория src/, её содержимое — другой tree-объект
+
+То есть tree описывает **директорию рекурсивно**: файлы напрямую (blob), поддиректории — через ссылки на другие tree-объекты. Похоже на файловую систему, но immutable и адресуемое через SHA.
+
+<Callout type="note">
+Содержимое tree — это «snapshot» в смысле, что Git может в любой момент восстановить состояние директории из этого tree. Без зависимости от истории, от других коммитов — tree автономен. Это и значит, что коммит — это полный snapshot, а не дельта.
+</Callout>
+
+---
+
+## parent: связь с предыдущим коммитом
+
+Поле `parent` — это SHA предыдущего коммита. Именно через parent образуется **история**: цепочка коммитов, связанных указателями.
+
+```text
+HEAD -> commit C ──parent-> commit B ──parent-> commit A ──parent-> (none, root)
+```
+
+Чтобы посмотреть историю — Git идёт по parent-ссылкам от текущего HEAD к корню.
+
+Несколько важных случаев:
+
+<DiagramContainer title="Варианты parent в commit" color="emerald">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Обычный commit" tooltip="Один parent — предыдущий коммит на этой ветке">1 parent</DataBox>
+      <DataBox label="Root commit" tooltip="Первый коммит в репозитории. БЕЗ parent. Поле parent отсутствует в commit-объекте">0 parents</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Merge commit" variant="highlight" tooltip="Коммит, образованный merge двух веток. Имеет ДВА parent (или больше для octopus merge): первый — куда мержили, второй — что мержили">2+ parents</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Например, merge commit:
+
+```bash
+git cat-file -p <merge-commit-SHA>
+```
+
+```text
+tree ...
+parent abc123...  ← куда мержим (например, main)
+parent def456...  ← что мержим (например, feature/x)
+author ...
+committer ...
+
+Merge branch 'feature/x' into main
+```
+
+Два parent. Подробно про merge — модуль 04.
+
+---
+
+## author vs committer: критическое отличие
+
+Это поле, которое путает junior больше всего.
+
+**Author** — кто **написал** изменения. Это человек, чья работа фиксируется. Имя + email + timestamp, когда работа была закончена.
+
+**Committer** — кто **создал** commit-объект. Это технический акт сборки коммита. В типичной ситуации это тот же человек, что и автор. Но не всегда.
+
+<DiagramContainer title="Author vs Committer — когда отличаются" color="amber">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Обычный коммит" tooltip="Вы сами написали код и закоммитили. Author = Committer = вы. 99% случаев">A = C</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Cherry-pick" tooltip="Вы взяли коммит от Bob и cherry-picked в свою ветку. Author остаётся Bob (он писал код), Committer становится вы (вы технически создали коммит в своей ветке)">A: Bob, C: вы</DataBox>
+      <DataBox label="Rebase" tooltip="Вы перебазировали ветку Alice. Author = Alice (исходный автор), Committer = вы (вы создали новый commit-объект)">A: Alice, C: вы</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Maintainer-проект" tooltip="Bob прислал patch по email. Maintainer применил через git am. Author = Bob, Committer = maintainer">A: Bob, C: maint</DataBox>
+      <DataBox label="GitHub web edit" tooltip="Изменили файл в GitHub UI. Author = вы (по вашему email), Committer = noreply@github.com">A: вы, C: gh-bot</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Почему это важно:
+
+1. **Атрибуция кредита** — в `git shortlog -s` (статистика по авторам) считается Author, не Committer. Если вы делаете rebase чужой ветки — автор остаётся прежним, кредит идёт ему.
+2. **GitHub отображение** — на странице коммита GitHub показывает обоих, с подписями «authored» и «committed».
+3. **Timestamp** — author date и committer date разные. После rebase committer date обновляется (это «когда коммит появился в текущей форме»), author date остаётся.
+
+```bash
+git log --format=fuller -1
+# commit a1b2c3d...
+# Author:     Ivan Petrov <ivan@example.com>
+# AuthorDate: Sat May 10 14:30:21 2026 +0300
+# Commit:     Ivan Petrov <ivan@example.com>
+# CommitDate: Sun May 12 09:15:42 2026 +0300       ← Rebase двое суток спустя!
+# 
+#     Add OAuth flow
+```
+
+Здесь AuthorDate — когда работа была сделана (10 мая). CommitDate — когда коммит обрёл текущую SHA (12 мая, после rebase).
+
+---
+
+## Timestamps: Unix epoch + timezone
+
+Timestamps в commit-объекте хранятся в Unix epoch (секунды с 1 января 1970 UTC) + смещение часового пояса:
+
+```text
+author Ivan Petrov <ivan@example.com> 1715600000 +0300
+```
+
+- `1715600000` — Unix timestamp (UTC)
+- `+0300` — смещение от UTC (Москва — UTC+3)
+
+Когда `git log` показывает дату, он переводит её в локальный часовой пояс или в часовой пояс автора (зависит от настроек):
+
+```bash
+# Локальный часовой пояс смотрящего
+git log --date=local
+
+# Часовой пояс автора (как было сохранено в коммите)
+git log --date=auto
+
+# Относительное время
+git log --date=relative
+# 2 hours ago
+# 3 days ago
+```
+
+<Callout type="tip">
+В DE-командах с разработчиками в разных часовых поясах хорошая привычка — `git log --date=iso-local`, чтобы видеть время в едином формате (ISO 8601) и в локальном времени. Так легче понять, кто и когда делал коммит относительно вашего рабочего дня.
+</Callout>
+
+---
+
+## Message: subject и body
+
+Сообщение коммита — произвольный текст. Конвенции:
+
+- **Subject** (первая строка): ≤ 50 символов, императив («Add OAuth», не «Added OAuth» и не «Adding OAuth»)
+- **Пустая строка** между subject и body
+- **Body**: подробное описание, можно многопараграфно
+
+```text
+feat(auth): add OAuth2 flow
+
+When primary password auth fails, attempt OAuth2 with
+refresh token. Falls back to email reset if OAuth fails.
+
+This reduces login error rates from ~5% to ~1.5% based
+on staging environment metrics.
+
+Refs #234
+```
+
+Это **семантика только для людей**. Для Git message — просто строка. Но команды/проекты используют конвенции (Conventional Commits — модуль 11), чтобы автоматизировать changelog, semver, etc.
+
+### Многострочный message из CLI
+
+```bash
+git commit -m "subject" -m "body"
+# Два -m создают subject и body, разделённые пустой строкой
+
+# Или: одна -m с явными переводами строк (shell-зависимо)
+git commit -m "subject
+
+body line 1
+body line 2"
+
+# Или: без -m, открыть редактор
+git commit
+```
+
+---
+
+## Просмотр коммитов
+
+### git log: разные форматы
+
+Базовый:
+
+```bash
+git log
+```
+
+В одну строку:
+
+```bash
+git log --oneline
+# a1b2c3d Add OAuth flow
+# e5f6g7h Fix login NPE
+# ...
+```
+
+С графом ветвлений:
+
+```bash
+git log --oneline --graph --all
+# * a1b2c3d (HEAD -> main) Add OAuth flow
+# | * d4e5f6g (feature/x) WIP
+# |/
+# * e5f6g7h Fix login NPE
+```
+
+Полные данные:
+
+```bash
+git log --format=fuller
+# commit a1b2c3d...
+# Author:     Ivan <ivan@example.com>
+# AuthorDate: Sat May 10 14:30:21 2026 +0300
+# Commit:     Ivan <ivan@example.com>
+# CommitDate: Sun May 12 09:15:42 2026 +0300
+#     Add OAuth flow
+```
+
+Машинно-читаемый сырой формат:
+
+```bash
+git log --format=raw -1
+# commit a1b2c3d...
+# tree 3a79be...
+# parent e5f6g7...
+# author Ivan Petrov <ivan@example.com> 1715600000 +0300
+# committer Ivan Petrov <ivan@example.com> 1715600000 +0300
+# 
+#     Add OAuth flow
+```
+
+Это тот же формат, что внутри commit-объекта (с добавленным `commit <SHA>` сверху).
+
+### Кастомный формат
+
+```bash
+git log --format="%h %an %ad %s" --date=short
+# a1b2c3d Ivan Petrov 2026-05-10 Add OAuth flow
+# e5f6g7h Ivan Petrov 2026-05-09 Fix login NPE
+```
+
+Placeholders:
+
+- `%h` — short SHA
+- `%H` — full SHA
+- `%an` — author name
+- `%ae` — author email
+- `%ad` — author date
+- `%cn` — committer name
+- `%cd` — committer date
+- `%s` — subject
+- `%b` — body
+
+Полный список — `man git-log`. Очень богатый язык форматирования.
+
+---
+
+## Особые случаи
+
+### Пустой коммит
+
+Можно создать коммит без изменений:
+
+```bash
+git commit --allow-empty -m "Trigger CI rebuild"
+```
+
+Полезно: триггерить CI, отметить milestone в истории, отправить «пинг» (увидеть, что push работает на пустом коммите).
+
+### Коммит без подписи (если включена `commit.gpgsign true`)
+
+```bash
+git commit --no-gpg-sign -m "Quick fix"
+```
+
+Один коммит без подписи. Глобальная настройка остаётся.
+
+### Изменить timestamp коммита
+
+```bash
+GIT_AUTHOR_DATE="2026-05-01T12:00:00" \
+GIT_COMMITTER_DATE="2026-05-01T12:00:00" \
+git commit -m "Backdated commit"
+```
+
+Для тестов / экспериментов. В production обычно не используют, чтобы не путать историю.
+
+---
+
+## Попробуй сам
+
+1. Создайте коммит и вскройте его:
+
+```bash
+cd ~/git-sandbox/lesson-03-init  # должен быть от ранее
+git cat-file -p HEAD
+```
+
+2. Посмотрите все поля:
+
+```bash
+git log --format=raw -1
+git log --format=fuller -1
+```
+
+3. Создайте серию коммитов с разными author и committer (через environment variables):
+
+```bash
+GIT_AUTHOR_NAME="Alice" GIT_AUTHOR_EMAIL="alice@example.com" \
+git commit --allow-empty -m "From Alice as author"
+
+git log --format=fuller -1
+```
+
+Увидите, что Author — Alice, Committer — вы. Это и есть демонстрация разделения.
+
+4. Посмотрите tree последнего коммита:
+
+```bash
+git cat-file -p HEAD^{tree}
+# или
+TREE_SHA=$(git rev-parse HEAD^{tree})
+git cat-file -p $TREE_SHA
+```
+
+5. Через `git log` посмотрите коммиты в разных форматах:
+
+```bash
+git log
+git log --oneline
+git log --graph --oneline --all
+git log --format=fuller
+git log --format="%h %an %ar: %s"
+```
+
+---
+
+<KnowledgeCheck
+  question="Junior сделал rebase ветки feature/auth, написанной коллегой Alice. После rebase Junior смотрит git log и видит, что коммиты всё ещё помечены как Author: Alice — но в `git log --format=fuller` видно, что Committer: Junior. Это нормально или баг?"
+  answer="Это нормально и правильно. Author и Committer — два разных поля в commit-объекте. Author — кто НАПИСАЛ изменения (Alice написала код), это атрибуция работы. Committer — кто СОЗДАЛ commit-объект (Junior технически собрал его при rebase). При rebase Git сохраняет Author оригинальных коммитов (Alice не теряет кредит за свою работу), но Committer обновляется на того, кто делает rebase (Junior). AuthorDate тоже сохраняется (когда работа была сделана), а CommitDate обновляется (когда коммит был пере-собран). Это поведение by design: Git уважает атрибуцию работы, отдельно от технического акта сборки коммита. В `git shortlog` (статистика контрибьюторов) считается Author, поэтому Alice всё ещё видна как автор работы. Это важно для корректной credit attribution в open-source и команде."
+/>

@@ -1,0 +1,63 @@
+{
+  "lessonSlug": "15-hooks-automation/03-conventional-commits",
+  "moduleId": "15-hooks-automation",
+  "_meta": {
+    "idPrefix": "git-m15-03",
+    "description": "Quiz for lesson 03 of module 15 — conventional commits"
+  },
+  "questions": [
+    {
+      "id": "git-m15-03-q1",
+      "type": "multiple-choice",
+      "question": "Какие 11 канонических типов в Conventional Commits и для чего каждый?",
+      "options": [
+        { "id": "a", "text": "Только feat и fix" },
+        { "id": "b", "text": "feat (новая фича -> MINOR bump), fix (bugfix -> PATCH), chore (обслуживание, deps), docs (документация), refactor (без изменения логики), test (тесты), style (формат кода), perf (performance), build (build system, Dockerfile), ci (CI/CD config), revert (отмена). BREAKING CHANGE: или ! -> MAJOR bump" },
+        { "id": "c", "text": "Любые слова на английском" },
+        { "id": "d", "text": "Только commit/push/pull" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Полный список канонических типов Conventional Commits с семантикой: (1) feat — новая функциональность для пользователя. Bumps MINOR version (1.5.0->1.6.0). (2) fix — исправление бага. Bumps PATCH (1.5.0->1.5.1). (3) chore — обслуживание: обновление зависимостей, internal tooling. No version bump. (4) docs — только документация (README, docstrings). (5) refactor — рефакторинг без изменения внешней функциональности. (6) test — добавление/изменение тестов. (7) style — форматирование кода, whitespace, без логических изменений. (8) perf — performance оптимизации. (9) build — build system: Dockerfile, requirements.txt, setup.py. (10) ci — CI/CD configs: GitHub Actions, GitLab CI. (11) revert — отмена предыдущего commit (revert: feat: ...). BREAKING CHANGE — указывается через `!` после type/scope (`feat!:`) или footer `BREAKING CHANGE: <description>`. Bumps MAJOR (1.5.0->2.0.0). На основе типов автоматизированные tools (semantic-release) определяют тип релиза и bumps version. CHANGELOG генератор (git-cliff, conventional-changelog) группирует по типам.",
+      "studyHint": "Повторите урок 03 — раздел 'Канонические типы'",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m15-03-q2",
+      "type": "multiple-choice",
+      "question": "Какая выгода от использования conventional commits для production DE проекта?",
+      "options": [
+        { "id": "a", "text": "Это только стилистическое предпочтение" },
+        { "id": "b", "text": "(1) Читаемый git log — fest impact каждого commit с одного взгляда; (2) Автоматический CHANGELOG через git-cliff/conventional-changelog — без ручной работы; (3) Auto versioning через semantic-release: feat->minor, fix->patch, BREAKING CHANGE->major; (4) Code review проще — chore PR low risk, feat — высокий; (5) Industry standard — Airflow, dbt, Kubernetes используют" },
+        { "id": "c", "text": "Только для open-source" },
+        { "id": "d", "text": "Делает commits короче" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Полный value proposition conventional commits: (1) Читаемость — через 6 месяцев в git log без conventional невозможно понять impact commits. С conventional — feat/fix/chore сразу классифицируют. (2) Автоматический CHANGELOG — git-cliff (Rust, быстрый) или conventional-changelog (Node) генерят release notes из commits. Никакой ручной работы. Output структурирован: ### Features, ### Bug Fixes, ### Chores. (3) Semantic-release — JS tool, который читает commits с last tag, определяет тип релиза, bumps version (по SemVer rules), создаёт Git tag, GitHub Release. Полная end-to-end автоматизация. Особенно ценно для shared libraries (pip-пакеты, dbt-packages, npm modules) — юзеры сразу видят какая версия добавляет фичи, какая фиксит баги. (4) Code review — PR с only `chore:` commits — низкий риск, можно быстро merge. С `feat:` — нужно более внимательное review. (5) PR title/squash — на GitHub PR title часто = squash commit. Conventional format в title даёт стандартизацию даже без местные commits. (6) Industry — Airflow, dbt, Kubernetes, React, Vue, Angular требуют conventional в их contributing guidelines. Опыт переносится между проектами. Для DE особенно ценно в shared libs и dbt-packages.",
+      "studyHint": "Повторите урок 03 — раздел 'Зачем нужен стандарт'",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m15-03-q3",
+      "type": "multiple-choice",
+      "question": "Как валидировать conventional commits в команде через commitlint?",
+      "options": [
+        { "id": "a", "text": "Только через code review" },
+        { "id": "b", "text": "(1) Добавить в .pre-commit-config.yaml hook `alessandrojcm/commitlint-pre-commit-hook` со stages: [commit-msg] и additional_dependencies: ['@commitlint/config-conventional']. (2) Создать commitlint.config.js с rules. (3) `pre-commit install --hook-type commit-msg` — активирует commit-msg hook. (4) Любой commit с невалидным format отменяется автоматически с пояснительным сообщением" },
+        { "id": "c", "text": "Установить специальный VS Code plugin" },
+        { "id": "d", "text": "Невозможно автоматизировать" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Commitlint setup через pre-commit: (1) Pre-commit hook добавляется в .pre-commit-config.yaml: ```yaml repos: - repo: https://github.com/alessandrojcm/commitlint-pre-commit-hook rev: v9.16.0 hooks: - id: commitlint stages: [commit-msg] additional_dependencies: ['@commitlint/config-conventional'] ``` . stages: [commit-msg] критично — указывает что hook запускается на commit-msg stage (после message написано, перед фактическим commit), не на pre-commit. (2) Config файл `commitlint.config.js`: ```js module.exports = { extends: ['@commitlint/config-conventional'], rules: { 'type-enum': [2, 'always', ['feat', 'fix', 'docs', ...]], 'subject-case': [2, 'never', ['upper-case']], 'header-max-length': [2, 'always', 72] } }; ``` . (3) `pre-commit install --hook-type commit-msg` — по умолчанию pre-commit install регистрирует только pre-commit hook, для commit-msg нужен --hook-type. (4) Тест: `git commit -m 'fixed bug'` — fails ('type may not be empty'). `git commit -m 'fix: handle null timestamp'` — passes. Alternative — commitizen (`cz commit`) для guided commit creation, особенно полезен в onboarding period.",
+      "studyHint": "Повторите урок 03 — раздел 'Валидация через commitlint'",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m15-03-q4",
+      "type": "true-false",
+      "question": "В DBT/Airflow proекте полезно расширить базовые conventional commits типы своими: например, добавить `data:` для commits, которые обновляют DBT seeds или данные тестовых fixtures.",
+      "correctAnswer": true,
+      "explanation": "Да, conventional commits — это спецификация, которая позволяет расширения для domain-specific types. Базовые 11 (feat, fix, chore, docs, refactor, test, style, perf, build, ci, revert) — стандарт. Дополнительные типы для DE: `data:` для обновлений seeds/fixtures (`data: refresh transactions test fixture`), `migration:` для DB-миграций (`migration: add users.created_at column`), `pipeline:` для изменений в Airflow DAG-ах если они выделены в категории. В commitlint config: ```js rules: { 'type-enum': [2, 'always', [ 'feat', 'fix', 'chore', 'docs', 'refactor', 'test', 'style', 'perf', 'build', 'ci', 'revert', 'data', 'migration' // custom ]] } ``` . Аналогично можно ограничить scope-ы через `'scope-enum': [2, 'always', ['airflow', 'dbt', 'api', 'ml', ...]]`. Это даёт structured commits, специфичные для вашего DE-проекта. Главное — задокументировать в CONTRIBUTING.md или README кастомные types, иначе новые коллеги не понимают разницы между `feat:` и `data:`. На уровне tooling (git-cliff, semantic-release) кастомные типы поддерживаются — добавляешь section в config: 'data: Data Updates' появится в CHANGELOG.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

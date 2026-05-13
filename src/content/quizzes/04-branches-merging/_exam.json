@@ -1,0 +1,78 @@
+{
+  "moduleId": "04-branches-merging",
+  "_meta": { "idPrefix": "git-m04-exam" },
+  "questions": [
+    {
+      "id": "git-m04-exam-q1",
+      "type": "multiple-choice",
+      "question": "Junior выполнил `git switch -c feature/new-dag` и удивляется, как Git так быстро 'создаёт ветку'. Что именно произошло с точки зрения файловой системы?",
+      "options": [
+        { "id": "a", "text": "Git склонировал все объекты текущей ветки и создал отдельное хранилище для feature/new-dag." },
+        { "id": "b", "text": "В .git/refs/heads/feature/new-dag создан текстовый файл размером ~41 байт, содержащий SHA текущего HEAD-коммита. HEAD обновлён, чтобы указывать на этот новый ref. Объекты не копируются — ветка это лишь указатель." },
+        { "id": "c", "text": "Создан новый commit с сообщением 'Branch feature/new-dag created'." },
+        { "id": "d", "text": "Git создал shallow-clone репозитория в .git/branches/feature/new-dag/." }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Ветка в Git — это просто файл-указатель размером ~41 байт (40-символьный SHA + newline) в .git/refs/heads/<name>. Поэтому создание/удаление ветки — мгновенная операция. Можно увидеть `cat .git/refs/heads/main`. Вариант (a) — клонирование объектов не происходит, они шарятся; (c) — создание ветки не создаёт коммит, HEAD сдвигается на существующий коммит; (d) — папки .git/branches/ нет (есть legacy /branches/ в старых версиях, но не используется).",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m04-exam-q2",
+      "type": "multiple-choice",
+      "question": "Junior мержит feature в main: `git switch main && git merge feature`. Git делает fast-forward вместо merge commit. Почему именно сейчас возможен fast-forward, и когда — нет?",
+      "options": [
+        { "id": "a", "text": "Fast-forward возможен, когда main является ancestor (прямым предком) feature в DAG — то есть main не имел собственных коммитов с момента отхода feature. Git просто двигает указатель main вперёд на коммит feature, без создания merge-коммита. Если в main появились коммиты после ответвления feature — fast-forward невозможен, нужен three-way merge с merge-коммитом, у которого 2 parent." },
+        { "id": "b", "text": "Fast-forward всегда возможен — Git выбирает его по умолчанию для любого merge." },
+        { "id": "c", "text": "Fast-forward работает только если feature содержит ровно один коммит." },
+        { "id": "d", "text": "Fast-forward невозможен в Git 2.40+, оно deprecated." }
+      ],
+      "correctAnswer": "a",
+      "explanation": "FF возможен только когда target branch (main) — ancestor source (feature), т.е. путь от main к feature в DAG линейный. Git просто двигает указатель ref без создания merge-коммита. Если main имеет собственные коммиты после ответвления — нужен three-way merge: общий ancestor + tip main + tip feature, результат — merge-коммит с двумя parent. Вариант (b) — FF не всегда возможен; (c) — количество коммитов не имеет значения; (d) — FF полностью поддерживается, не deprecated.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m04-exam-q3",
+      "type": "multiple-choice",
+      "question": "Команда требует использовать `git merge --no-ff feature` даже когда fast-forward возможен. Зачем?",
+      "options": [
+        { "id": "a", "text": "--no-ff заставляет Git создать merge-коммит даже при возможном FF. Это сохраняет в истории факт существования ветки feature (видно где она началась и закончилась) и группирует коммиты ветки под одним merge-коммитом — удобно для code review, revert (один merge-коммит можно откатить целиком) и анализа истории." },
+        { "id": "b", "text": "--no-ff ускоряет merge, потому что не нужно вычислять ancestor." },
+        { "id": "c", "text": "--no-ff единственный способ замержить ветку с конфликтами." },
+        { "id": "d", "text": "--no-ff требуется GitHub для создания PR." }
+      ],
+      "correctAnswer": "a",
+      "explanation": "--no-ff форсирует создание merge-коммита (с двумя parent) даже когда FF возможен. Это явная история ветки: видно где она ответвилась и где влилась, можно откатить весь feature одной командой `git revert -m 1 <merge-sha>`. Многие команды используют --no-ff для main как политику. Вариант (b) — --no-ff делает больше работы (создаёт коммит), а не ускоряет; (c) — конфликты разрешаются и при FF, и при three-way; (d) — GitHub поддерживает все варианты (FF, merge, squash).",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m04-exam-q4",
+      "type": "multiple-choice",
+      "question": "Junior выполнил `git checkout <sha-старого-коммита>` и получил предупреждение про 'detached HEAD'. Что это значит, и как безопасно выйти?",
+      "options": [
+        { "id": "a", "text": "Detached HEAD = критическая ошибка, нужно немедленно делать `git reset --hard origin/main`, иначе репо сломан." },
+        { "id": "b", "text": "Detached HEAD = HEAD указывает напрямую на коммит, а не на ветку. Безопасно для просмотра/тестов. Если сделаете коммиты — они 'висят' без ветки и могут быть собраны gc. Выход: либо `git switch -` (вернуться на предыдущую ветку), либо `git switch -c new-branch` чтобы сохранить новые коммиты в ветку." },
+        { "id": "c", "text": "Detached HEAD навсегда удаляет все коммиты текущей ветки." },
+        { "id": "d", "text": "Detached HEAD — это режим только-чтение, Git не даст сделать ничего, даже git log." }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Detached HEAD — HEAD как 'свободный указатель' на конкретный коммит вместо ссылки на ветку. Сам по себе безопасен (можно смотреть, билдить старую версию). Опасность: новые коммиты в этом состоянии не привязаны к ветке и могут быть собраны git gc через ~30 дней. Выход: `git switch <branch>` если не нужны изменения, или `git switch -c new-branch` чтобы сохранить. Вариант (a) — reset --hard origin/main потеряет несинхронизированную работу; (c) — текущая ветка остаётся нетронутой; (d) — Git работает нормально, можно делать log/diff/commit.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m04-exam-q5",
+      "type": "true-false",
+      "question": "Когда Git выполняет three-way merge ветки feature в main, создаётся новый commit-объект, у которого поле parent содержит ДВА SHA: tip main (до merge) и tip feature. Это единственный 'обычный' случай, когда у коммита больше одного родителя.",
+      "correctAnswer": true,
+      "explanation": "Three-way merge всегда создаёт merge-commit с двумя parent (или больше при octopus merge). Первый parent — ветка, в которую мержим (main), второй — ветка-источник (feature). Это объясняет важность параметра -m в `git revert -m 1 <merge-sha>` — нужно указать 'основной' parent (1 = main), Git вычисляет diff относительно него. Все остальные коммиты имеют 0 parent (root commit, обычно первый в репо) или 1 parent (обычный коммит).",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m04-exam-q6",
+      "type": "true-false",
+      "question": "Файл `.git/HEAD` обычно содержит ссылку вида `ref: refs/heads/main`, что означает 'HEAD указывает на ветку main'. При detached HEAD этот файл содержит непосредственно SHA-коммита вместо `ref:`-ссылки.",
+      "correctAnswer": true,
+      "explanation": "HEAD реализован как симлинк-подобная ссылка в текстовом виде. Обычное состояние: `cat .git/HEAD` -> `ref: refs/heads/main\\n` — HEAD ссылается на ref (косвенно через файл refs/heads/main), который ссылается на SHA. При detached HEAD файл содержит прямо `<sha>\\n` без `ref:`. Поэтому `git status` определяет состояние из формата .git/HEAD, и почему detached HEAD коммиты 'висят' — нет ref'а, который бы их удерживал от gc.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

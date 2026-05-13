@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "07-rebase/02-basic-rebase",
+  "moduleId": "07-rebase",
+  "_meta": { "idPrefix": "git-m07-02" },
+  "questions": [
+    {
+      "id": "git-m07-02-q1",
+      "type": "multiple-choice",
+      "question": "Что делает `git rebase main` на ветке feature пошагово?",
+      "options": [
+        { "id": "a", "text": "Просто меняет parent текущего коммита на main" },
+        { "id": "b", "text": "(1) Находит merge base (точку расхождения), (2) собирает коммиты feature после base, (3) reset на HEAD main, (4) cherry-pick каждого коммита feature по одному, (5) перемещает feature на новый top" },
+        { "id": "c", "text": "Удаляет коммиты feature и копирует из main" },
+        { "id": "d", "text": "Создаёт merge commit между main и feature" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Алгоритм rebase: (1) `git merge-base feature main` находит общего предка. (2) Собирает коммиты feature, которых нет в main (`git log main..feature`). (3) Делает checkout на HEAD main (detached). (4) Для каждого коммита из списка делает cherry-pick: применяет diff на текущий HEAD, создаёт новый коммит с новым SHA. (5) Перемещает указатель feature на верхушку из применённых. Знать алгоритм важно, потому что объясняет: почему SHA меняются (новый parent), почему конфликты на каждом коммите (не один merge), почему 'потерянные' коммиты доступны через reflog (старые объекты в .git/objects/).",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m07-02-q2",
+      "type": "true-false",
+      "question": "Старые коммиты до rebase сразу удаляются из репозитория и нельзя восстановить.",
+      "correctAnswer": "false",
+      "explanation": "Старые коммиты НЕ удалены сразу. Они остаются в `.git/objects/` без указателей (то есть как 'осиротевшие'). Git хранит их минимум 30 дней (или 90 в зависимости от `gc.reflogExpire`). Доступны через `git reflog`: показывает историю движения HEAD/веток, включая записи `rebase (pick)`, `rebase (start)`, `rebase (finish)`. Если испортил rebase: `git reset --hard feature@{3}` вернёт к старому состоянию. Это спасательный круг. После expire — `git gc` удаляет их физически. Подробно reflog в Module 09 курса.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m07-02-q3",
+      "type": "multiple-choice",
+      "question": "Конфликт при rebase возник на втором из трёх коммитов. После разрешения и `git add` какая команда продолжает rebase?",
+      "options": [
+        { "id": "a", "text": "git rebase --resume" },
+        { "id": "b", "text": "git rebase --continue" },
+        { "id": "c", "text": "git commit --rebase" },
+        { "id": "d", "text": "git rebase --next" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`git rebase --continue` продолжает rebase после разрешения конфликта. Workflow: (1) конфликт, Git останавливается, (2) разрешаешь файлы, (3) `git add <file>` отмечает разрешённым, (4) `git rebase --continue` создаёт коммит из текущего состояния и переходит к следующему коммиту в списке. Альтернативы: `--skip` — пропустить текущий коммит (опасно, теряешь изменения), `--abort` — отменить весь rebase и вернуть всё как было.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m07-02-q4",
+      "type": "multiple-choice",
+      "question": "В чём ключевое отличие конфликтов при rebase от конфликтов при merge?",
+      "options": [
+        { "id": "a", "text": "Никакого отличия" },
+        { "id": "b", "text": "При merge — один большой конфликт сразу. При rebase — конфликты по одному для каждого коммита; разрешаешь, `--continue`, повторяешь" },
+        { "id": "c", "text": "rebase конфликты можно разрешить только в VS Code" },
+        { "id": "d", "text": "merge конфликты опаснее rebase" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "При **merge** Git делает один большой 3-way merge всей ветки сразу — все конфликты появляются одновременно в файле(ах). Разрешаешь один раз, делаешь commit. При **rebase** Git применяет коммиты твоей ветки по одному. На каждом коммите может быть свой конфликт (если этот коммит трогает строки, изменённые в main). Получается несколько циклов: конфликт -> разрешить -> `--continue` -> следующий коммит -> возможно снова конфликт. Плюс rebase: каждый конфликт меньше, легче понять контекст. Минус: если у тебя 10 коммитов, и в каждом конфликт — это 10 циклов. Решение для повторных конфликтов — `git rerere` (следующий урок).",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m07-02-q5",
+      "type": "multiple-choice",
+      "question": "Ты в середине rebase, разрешил конфликты двух коммитов, но передумал и хочешь вернуть всё как было. Какая правильная команда?",
+      "options": [
+        { "id": "a", "text": "git reset --hard HEAD~3" },
+        { "id": "b", "text": "git rebase --abort" },
+        { "id": "c", "text": "rm -rf .git/rebase-merge" },
+        { "id": "d", "text": "git checkout -" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`git rebase --abort` — единственная правильная команда для безопасного отката незавершённого rebase. Она восстанавливает ветку точно в состояние до `git rebase main`: все разрешённые конфликты отбрасываются, working tree восстанавливается, HEAD возвращается на старую верхушку. НЕ делать: (1) `git reset --hard` во время незавершённого rebase — Git в неконсистентном состоянии. (2) `rm -rf .git/rebase-merge` — поломает консистентность. (3) `git rebase --continue` если передумал — это применит изменения и пойдёт дальше. Если уже завершил rebase и хочешь откатить — старые коммиты доступны через `git reflog`, можно `git reset --hard feature@{N}`.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

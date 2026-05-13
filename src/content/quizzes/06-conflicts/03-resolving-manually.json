@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "06-conflicts/03-resolving-manually",
+  "moduleId": "06-conflicts",
+  "_meta": { "idPrefix": "git-m06-03" },
+  "questions": [
+    {
+      "id": "git-m06-03-q1",
+      "type": "multiple-choice",
+      "question": "Какая правильная последовательность действий при разрешении конфликта?",
+      "options": [
+        { "id": "a", "text": "git status -> открыть файл -> удалить маркеры, оставить нужное -> git add -> git commit" },
+        { "id": "b", "text": "git push --force сразу" },
+        { "id": "c", "text": "git checkout --theirs всех файлов автоматически" },
+        { "id": "d", "text": "Удалить .git/ и склонировать заново" }
+      ],
+      "correctAnswer": "a",
+      "explanation": "Стандартный workflow: (1) `git status` — список конфликтных файлов, (2) открыть файл в редакторе, увидеть маркеры (`<<<<<<<`, `=======`, `>>>>>>>` + `|||||||` если zdiff3), (3) выбрать правильную версию или объединить умом, удалить ВСЕ маркеры, (4) `git add <file>` — отметить разрешённым, (5) `git status` — проверить 'All conflicts fixed', (6) `git commit` — Git сам предложит сообщение типа 'Merge branch ...'. Перед commit полезно `grep '<<<<<<<' .` чтобы убедиться что маркеров не осталось.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m06-03-q2",
+      "type": "true-false",
+      "question": "`git merge --abort` безопасно откатывает merge в состояние до начала и сохраняет все локальные изменения, которые были до merge.",
+      "correctAnswer": "true",
+      "explanation": "`git merge --abort` — твой safety net. Возвращает ветку в состояние до `git merge`. Все промежуточные разрешения отбрасываются, working tree восстанавливается. Локальные uncommitted изменения, которые были ДО начала merge, сохраняются. Если не уверен в разрешении — лучше abort, спросить коллегу, попробовать снова. Аналогичные команды для других операций: `git rebase --abort`, `git cherry-pick --abort`, `git revert --abort`.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m06-03-q3",
+      "type": "multiple-choice",
+      "question": "У тебя 12 конфликтов в разных файлах после merge. Среди них 3 lock-файла (requirements.txt, poetry.lock, package-lock.json). В каком порядке разрешать для минимизации риска?",
+      "options": [
+        { "id": "a", "text": "Lock-файлы первыми, потом всё остальное" },
+        { "id": "b", "text": "Сначала редактируемые файлы кода руками, потом manifest-файлы (requirements.txt, pyproject.toml), и в самом конце — регенерация lock-файлов (poetry.lock, package-lock.json)" },
+        { "id": "c", "text": "Параллельно — открыть все файлы и решать одновременно" },
+        { "id": "d", "text": "Без разницы — порядок не важен" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Правильная последовательность: (1) Сначала **редактируемые файлы кода руками** — там критично понимание логики. requirements.txt можно мерджить руками (читаемый текст). (2) Manifest-файлы (pyproject.toml, package.json) — определяют, что включать в lock. (3) В САМОМ КОНЦЕ — **lock-файлы**: `git checkout --theirs poetry.lock && poetry lock --no-update && git add`. Иначе можешь сначала регенерировать lock, потом изменить manifest — и lock устареет, придётся регенерировать заново. Перед каждым `git add` проверяй `grep '<<<<<<<' file` чтобы убедиться, что маркеров не осталось. Перед `git commit` запусти тесты, чтобы поймать логические merge-ошибки.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m06-03-q4",
+      "type": "multiple-choice",
+      "question": "Какая команда позволяет взять полностью версию из мерджимой ветки (THEIRS) для конкретного файла без ручного разрешения?",
+      "options": [
+        { "id": "a", "text": "git accept --theirs <file>" },
+        { "id": "b", "text": "git checkout --theirs <file> (или git restore --theirs <file> в современном Git)" },
+        { "id": "c", "text": "git merge --strategy=theirs <file>" },
+        { "id": "d", "text": "git pick-side theirs <file>" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`git checkout --theirs <file>` (или modern `git restore --theirs <file>`) заменяет файл целиком версией из мерджимой ветки. Аналогично `--ours` — версией из текущей. Полезно для: (1) lock-файлов, где ручной merge бессмыслен — `checkout --theirs` + регенерация, (2) бинарных файлов (PNG, parquet) — нет diff построчно, можно только выбрать целиком, (3) сгенерированных файлов (миграции, схемы) — обычно перегенерируешь. После `--ours`/`--theirs` обязательно `git add <file>` чтобы отметить как разрешённый.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m06-03-q5",
+      "type": "multiple-choice",
+      "question": "Конфликт в файле, который ты не трогал — что может быть причиной?",
+      "options": [
+        { "id": "a", "text": "Это всегда баг Git" },
+        { "id": "b", "text": "CRLF/LF разница (Windows vs Unix), whitespace-only изменения (форматирование), или переименование без detection" },
+        { "id": "c", "text": "Файл повреждён" },
+        { "id": "d", "text": "Антивирус заблокировал" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Часто бывают три причины: (1) **CRLF/LF**: кто-то закоммитил файл с CRLF, ты с LF — каждая строка 'изменена'. Решение: `.gitattributes` с `* text=auto`. (2) **Whitespace/форматирование**: код переформатирован (Black, isort, prettier разной версией) — все строки выглядят 'изменёнными'. Решение: общий config форматирования + pre-commit hooks. (3) **Rename без detection**: файл переименован, Git видит как 'удалили один, создали другой'. Решение: `git config --global merge.renames true` (по дефолту включено в Git 2.18+). Это НЕ баги Git, а специфика того, как сравнивается текст.",
+      "bloomLevel": "analytical"
+    }
+  ]
+}

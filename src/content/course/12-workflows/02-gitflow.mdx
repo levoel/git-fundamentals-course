@@ -1,0 +1,260 @@
+---
+title: "GitFlow — workflow для версионных релизов"
+description: "Vincent Driessen 2010: main + develop + feature/* + release/* + hotfix/*. Сложно. Подходит для версионных релизов (mobile, library, packaged software). Большинство DE команд НЕ юзают."
+order: 2
+difficulty: "intermediate"
+estimatedTime: 25
+topics: ["gitflow", "vincent-driessen", "release-branches", "hotfix", "develop", "versions"]
+---
+
+# GitFlow — workflow для версионных релизов
+
+В 2010 году Vincent Driessen опубликовал статью «A successful Git branching model», которая стала очень популярной. Workflow назвали **GitFlow**. Это **complex workflow** с 5 типами веток для проектов, которые релизятся версиями: mobile apps, libraries, SDKs, enterprise software.
+
+Долгое время GitFlow считался «стандартом», и junior копировали его в любые проекты — часто без понимания зачем. В 2026 году большинство DE-команд (SaaS, dbt, Airflow) используют **GitHub Flow** (предыдущий урок), а GitFlow — только когда есть **конкретная** причина.
+
+В этом уроке: что такое GitFlow, как работают 5 типов веток, и почему в DE это редкость.
+
+---
+
+## 5 типов веток
+
+<DiagramContainer title="GitFlow — 5 типов веток">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox tooltip="main — production releases (только tagged commits)">main</DataBox>
+      <FlowNode tooltip="">v1.0</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="">v1.1</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="">v1.1.1</FlowNode>
+    </FlowRow>
+    <FlowRow>
+      <DataBox tooltip="develop — integration ветка, текущая разработка">develop</DataBox>
+      <FlowNode tooltip="">commits</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="">-> release/1.1</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="">commits</FlowNode>
+    </FlowRow>
+    <FlowRow>
+      <DataBox tooltip="feature/* — новые фичи от develop, merge в develop">feature/foo</DataBox>
+      <FlowNode tooltip="">F1</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="merge в develop">-> develop</FlowNode>
+    </FlowRow>
+    <FlowRow>
+      <DataBox tooltip="release/* — заморозка для release, merge в main+develop">release/1.1</DataBox>
+      <FlowNode tooltip="">fix</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="merge в main+develop">-> main + develop</FlowNode>
+    </FlowRow>
+    <FlowRow>
+      <DataBox tooltip="hotfix/* — критический fix от main, merge в main+develop">hotfix/critical</DataBox>
+      <FlowNode tooltip="">H1</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="merge в main+develop">-> main + develop</FlowNode>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+### 1. `main` — only releases
+
+Только tagged versions попадают в main. Каждый коммит на main = production release (v1.0, v1.1, v1.1.1). **Никаких разработческих коммитов** на main.
+
+### 2. `develop` — integration
+
+Активная разработка. Сюда merge feature ветки. Это «то что **будет** в следующей версии».
+
+### 3. `feature/*` — новые фичи
+
+От `develop`, merge в `develop`. Длина — недели. Примеры: `feature/users-pipeline`, `feature/revenue-mart`.
+
+### 4. `release/*` — заморозка для следующего релиза
+
+От `develop`, когда фичи готовы. Сюда — только bug fixes для preparation release. Когда release ready — merge в **main** (тегируется vX.Y.Z) **и** в **develop** (чтобы fixes попали обратно).
+
+### 5. `hotfix/*` — критический production fix
+
+От `main` (последняя release), для urgent prod fixes. После — merge в **main** (новый patch release vX.Y.Z+1) **и** в **develop** (чтобы fix не потерялся в следующем release).
+
+---
+
+## Жизненный цикл feature в GitFlow
+
+```bash
+# 1. Начинаем feature от develop
+$ git switch develop && git pull
+$ git switch -c feature/users-pipeline
+
+# 2. Работаем (могут быть недели)
+$ vim ...
+$ git commit -am "feat: users"
+# ...много коммитов
+
+# 3. Push и PR
+$ git push -u origin feature/users-pipeline
+$ gh pr create --base develop --title "feat: users pipeline"
+
+# 4. После review — merge в develop
+$ gh pr merge --no-ff --delete-branch
+
+# 5. develop now has feature, awaiting next release
+```
+
+Фича в `develop`. Когда develop накопил достаточно фич для следующего release:
+
+```bash
+# 6. Создаём release branch
+$ git switch develop && git pull
+$ git switch -c release/v2.0.0
+
+# 7. Только bug fixes на этой ветке (тестирование preparation)
+$ vim ... && git commit -am "fix: bug found in QA"
+
+# 8. Когда release ready — merge в main с тегом
+$ git switch main
+$ git merge --no-ff release/v2.0.0
+$ git tag -a v2.0.0 -m "Release 2.0.0"
+$ git push origin main --follow-tags
+
+# 9. И в develop, чтобы fixes не потерялись
+$ git switch develop
+$ git merge --no-ff release/v2.0.0
+$ git push origin develop
+
+# 10. Удалить release branch
+$ git branch -d release/v2.0.0
+```
+
+10 шагов для одного релиза. **Сложно для команд с continuous deployment** — много церемоний.
+
+---
+
+## Жизненный цикл hotfix
+
+Production упал, нужен immediate fix:
+
+```bash
+# 1. Hotfix от main (latest release)
+$ git switch main && git pull
+$ git switch -c hotfix/v2.0.1-null-handling
+
+# 2. Fix
+$ vim ... && git commit -am "fix: handle null"
+
+# 3. Merge в main + tag (новый patch release)
+$ git switch main
+$ git merge --no-ff hotfix/v2.0.1-null-handling
+$ git tag -a v2.0.1 -m "Hotfix 2.0.1"
+$ git push origin main --follow-tags
+
+# 4. Merge в develop (важно! иначе fix потеряется в следующем release)
+$ git switch develop
+$ git merge --no-ff hotfix/v2.0.1-null-handling
+
+# 5. Удалить hotfix branch
+$ git branch -d hotfix/v2.0.1-null-handling
+```
+
+Главный нюанс: **hotfix должен попасть в develop**. Если забыть — в следующем release будет regression (старый buggy код).
+
+---
+
+## Что в GitFlow хорошо
+
+### 1. Чёткие release boundaries
+
+`main` — это история релизов. `git log main --tags` показывает: `v1.0 -> v1.1 -> v1.1.1 -> v2.0`. Прозрачно для аудита, customer support, regulatory compliance.
+
+### 2. Stable production, fast iteration
+
+Production деплоится **только** с main (только tagged). Developers разрабатывают на develop без риска сломать прод. Hotfix — отдельный pipeline.
+
+### 3. Подходит для versioned products
+
+Mobile apps (iOS / Android store releases каждые 2 недели), libraries (npm/pip/Maven с semver), enterprise software с patch releases.
+
+---
+
+## Что в GitFlow плохо
+
+### 1. Complexity overhead
+
+5 типов веток. Множественные merges (release -> main + develop). Hotfix dual-merge. Junior легко забывает шаг -> bugs.
+
+### 2. Slow iteration
+
+Feature не доступна на проде до **release**, который может быть через недели. Continuous deployment невозможен.
+
+### 3. Merge hell
+
+Long-lived develop ветка -> значительные расхождения с main -> конфликты при merge release -> main. Чем дольше развивается develop, тем хуже.
+
+### 4. Не подходит для современных DevOps practices
+
+Feature flags, blue-green deployment, canary releases — все это лучше с GitHub Flow.
+
+### 5. Vincent Driessen retracted endorsement
+
+Сам автор в 2020 году опубликовал [update](https://nvie.com/posts/a-successful-git-branching-model/): «If your team is doing continuous delivery of software, I would suggest to adopt a much simpler workflow». То есть автор сам говорит «теперь не для всех».
+
+---
+
+## Когда GitFlow подходит для DE
+
+Редко. Конкретные кейсы:
+
+1. **DE репо для библиотеки** (например, custom Spark connector, opensource Airflow provider) с semver releases для users.
+
+2. **Enterprise DE с regulatory requirements**: финтех/healthcare, где «v2.3.1 released on 2026-03-15» должно быть explicit, audit-able, deployment не automated.
+
+3. **DE репо distributed как packaged software** (Docker images version), customers pin specific версия.
+
+4. **Старый репо в legacy company** с устоявшимся GitFlow процессом — менять кость дорого, продолжай.
+
+В **99% продуктовых DE команд** (SaaS, internal analytics, dbt-команды) — это overhead без бенефита. Используй GitHub Flow.
+
+---
+
+## Hybrid: упрощённый GitFlow
+
+Иногда команды используют **облегчённый GitFlow**: без `develop`, но с `release/*` и `hotfix/*`:
+
+- `main` — production.
+- `feature/*` — новые фичи от main.
+- `release/v1.x` — release ветки для поддержки старых версий.
+- `hotfix/*` — критические fixes на release ветке + cherry-pick на main.
+
+Это GitHub Flow + release branches для legacy support. Подходит когда у тебя SaaS + customers на старых версиях которые надо поддерживать.
+
+Пример: Apache Airflow поддерживает несколько minor versions (2.5.x, 2.6.x, 2.7.x). Главная разработка на main (Airflow 2.10), patch releases на release ветках. Это не full GitFlow, но не чистый GitHub Flow.
+
+---
+
+## DE-сценарий: НЕ-подходящий case для GitFlow
+
+Команда из 5 DE на dbt репо для warehouse. Continuous deployment на BigQuery.
+
+**Без GitFlow** (GitHub Flow):
+- feature -> PR -> merge -> auto-deploy. Total: hours.
+- Каждый день 5-10 deploys.
+
+**С GitFlow** (как было предложено newcomer junior, читавший Driessen 2010):
+- feature -> develop -> release/v2 -> main -> deploy. Each merge requires PR.
+- Release раз в 2 недели (release planning meeting!).
+- Hotfix flow для simple null bug — overhead неоправдан.
+
+Результат: команда замедлилась с hours до weeks для каждой feature. GitFlow тут — антипаттерн.
+
+<Callout type="warning">
+Если ты junior и приходишь в команду с GitFlow, понимаешь почему — спроси у tech lead. Если есть весомая причина (versioned product) — OK. Если «так всегда было, никто не помнит зачем» — это red flag, обсудите переход на GitHub Flow.
+</Callout>
+
+---
+
+## Killer takeaway
+
+GitFlow (Vincent Driessen 2010) = `main + develop + feature/* + release/* + hotfix/*`. Сложный workflow для **versioned releases**: mobile apps, libraries, enterprise. **Не подходит** для continuous deployment SaaS — overhead убивает скорость. В DE командах GitFlow — редкость, обычно legacy или specific case (поддержка multiple versions). Если ты junior и видишь GitFlow в новой DE команде — спроси «зачем?» — часто это cargo cult.
+
+<KnowledgeCheck quizSlug="12-workflows/02-gitflow" />

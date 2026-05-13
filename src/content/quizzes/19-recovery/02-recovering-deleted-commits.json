@@ -1,0 +1,59 @@
+{
+  "lessonSlug": "19-recovery/02-recovering-deleted-commits",
+  "moduleId": "19-recovery",
+  "_meta": {
+    "idPrefix": "git-m19-02"
+  },
+  "questions": [
+    {
+      "id": "git-m19-02-q1",
+      "type": "multiple-choice",
+      "question": "Junior удалил feature ветку через `git branch -D feat/wip`. Через час понимает, что нужно было сохранить работу. Reflog уже не показывает (или ему сложно найти). Какой подход?",
+      "options": [
+        {"id": "a", "text": "Невозможно восстановить, надо переписывать"},
+        {"id": "b", "text": "git fsck --lost-found — найдёт dangling commits, для каждого `git show <sha>` посмотреть содержимое, и `git branch <name> <sha>` восстановить ветку"},
+        {"id": "c", "text": "git clone <remote> — auto-восстанавливает удалённое"},
+        {"id": "d", "text": "git pull origin feat/wip"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "После delete branch commits становятся orphan (никакой ref на них не указывает). Они **физически на диске** в `.git/objects/`, пока не запустился `git gc` (по умолчанию unreachable объекты живут 30 дней). `git fsck --lost-found` находит все dangling commits (на которые никто не указывает). Для каждого SHA — `git show <sha>` посмотреть содержимое, определить нужный, создать ветку: `git branch recovered feat-wip-sha`. clone не помогает (если ветка не пушнута — её на remote не было). pull не помогает по той же причине.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m19-02-q2",
+      "type": "multiple-choice",
+      "question": "Чем отличается 'dangling' и 'unreachable' object в Git?",
+      "options": [
+        {"id": "a", "text": "Это синонимы"},
+        {"id": "b", "text": "Dangling — объект, на который никто не указывает (ни ref, ни другой объект). Unreachable — нет пути от ref-ов через граф. Все dangling unreachable, но unreachable может быть parent другого unreachable (тогда не dangling)"},
+        {"id": "c", "text": "Dangling — на диске, unreachable — в pack files"},
+        {"id": "d", "text": "Dangling — старше 30 дней, unreachable — младше"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Тонкая разница, но важная для понимания fsck output. Reachable = есть путь от какого-то ref (через граф commits и trees). Unreachable = нет такого пути. Dangling = более узкое: ни один объект (включая unreachable) не ссылается на него. Пример: 5 коммитов потеряны после reset --hard. Top commit — dangling (никто на него не указывает). Его 4 parent commits — unreachable, но НЕ dangling (на них указывает потерянный top commit). `git fsck` без флагов показывает dangling. С `--unreachable` — все unreachable.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m19-02-q3",
+      "type": "multiple-choice",
+      "question": "Какая команда **показывает** все existing branches с их SHA и датами last commit (полезно для аудита перед cleanup)?",
+      "options": [
+        {"id": "a", "text": "git branch -a"},
+        {"id": "b", "text": "git log --all"},
+        {"id": "c", "text": "git for-each-ref --sort=-committerdate refs/heads/ --format='%(refname:short) %(objectname:short) %(committerdate:short)'"},
+        {"id": "d", "text": "git status"}
+      ],
+      "correctAnswer": "c",
+      "explanation": "for-each-ref — мощный команда для introspection refs. --sort=-committerdate сортирует по дате (newest first). --format задаёт output: refname:short (имя без префикса), objectname:short (SHA), committerdate:short (дата). Полезно для cleanup: видишь старые ветки (е.g., feat/old-thing от декабря) — кандидаты на delete. git branch -a — простой list имён, без дат и SHA. git log --all — graph commits, не структура refs. git status — только текущая ветка.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m19-02-q4",
+      "type": "true-false",
+      "question": "После `git gc` объекты, которые были unreachable и старше gc.pruneExpire (default 2 недели), удаляются с диска навсегда. После этого даже `git fsck` не сможет их найти — рекавери невозможен через локальные средства.",
+      "correctAnswer": true,
+      "explanation": "gc удаляет unreachable объекты старше pruneExpire (default 2.weeks.ago). После удаления — files in .git/objects/ физически удалены. fsck сканирует диск, объектов нет — нечего находить. Recovery options после gc: (1) clone с remote (если ветка пушнута); (2) bundle с другого коллеги (у него есть копия); (3) OS-level undelete (Time Machine, btrfs snapshots, ext4 extundelete). Поэтому критично НЕ ждать с recovery — делать как только обнаружил потерю. Также важно регулярно push в remote (= backup).",
+      "bloomLevel": "applied"
+    }
+  ]
+}

@@ -1,0 +1,312 @@
+---
+title: "git cherry-pick — применить отдельный коммит на другую ветку"
+description: "git cherry-pick <commit> — применить один (или диапазон) коммитов на текущую ветку. Флаги -n (no commit), -x (добавить footer). Hotfix portage. Дубликаты commits и ломание merge-base."
+order: 3
+difficulty: "intermediate"
+estimatedTime: 25
+topics: ["cherry-pick", "hotfix", "portage", "duplicate-commits", "merge-base"]
+---
+
+# git cherry-pick — применить отдельный коммит куда хочешь
+
+Иногда нужно взять **один конкретный коммит** с одной ветки и применить его на другую — не мержа всю ветку. Например, hotfix замержен в `main`, но на стабильной `release/v1.x` его нет; или экспериментальная ветка содержит полезный коммит, а остальное не нужно.
+
+`git cherry-pick <commit>` решает эту задачу. Дословно — «вишенка», выбрать одну ягоду из корзины, оставив остальные. Под капотом — точно как `git revert`, только применяет **прямой** патч коммита вместо обратного.
+
+В этом уроке: как работает cherry-pick, опасность дубликатов коммитов, конфликты, и почему он ломает merge-base, если переборщить.
+
+---
+
+## Базовая модель
+
+```bash
+$ git log --all --oneline --graph
+* abc1234 (HEAD -> main) Latest on main
+| * def5678 (feature) Useful commit on feature
+| * ghi9012 Other feature work
+|/
+* jkl3456 Common ancestor
+```
+
+Хочу применить `def5678` (Useful commit) на `main`, без всей `feature`:
+
+```bash
+$ git cherry-pick def5678
+[main fff7777] Useful commit on feature
+ Date: ...
+```
+
+Что случилось:
+
+1. Git взял diff коммита `def5678` (от его parent `ghi9012`).
+2. Применил этот diff на текущий HEAD (`main` = `abc1234`).
+3. Создал **новый коммит** `fff7777` с тем же содержимым/message, но **другим хэшем** (другой parent -> другой SHA).
+
+```bash
+$ git log --all --oneline --graph
+* fff7777 (HEAD -> main) Useful commit on feature
+* abc1234 Latest on main
+| * def5678 (feature) Useful commit on feature
+| * ghi9012 Other feature work
+|/
+* jkl3456 Common ancestor
+```
+
+**Два коммита с одинаковым содержимым, разными SHA**. Это ключевой нюанс cherry-pick — он создаёт дубликаты.
+
+<DiagramContainer title="Cherry-pick: содержимое одно, SHA разные">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox tooltip="До cherry-pick">До</DataBox>
+      <FlowNode tooltip="main HEAD">main: abc1234</FlowNode>
+      <FlowNode tooltip="feature commit с нужным фиксом">feature: def5678 (fix)</FlowNode>
+    </FlowRow>
+    <FlowRow>
+      <DataBox tooltip="После cherry-pick def5678 на main">После</DataBox>
+      <FlowNode tooltip="Новый коммит с тем же diff но другим parent (=другой SHA)">main: fff7777 (fix)</FlowNode>
+      <FlowNode tooltip="feature не изменилась">feature: def5678 (fix)</FlowNode>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+---
+
+## Типичный сценарий: hotfix portage
+
+Эта основная причина cherry-pick. Есть ветки:
+
+- `main` — текущая разработка (v2.x).
+- `release/v1.x` — стабильная версия в проде.
+
+В `main` нашли бак, исправили. Нужно перенести fix на `release/v1.x`:
+
+```bash
+$ git switch main
+$ git log --oneline -5
+abc1234 (HEAD -> main) fix: critical null handling     # ← нужно сюда
+def5678 feat: new v2 pipeline
+...
+
+$ git switch release/v1.x
+$ git cherry-pick abc1234
+[release/v1.x fff7777] fix: critical null handling
+
+$ git push origin release/v1.x
+# CI деплоит на стабильный прод
+```
+
+Один коммит fix-а теперь на двух ветках. Без cherry-pick пришлось бы:
+- Либо мержить main -> release/v1.x (а там тонна изменений из v2.x — не подходит).
+- Либо вручную копировать diff (error-prone).
+- Либо ребейзить (опасно, переписывает историю).
+
+Cherry-pick — самый точный инструмент для **выборочного** переноса.
+
+---
+
+## Полезные флаги
+
+### `-x` — добавить footer с upstream-коммитом
+
+```bash
+$ git cherry-pick -x abc1234
+[main fff7777] fix: critical null handling
+
+(cherry picked from commit abc1234)
+```
+
+Появляется footer `(cherry picked from commit abc1234)`. Полезно для audit: видно «этот коммит — портированный из main». Best practice для public репо.
+
+### `-n` (`--no-commit`) — применить, но не коммитить
+
+```bash
+$ git cherry-pick -n abc1234
+# Изменения в working tree + staged, коммита нет
+$ git diff --cached       # посмотреть
+$ git commit -m "Custom message"
+```
+
+Полезно когда хочешь подредактировать содержимое или message перед коммитом.
+
+### `-e` (`--edit`) — открыть редактор для message
+
+```bash
+$ git cherry-pick -e abc1234
+# Появится редактор с original message — можно подправить
+```
+
+---
+
+## Cherry-pick диапазон
+
+Можно применить несколько коммитов сразу:
+
+```bash
+# Диапазон A..B (НЕ включая A, включая B)
+$ git cherry-pick abc1234..ghi9012
+
+# Включая обе границы
+$ git cherry-pick abc1234^..ghi9012
+
+# Список отдельных
+$ git cherry-pick abc1234 def5678 ghi9012
+```
+
+Git применяет коммиты **по порядку** (по timestamp). При конфликте останавливается на конкретном коммите.
+
+---
+
+## Конфликты при cherry-pick
+
+Если изменения коммита конфликтуют с текущим HEAD — Git остановится:
+
+```bash
+$ git cherry-pick abc1234
+Auto-merging dags/etl.py
+CONFLICT (content): Merge conflict in dags/etl.py
+error: could not apply abc1234... fix: critical null handling
+hint: After resolving the conflicts, mark them with
+hint: "git add/rm <conflicted_files>", then run "git cherry-pick --continue".
+hint: You can instead skip this commit with "git cherry-pick --skip".
+hint: To abort and get back to the state before "git cherry-pick", run "git cherry-pick --abort".
+```
+
+Дальше как обычный merge conflict (модуль 06):
+
+```bash
+$ vim dags/etl.py          # руками решаешь
+$ git add dags/etl.py
+$ git cherry-pick --continue
+```
+
+Можно прервать: `git cherry-pick --abort`. Можно пропустить конкретный коммит при range: `git cherry-pick --skip`.
+
+---
+
+## Опасности cherry-pick
+
+### 1. Дубликаты коммитов в merge
+
+Сценарий: ты cherry-pick `abc1234` из `main` на `release/v1.x`. Потом мержишь `release/v1.x` -> `main`. Что произойдёт?
+
+```bash
+$ git switch main
+$ git merge release/v1.x
+```
+
+Git **обычно** разрулит — заметит что patch уже применён. Но если cherry-pick вызвал конфликт, ты разрешил его руками, и теперь в `release/v1.x` коммит чуть-чуть отличается от `main` — Git ругается с конфликтом, и тебе придётся снова руками разруливать **один и тот же fix**.
+
+### 2. Ломание merge-base
+
+`merge-base` — это общий предок двух веток, базовая точка для merge. После cherry-pick `def5678` из `feature` на `main`:
+
+```
+main:    A -> B -> C -> D'   (D' = cherry-picked from D)
+feature: A -> B -> C -> D
+```
+
+Merge-base всё ещё `C` (не `D`). При следующем merge `feature -> main`, Git попытается замержить **всю разницу** между `C` и `feature.D`, включая логически уже применённый `D'`. Возможны конфликты.
+
+**Best practice**: cherry-pick используй когда **не планируешь** мержить ветки целиком. Если планируешь — лучше merge (или замержь часть через `git merge --squash`).
+
+### 3. Потеря context
+
+Cherry-picked коммит теряет связь с feature. В `git log` на main видно только сам fix, не понятно «откуда он пришёл и почему». `-x` footer спасает, но всё равно — нужно вручную следить, что куда портировано.
+
+---
+
+## Реальный DE-сценарий: backport на release/v1.x
+
+Команда поддерживает две версии Airflow DAGs репо:
+
+- `main` — Airflow 2.10 (новые DAGs).
+- `release/airflow-2.5.x` — старые DAGs для legacy customer.
+
+В `main` залили fix DAG'а, который существует и в 2.5.x. Бэкап-портируем:
+
+```bash
+$ git switch main
+$ git log --oneline -3
+abc1234 (HEAD -> main) fix: handle None in user_id
+def5678 feat: new revenue DAG
+ghi9012 fix: deprecation warning in 3.10
+
+# Только первый коммит нужен на 2.5.x (второй — новая фича)
+$ git switch release/airflow-2.5.x
+$ git cherry-pick -x abc1234
+
+# Может быть конфликт если API DAG-а изменилось между 2.5 и 2.10
+# Разрешаем руками, добавляем тесты для 2.5
+
+$ git push origin release/airflow-2.5.x
+$ gh pr create --base release/airflow-2.5.x --title "Backport: fix None user_id"
+```
+
+PR на 2.5.x — review, merge, deploy.
+
+---
+
+## Cherry-pick vs rebase vs merge
+
+| Хочу | Команда |
+|---|---|
+| Один коммит на другую ветку | `git cherry-pick <commit>` |
+| Перенести feature ветку на новый base | `git rebase <new-base>` |
+| Влить feature ветку целиком | `git merge feature` |
+| Влить с squash | `git merge --squash feature` |
+
+Mnemonic: cherry-pick — точечный (один коммит). Rebase — массовый перенос ветки. Merge — соединение веток.
+
+---
+
+## Что cherry-pick НЕ делает
+
+1. **Не двигает коммиты, не удаляет с исходной ветки**. После cherry-pick `feature.def5678 -> main`, коммит остаётся и на `feature` (со своим SHA), и на `main` (с новым SHA).
+
+2. **Не создаёт merge-коммит**. Linear история (как regular commit) — это плюс для GitHub Flow.
+
+3. **Не запоминает, что был cherry-pick** (без `-x` flag). В Git internal record нет «этот коммит — backport».
+
+---
+
+## Попробуй сам
+
+```bash
+$ mkdir cherry-demo && cd cherry-demo
+$ git init && echo "v1" > app.py && git add . && git commit -m "Initial"
+
+# Создаём feature с двумя коммитами
+$ git switch -c feature
+$ echo "new feature" > app.py && git commit -am "feat: new feature"
+$ echo "critical fix" > fix.py && git add . && git commit -m "fix: critical bug"
+
+$ git log --oneline
+ccc3333 (HEAD -> feature) fix: critical bug
+bbb2222 feat: new feature
+aaa1111 (main) Initial
+
+# Только fix нужен на main, фичу не хотим
+$ git switch main
+$ git cherry-pick -x ccc3333
+[main ddd4444] fix: critical bug
+
+$ git log --oneline
+ddd4444 (HEAD -> main) fix: critical bug
+aaa1111 Initial
+
+$ ls
+app.py fix.py            # только fix, без feature
+
+$ git log -1 --format="%B"
+fix: critical bug
+
+(cherry picked from commit ccc3333...)    # -x footer
+```
+
+---
+
+## Killer takeaway
+
+`git cherry-pick <commit>` — точечный перенос одного коммита на текущую ветку. Создаёт **новый коммит с другим SHA**, но тем же содержимым. Используй для backport (hotfix на release-ветку, feature portage). Всегда `-x` для audit footer. Опасности: дубликаты коммитов в будущих merge-ах, ломание merge-base — поэтому не используй для систематического переноса больших объёмов, только для точечных задач.
+
+<KnowledgeCheck quizSlug="10-stash-tags-cherry-pick/03-cherry-pick" />

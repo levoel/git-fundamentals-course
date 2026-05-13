@@ -1,0 +1,449 @@
+---
+title: "Worktrees: параллельные working trees из одного репо"
+description: "git worktree — несколько checkout одновременно. Killer feature для review PR без stash, поддержка long-running тестов, безопасный experimentation"
+order: 4
+difficulty: "intermediate"
+estimatedTime: 22
+topics: ["Git", "worktree", "parallel", "PR review", "workflow"]
+---
+
+# Worktrees: параллельные working trees из одного репо
+
+`git worktree` — недооценённая фича Git (с версии 2.5), которая решает специфическую, но часто возникающую проблему: **тебе нужно работать с несколькими ветками одновременно**. Классический сценарий: пишешь feature, на середине прилетает PR коллеги на review, надо переключиться, посмотреть, потом вернуться. Обычно — `git stash`, `git checkout`, review, `git checkout`, `git stash pop`. И каждый раз риск что-то потерять или сломать.
+
+С worktrees ты делаешь `git worktree add ../parent-pr-123 origin/pr-123` — и у тебя **в другой папке** уже готовый checkout PR, без stash, без переключения. Можешь его открыть в новом окне VS Code, запустить тесты, пока твой основной checkout продолжает работу.
+
+В этом уроке: что такое worktree, как использовать, killer feature для DE workflow (parallel reviews, long-running ETL jobs, безопасный experimentation), и production gotchas.
+
+---
+
+## Mental model: shared .git, разные working trees
+
+<DiagramContainer title="Worktree: одна репозиторная база, несколько checkout-ов" color="blue">
+  <FlowColumn className="p-4 gap-3">
+    <Tooltip content="Один .git/ хранит все коммиты, ветки, истории">
+      <DataBox label="Shared .git/" className="border-purple-500/30 w-96 mx-auto">
+        <div className="text-xs">objects/, refs/, packed-refs, hooks — общие для всех worktrees</div>
+      </DataBox>
+    </Tooltip>
+    <Arrow direction="down" />
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Главный worktree — где ты обычно работаешь">
+        <DataBox label="main worktree" className="border-blue-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>~/projects/parent/</div>
+            <div>checkout: feature/etl-fix</div>
+            <div>uncommitted changes</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Дополнительный worktree — для review PR">
+        <DataBox label="review worktree" className="border-emerald-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>~/projects/parent-pr-123/</div>
+            <div>checkout: pr-123-branch</div>
+            <div>clean</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Ещё один worktree — для long-running tests">
+        <DataBox label="test worktree" className="border-amber-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>~/projects/parent-tests/</div>
+            <div>checkout: main</div>
+            <div>тесты идут 30 минут</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Ключевая идея: **один `.git/`**, **разные working tree директории**. Каждый worktree имеет свой checkout (свой checkout branch и свой working tree), но все они смотрят в одну и ту же базу объектов.
+
+Это экономично:
+- Не нужен disk space на полный второй clone (worktrees делят `.git/objects/`)
+- Не нужен fresh fetch для каждого worktree (общий refs)
+- Все коммиты доступны из любого worktree
+
+И удобно:
+- В каждой папке — обычный git workflow
+- Открой в разных окнах VS Code, JetBrains — никаких конфликтов
+- Можно одновременно: твоя feature + PR review + running tests
+
+---
+
+## Команды worktree
+
+### Add: создать новый worktree
+
+```bash
+# В существующем репо
+$ cd ~/projects/parent
+
+# Создать worktree из существующей ветки
+$ git worktree add ../parent-pr-123 feature/colleague-branch
+Preparing worktree (checking out 'feature/colleague-branch')
+HEAD is now at abc123 feat: add S3 connector
+
+# Что произошло
+$ ls ~/projects/
+parent/                   ← main worktree
+parent-pr-123/            ← new worktree, на ветке feature/colleague-branch
+
+$ ls ~/projects/parent-pr-123/
+.git                      ← это файл, не папка!
+README.md src/ tests/ ...
+
+$ cat ~/projects/parent-pr-123/.git
+gitdir: /Users/me/projects/parent/.git/worktrees/parent-pr-123
+```
+
+Видишь — в новом worktree `.git` это **файл-указатель** на главный `.git/worktrees/`. Все объекты и истории — в исходном `.git/`.
+
+```bash
+# Создать worktree + новую ветку одновременно
+$ git worktree add -b experimental ../parent-experiment
+
+# Создать из конкретного коммита
+$ git worktree add ../parent-old abc123
+
+# Detached worktree (без branch — для temporary использования)
+$ git worktree add --detach ../parent-temp origin/main
+```
+
+### List: посмотреть все worktrees
+
+```bash
+$ git worktree list
+/Users/me/projects/parent          abc123 [feature/my-fix]
+/Users/me/projects/parent-pr-123   def456 [feature/colleague-branch]
+/Users/me/projects/parent-tests    789012 [main]
+```
+
+Видим: 3 worktrees, каждый на своей ветке.
+
+### Remove: удалить worktree
+
+```bash
+# Удалить когда больше не нужен
+$ git worktree remove ../parent-pr-123
+
+# Если worktree повреждён или удалён вручную с диска
+$ git worktree prune
+```
+
+`remove` чистит и working tree, и метаданные в `.git/worktrees/`. `prune` — для случаев, когда working tree уже удалён, но метаданные остались.
+
+---
+
+## Killer feature: review PR без stash
+
+Сценарий: пишешь feature, в середине прилетает PR для review. С stash workflow:
+
+```bash
+# Обычный путь (без worktree)
+$ git stash push -m "wip"
+$ git fetch
+$ git checkout colleague/pr-123
+# Запустить тесты, открыть в IDE
+# Дать review
+
+$ git checkout feature/my-work
+$ git stash pop
+
+# Минусы:
+# - stash может конфликтовать
+# - случайно потерять unstashed файлы
+# - переключение branch ломает IDE state (terminal cd, breakpoints, etc.)
+# - если PR требует pip install (новые deps) — твоя venv "испорчена"
+```
+
+С worktree:
+
+```bash
+# Создать worktree для PR в отдельной папке
+$ git fetch origin pull/123/head:pr-123
+$ git worktree add ../parent-pr-123 pr-123
+
+# Открыть в новом окне IDE
+$ code ../parent-pr-123
+
+# Дать review, запустить тесты — в отдельной папке
+# Твоя основная папка не трогается
+
+# Когда закончил
+$ git worktree remove ../parent-pr-123
+```
+
+**Огромное преимущество**:
+- Никакого stash риска
+- IDE открыто в обоих папках одновременно, переключение через alt-tab
+- Если PR нужны новые deps (`pip install`), это в отдельной venv для review worktree, не ломает твою
+- Можешь сравнивать side-by-side файлы из обоих веток
+
+Для DE это особенно ценно когда code review требует **запуска ETL** (long-running): запускаешь в review worktree, продолжаешь работать в main.
+
+---
+
+## Use case: long-running тесты
+
+DE-сценарий: интеграционные тесты для ETL занимают 30 минут. Запустить их и **продолжить работу** обычно нельзя — они блокируют working tree (например, тесты пишут в `data/output/`, твоя работа тоже хочет писать).
+
+С worktree:
+
+```bash
+# В основном worktree запустить тесты не получается
+# Создаём отдельный для тестов
+$ git worktree add ../parent-tests main
+$ cd ../parent-tests
+
+# Запускаем тесты, они работают 30 минут
+$ python -m pytest tests/integration/ &
+
+# Возвращаемся в main worktree, продолжаем работу
+$ cd ~/projects/parent
+$ vim src/etl.py
+# тесты в фоне идут, ты пишешь код
+```
+
+Через 30 минут — `tests/integration/results.json` появляется в `~/projects/parent-tests/`. Твоя основная работа не нарушена.
+
+---
+
+## Use case: безопасный experimentation
+
+Хочешь попробовать рискованный refactor, не уверен. Worktree даёт изолированный sandbox:
+
+```bash
+$ git worktree add -b experiment/big-refactor ../parent-experiment
+$ cd ../parent-experiment
+
+# Делай что хочешь — drop таблицы, переименовывай папки, переписывай ETL
+# Твой main worktree не затронут
+
+# Если получилось — push, открой PR
+# Если нет — git worktree remove
+```
+
+Альтернатива (без worktree) — branch + stash. Но experimental ветка в том же working tree — это всё ещё **те же файлы на диске**, IDE state, кэши. С worktree — полное physical separation.
+
+---
+
+## Use case: parallel hotfix + feature
+
+Сценарий: пишешь сложную feature на `feature/etl-rewrite`, в production упал баг. Нужно hotfix немедленно.
+
+```bash
+# Текущий worktree — на feature/etl-rewrite, много uncommitted
+$ cd ~/projects/parent
+$ git status
+# 15 modified files
+
+# Создаём worktree для hotfix
+$ git worktree add ../parent-hotfix -b hotfix/critical-bug main
+
+$ cd ../parent-hotfix
+# Чистый checkout от main
+# Делай hotfix
+$ vim src/critical.py
+$ git add . && git commit -m "fix: critical production bug"
+$ git push origin hotfix/critical-bug
+
+# Открыть PR на GitHub, merge
+
+# Вернуться к feature
+$ cd ~/projects/parent
+# Всё на месте — 15 modified files, IDE state сохранён
+# Продолжай feature
+```
+
+Без worktree это значило бы: stash feature (риск потерять), checkout main, branch hotfix, и неприятный mental switch. С worktree — почти не отвлекаешься.
+
+---
+
+## Worktree restrictions
+
+Несколько ограничений:
+
+### 1. Один branch — один worktree
+
+Один и тот же branch не может быть checked out в двух worktrees одновременно. Это safety mechanism:
+
+```bash
+# В worktree A на feature/x
+$ cd ~/projects/parent-a
+$ git checkout feature/x
+
+# Попытка checkout того же branch в worktree B
+$ cd ~/projects/parent-b
+$ git checkout feature/x
+fatal: 'feature/x' is already checked out at '/Users/me/projects/parent-a'
+```
+
+Workaround — detached HEAD (`git checkout --detach <ref>`) или separate branch.
+
+### 2. .git — это файл-указатель, не директория
+
+```bash
+$ cd ~/projects/parent-pr-123
+$ cat .git
+gitdir: /Users/me/projects/parent/.git/worktrees/parent-pr-123
+```
+
+Это значит: некоторые инструменты, ожидающие `.git/` директорию, могут не работать. Большинство modern tools (GitHub Desktop, VS Code Git, IntelliJ Git) поддерживают gitfile корректно. Старые могут глючить.
+
+### 3. Hooks shared между worktrees
+
+`.git/hooks/` — общая для всех worktrees. Это и плюс (one config), и минус (если ты хочешь разные hooks в разных worktrees — нельзя без core.hooksPath трюков).
+
+---
+
+## Production gotchas
+
+### 1. Не удаляй worktree директорию руками
+
+```bash
+# ПЛОХО:
+$ rm -rf ../parent-pr-123
+
+# Git не знает что worktree удалён, метаданные остаются
+$ git worktree list
+... /Users/me/projects/parent-pr-123  (prunable)
+
+# Нужно prune
+$ git worktree prune
+```
+
+Правильно — всегда через `git worktree remove`:
+
+```bash
+$ git worktree remove ../parent-pr-123
+# Это атомарно: удаляет директорию и метаданные
+```
+
+### 2. Submodule + worktree = осторожно
+
+Worktrees и submodules — две сложности, которые могут не дружить. До недавнего Git submodule update в дополнительных worktrees работало неправильно. В Git 2.30+ улучшилось, но всё равно тестируй.
+
+Для simple submodule + worktree:
+
+```bash
+$ git worktree add ../parent-pr-123 some-branch
+$ cd ../parent-pr-123
+$ git submodule update --init --recursive
+# submodule синхронизирован для этого worktree
+```
+
+### 3. Disk space
+
+Хоть worktrees и делят `.git/objects/`, working tree (рабочие файлы) дублируются. Если у тебя репо 500MB файлов, два worktrees = 1GB. Не превращай worktrees в способ хранить все ветки одновременно.
+
+### 4. IDE config
+
+Большинство IDE (VS Code, JetBrains) предполагают что project root = git root. С worktrees каждая папка — отдельный project root. Открой в отдельном окне IDE. Шортcut для VS Code: `code ../parent-pr-123` открывает в новом окне.
+
+---
+
+## Полный workflow для PR review
+
+Самый частый use case для DE — PR review без потери своей работы. Полная рутина:
+
+```bash
+# Один раз — alias
+$ git config --global alias.pr-review '!f() {
+    git fetch origin pull/$1/head:pr-$1
+    git worktree add ../$(basename $(pwd))-pr-$1 pr-$1
+    echo "Worktree created at ../$(basename $(pwd))-pr-$1"
+    echo "cd ../$(basename $(pwd))-pr-$1 to start review"
+}; f'
+
+# Использование
+$ git pr-review 123
+Fetching pull request 123...
+Worktree created at ../parent-pr-123
+cd ../parent-pr-123 to start review
+
+$ cd ../parent-pr-123
+$ code .   # открывается в новом VS Code
+# Делать review
+
+# По завершении
+$ cd ~/projects/parent
+$ git worktree remove ../parent-pr-123
+$ git branch -D pr-123   # удалить ветку, она больше не нужна
+```
+
+С этим alias review PR — одна команда, не нарушает текущую работу. Адаптируй под свой workflow (например, добавь `cd` в end, или autocompletion для PR number).
+
+---
+
+## Hands-on: попробуй worktrees
+
+```bash
+# В тестовом репо
+mkdir wt-demo && cd wt-demo
+git init
+echo "main work" > README.md
+git add . && git commit -m "init"
+
+# Создать ветку
+git checkout -b feature/a
+echo "feature work" > feature.py
+git add . && git commit -m "feature a"
+
+# Создать второй worktree из main
+cd ..
+mkdir -p wt-demo-b
+git -C wt-demo worktree add ../wt-demo-b main
+
+ls wt-demo-b/
+# README.md (без feature.py — это другой checkout)
+
+cat wt-demo-b/.git
+# gitdir: /path/to/wt-demo/.git/worktrees/wt-demo-b
+
+# Список worktrees
+cd wt-demo
+git worktree list
+# /path/to/wt-demo    abc123 [feature/a]
+# /path/to/wt-demo-b  def456 [main]
+
+# Можно работать в обоих параллельно
+# В wt-demo: feature/a
+# В wt-demo-b: main
+
+# Удалить
+git worktree remove ../wt-demo-b
+git worktree list
+# Только wt-demo
+```
+
+---
+
+## Cross-link
+
+- **Урок 01-02** — submodules
+- **Урок 03** — subtree
+- **Модуль 04** — branches (основа); worktrees расширяют branches mental model
+- **Модуль 11** — PR review; worktrees — лучший способ review без stash
+
+---
+
+## TL;DR
+
+- `git worktree add <path> <branch>` — создать дополнительный working tree.
+- Все worktrees делят `.git/objects/`, но имеют свои working trees.
+- Killer feature: review PR без stash (открой в новой папке, в новом IDE окне).
+- Use cases: long-running tests, parallel hotfix + feature, безопасный experimentation.
+- Ограничения: один branch — один worktree, hooks общие.
+- Всегда удаляй через `git worktree remove`, не `rm -rf`.
+
+Worktrees — недооценённая фича. Junior DE, который освоил workflow с worktrees, экономит часы каждую неделю на context-switching.
+
+---
+
+<KnowledgeCheck
+  question="Описание сценария: ты пишешь сложный refactor ETL pipeline (15 modified files в working tree, не closer к commit). Тебе нужно срочно review PR коллеги — он добавил S3 connector, нужно пробежаться по коду и запустить unit tests. PR требует pip install новых deps (boto3 update). Как worktree workflow решает эту задачу лучше stash?"
+  answer="Сценарий с stash workflow (плохо): (1) `git stash push -m 'wip refactor'` — рискованно (если stash conflict при pop, можно потерять работу). (2) `git fetch && git checkout colleague/s3-connector`. (3) `pip install -r requirements.txt` — обновит boto3 в твоей venv. (4) Запустить tests, дать review. (5) `git checkout feature/etl-refactor`. (6) `pip install -r requirements.txt` снова (вернуть старую версию boto3 — рискованно if requirements changed). (7) `git stash pop` — risk of conflicts с newer requirements.txt. (8) IDE state потерян — breakpoints, terminal cd, open tabs. Проблемы: 30 минут setup, риск потерять работу, побочные эффекты на venv. С worktree (правильно): (1) `git fetch origin pull/<N>/head:pr-N` — fetch PR в local branch. (2) `git worktree add ../parent-pr-N pr-N` — создаёт новую папку с checkout PR. Это занимает 2 секунды (shared .git). (3) `cd ../parent-pr-N && python -m venv .venv-review` — отдельная venv для review (изоляция). (4) `pip install -r requirements.txt` — в review venv, не трогает основную. (5) `code .` — открыть в новом VS Code окне. Твой основной checkout полностью intact. (6) Запустить tests, дать review. (7) `cd ~/projects/parent && git worktree remove ../parent-pr-N`. Закончил. Главные преимущества: (a) Никакого stash риска — твои 15 файлов остаются на месте. (b) Изоляция venv — review-зависимости не влияют на твою работу. (c) IDE state сохранён — breakpoints, terminal cd, open tabs всё на месте. (d) Можно сравнивать файлы side-by-side из двух checkout. (e) Если review требует запуска long-running ETL — пусть бежит, ты продолжаешь refactor. Time saved: 20-30 минут на каждом PR review. Bonus: alias `git pr-review <N>` (см. урок) делает это одной командой."
+/>

@@ -1,0 +1,405 @@
+---
+title: "GUI mergetool: VS Code, JetBrains и старая школа"
+description: "Когда визуальный mergetool помогает: 3-way merge UI и git mergetool configuration"
+order: 4
+difficulty: "beginner"
+estimatedTime: 16
+topics: ["Git", "mergetool", "VS Code", "JetBrains", "meld"]
+---
+
+# GUI mergetool: VS Code, JetBrains и старая школа
+
+Разрешать конфликты через `vim` и `grep` — нормально для маленьких и средних. Но когда у тебя 8 конфликтов в одном файле, или конфликт сложный (три блока изменений рядом, плюс реструктурирование), визуальный 3-way merge tool экономит часы.
+
+В этом уроке мы разбираемся: какие инструменты есть, как они работают концептуально, как настроить `git mergetool`, и когда стоит юзать GUI vs CLI.
+
+---
+
+## Концепция 3-way merge editor
+
+Хороший GUI mergetool показывает **три или четыре панели**:
+
+<DiagramContainer title="3-way merge UI: видишь все три версии одновременно" color="purple">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Слева — OURS (твоя текущая ветка), типично main">
+        <DataBox label="OURS" className="border-blue-500/30 w-44">
+          <div className="text-xs">текущая ветка</div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="В центре — BASE (общий предок), показывает что было ДО">
+        <DataBox label="BASE" className="border-zinc-500/30 w-44">
+          <div className="text-xs">merge base</div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Справа — THEIRS (мерджимая ветка), типично feature">
+        <DataBox label="THEIRS" className="border-purple-500/30 w-44">
+          <div className="text-xs">мерджимая ветка</div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+    <Arrow direction="down" />
+    <Tooltip content="Внизу — RESULT, итог; туда ты собираешь финальную версию">
+      <DataBox label="RESULT (output)" className="border-green-500/30 w-72 mx-auto">
+        <div className="text-xs">финальный файл</div>
+      </DataBox>
+    </Tooltip>
+  </FlowColumn>
+</DiagramContainer>
+
+Преимущество перед текстовыми маркерами:
+
+- Видишь все версии одновременно, не нужно переключаться/прокручивать.
+- Кнопки "Accept Current Change / Incoming Change / Both" — быстрый выбор стороны.
+- Подсветка синтаксиса, intellisense — пишешь финальную версию в нормальном редакторе.
+- Иногда видна история коммитов для каждой стороны.
+
+---
+
+## VS Code: встроенный editor
+
+С версии 1.69 (2022) в VS Code встроен полноценный 3-way merge editor. К 2026 году он зрелый и удобный.
+
+### Как открыть
+
+1. Получи конфликт через `git merge`.
+2. Открой проект в VS Code (`code .`).
+3. Кликни на конфликтный файл в Source Control панели слева.
+4. VS Code предложит **"Open in Merge Editor"** — кликни.
+
+Откроется UI с тремя панелями: Incoming (THEIRS), Current (OURS), Result.
+
+### Полезные действия
+
+- **Accept Current** — взять OURS для блока.
+- **Accept Incoming** — взять THEIRS.
+- **Accept Both (Combination)** — оставить обе версии последовательно.
+- **Compare with...** — diff с любой версией.
+
+После того, как все блоки разрешены, кнопка **"Complete Merge"** — это эквивалент `git add`. Сохраняешь, и можно коммитить.
+
+<Callout type="tip">
+VS Code Merge Editor — лучший дефолтный выбор для начинающих. Бесплатный, кросс-платформенный, не требует отдельной установки. Если уже используешь VS Code как редактор — просто кликай "Open in Merge Editor" при конфликте.
+</Callout>
+
+### Inline view как альтернатива
+
+Если не хочется открывать Merge Editor, VS Code показывает inline кнопки прямо над маркерами в файле:
+
+```
+Accept Current Change | Accept Incoming Change | Accept Both Changes | Compare Changes
+<<<<<<< HEAD
+...
+=======
+...
+>>>>>>> feature
+```
+
+Это менее наглядно, но быстрее для простых случаев.
+
+---
+
+## JetBrains IDE (PyCharm, IntelliJ, DataGrip)
+
+JetBrains часто считают лучшим merge editor — особенно для сложных конфликтов в больших файлах.
+
+### Возможности
+
+- 3-way panel с продвинутой подсветкой различий.
+- **Chunk-by-chunk navigation** с шорткатами (Alt+Right/Left для перехода между конфликтами).
+- **Magic wand** — Auto-resolve простых блоков, оставляет только реальные конфликты.
+- Подсветка whitespace-only различий — можно их игнорировать.
+- Интеграция с VCS-историей — кликаешь на блок, видишь "когда и кто этот код добавил".
+
+### Открытие
+
+JetBrains IDE при `git merge` с конфликтом покажет диалог "Merge Conflicts in N files". Кнопка "Merge" открывает 3-way editor.
+
+Или из CLI: `git mergetool` (после настройки).
+
+### Настройка как `git mergetool`
+
+```bash
+# PyCharm
+git config --global merge.tool pycharm
+git config --global mergetool.pycharm.cmd '/Applications/PyCharm.app/Contents/MacOS/pycharm merge "$LOCAL" "$REMOTE" "$BASE" "$MERGED"'
+
+# IntelliJ
+git config --global merge.tool intellij
+git config --global mergetool.intellij.cmd '/Applications/IntelliJ\ IDEA.app/Contents/MacOS/idea merge "$LOCAL" "$REMOTE" "$BASE" "$MERGED"'
+```
+
+Пути зависят от ОС — на Linux/Windows подправь.
+
+---
+
+## Старая школа: meld, kdiff3, p4merge
+
+До эпохи VS Code и JetBrains данная категория была доминирующей.
+
+### `meld`
+
+- Open-source, кросс-платформенный (GTK).
+- Простой, надёжный.
+- Хорошо для Linux-ориентированных команд.
+- Установка: `brew install meld` (macOS), `apt install meld` (Linux).
+
+```bash
+git config --global merge.tool meld
+git config --global mergetool.meld.path /usr/local/bin/meld
+git config --global mergetool.meld.useAutoMerge true
+```
+
+### `kdiff3`
+
+- Open-source, исторически один из лучших 3-way merge tools.
+- Бывает багги на современных macOS, но на Linux работает отлично.
+- Auto-merge простых блоков, удобная навигация.
+
+### `p4merge`
+
+- Бесплатная утилита от Perforce.
+- Очень популярна в эпоху до VS Code — простой UI, четыре панели.
+- Скачать: perforce.com/downloads/visual-merge-tool.
+
+```bash
+git config --global merge.tool p4merge
+git config --global mergetool.p4merge.path /Applications/p4merge.app/Contents/MacOS/p4merge
+```
+
+### `vimdiff`
+
+Для тех, кто живёт в терминале. Конфликты разрешаются через 4 окна vim с подсветкой.
+
+```bash
+git config --global merge.tool vimdiff
+```
+
+Не для джунов — кривая обучения вертикальная, плюс в эпоху VS Code это редко оправдано. Знай, что существует, но не начинай с этого.
+
+---
+
+## `git mergetool`: команда запуска
+
+После настройки `merge.tool`:
+
+```bash
+$ git merge feature
+CONFLICT (content): Merge conflict in src/etl.py
+
+$ git mergetool
+Merging:
+src/etl.py
+
+Normal merge conflict for 'src/etl.py':
+  {local}: modified file
+  {remote}: modified file
+Hit return to start merge resolution tool (vscode):
+```
+
+Git запустит сконфигурированный tool для каждого конфликтного файла по очереди. После того, как ты сохраняешь финальную версию и закрываешь tool, Git помечает файл `git add`-нутым автоматически.
+
+### `.orig` файлы
+
+По дефолту `git mergetool` создаёт `.orig` backup-файлы с не-разрешённой версией. Чтобы убрать:
+
+```bash
+git config --global mergetool.keepBackup false
+```
+
+Или вычистить разово:
+
+```bash
+find . -name "*.orig" -delete
+```
+
+Также полезно добавить в `.gitignore`:
+
+```
+*.orig
+```
+
+---
+
+## Когда GUI лучше, когда CLI
+
+| Сценарий | Выбор |
+|----------|-------|
+| 1-2 простых конфликта в файле | CLI: открой в редакторе, поправь руками |
+| 5+ конфликтов в одном файле | GUI: 3-way panel экономит когнитивную нагрузку |
+| Конфликт в сложном коде (рефакторинг, переезд функций) | GUI: проще видеть структуру |
+| Конфликт в YAML/JSON config | CLI: обычно тривиальный |
+| Конфликт в lock-файле | НИ ОДИН: регенерируй (см. предыдущий урок) |
+| Конфликт в бинарном файле | CLI: `--ours/--theirs` целиком |
+| Конфликт на удалённой сессии (SSH без X11) | CLI: vimdiff или текстовый редактор |
+| Параллельно с code review | GUI: видно историю, легче судить контекст |
+
+<Callout type="tip">
+Не бойся переключаться. Не обязательно "выбрать один инструмент на всю карьеру". Для простых случаев — текстовый редактор быстрее, для сложных — открываешь GUI. Главное — не геройствовать, экономь голову.
+</Callout>
+
+---
+
+## Diff tool ≠ Merge tool
+
+`git mergetool` — для разрешения конфликтов. Есть похожая команда `git difftool` — для просмотра обычных diff-ов в GUI:
+
+```bash
+git config --global diff.tool meld     # или vscode, или другое
+
+git difftool HEAD~3 HEAD               # diff между двумя коммитами
+git difftool --staged                  # staged changes
+git difftool main feature              # diff между ветками
+```
+
+Полезно для подготовки к ревью кода или для просмотра изменений в IDE, не выходя в браузер.
+
+---
+
+## Настройка VS Code как mergetool и difftool
+
+```bash
+# Mergetool
+git config --global merge.tool vscode
+git config --global mergetool.vscode.cmd 'code --wait --merge $REMOTE $LOCAL $BASE $MERGED'
+
+# Difftool
+git config --global diff.tool vscode
+git config --global difftool.vscode.cmd 'code --wait --diff $LOCAL $REMOTE'
+
+# Опционально — не спрашивать "точно хочешь mergetool?"
+git config --global mergetool.prompt false
+git config --global difftool.prompt false
+```
+
+Проверка:
+
+```bash
+$ git config --list | grep -i 'merge.tool\|mergetool\|diff.tool\|difftool'
+merge.tool=vscode
+mergetool.vscode.cmd=code --wait --merge $REMOTE $LOCAL $BASE $MERGED
+mergetool.prompt=false
+diff.tool=vscode
+difftool.vscode.cmd=code --wait --diff $LOCAL $REMOTE
+```
+
+Тест:
+
+```bash
+# Создай конфликт
+mkdir test-mergetool && cd test-mergetool
+git init
+echo "v1" > f.txt && git add . && git commit -m "init"
+git switch -c b1
+echo "from b1" > f.txt && git commit -am "b1"
+git switch -
+git switch -c b2
+echo "from b2" > f.txt && git commit -am "b2"
+git merge b1
+# CONFLICT
+
+# Запусти mergetool
+git mergetool
+# VS Code откроется с merge editor
+```
+
+---
+
+## Несколько mergetool параллельно
+
+В `.gitconfig` можно описать несколько инструментов и переключаться:
+
+```ini
+[merge]
+    tool = vscode
+[mergetool "vscode"]
+    cmd = code --wait --merge $REMOTE $LOCAL $BASE $MERGED
+[mergetool "meld"]
+    path = /usr/local/bin/meld
+
+[diff]
+    tool = vscode
+[difftool "vscode"]
+    cmd = code --wait --diff $LOCAL $REMOTE
+```
+
+И запускать конкретный:
+
+```bash
+git mergetool --tool=meld
+```
+
+Удобно: на работе один тул (VS Code), а на личном проекте через SSH — vimdiff.
+
+---
+
+## Альтернатива: разрешать в IDE без `git mergetool`
+
+В современном workflow многие вообще не используют `git mergetool`. Сценарий:
+
+1. Конфликт случился в терминале (`git merge` или `git pull`).
+2. Открываешь проект в IDE (VS Code/JetBrains).
+3. IDE сама подсвечивает конфликты, показывает кнопки.
+4. Разрешаешь в IDE, сохраняешь.
+5. Возвращаешься в терминал, `git add` + `git commit`.
+
+Это лёгкий путь — никакой настройки `mergetool` не нужно. IDE уже знает о Git и работает с `.git/` напрямую.
+
+---
+
+## Попробуй сам
+
+```bash
+# Создай конфликт
+mkdir mergetool-demo && cd mergetool-demo
+git init
+cat > app.py <<EOF
+def process(data):
+    return [x.upper() for x in data]
+EOF
+git add . && git commit -m "init"
+
+git switch -c add-filter
+cat > app.py <<EOF
+def process(data):
+    return [x.upper() for x in data if x]
+EOF
+git commit -am "add: filter empty"
+
+git switch main
+git switch -c add-logging
+cat > app.py <<EOF
+import logging
+log = logging.getLogger(__name__)
+
+def process(data):
+    log.info("processing")
+    return [x.upper() for x in data]
+EOF
+git commit -am "add: logging"
+
+git switch main
+git merge add-filter      # fast-forward
+git merge add-logging     # CONFLICT
+
+# Вариант 1: открой в VS Code
+code .
+# Source Control панель -> клик на app.py -> "Open in Merge Editor"
+
+# Вариант 2: настрой mergetool и запусти
+git config merge.tool vscode
+git config mergetool.vscode.cmd 'code --wait --merge $REMOTE $LOCAL $BASE $MERGED'
+git mergetool
+
+# Финиш
+git status
+git add app.py
+git commit --no-edit
+```
+
+---
+
+<KnowledgeCheck
+  question="Коллега жалуется: 'я месяц мучаюсь с конфликтами через vim, открыл VS Code merge editor — оказалось в 5 раз быстрее. Но теперь у меня файлы `*.orig` валяются по всему репо, и git status их показывает.' Что произошло и как исправить?"
+  answer="Это побочный эффект `git mergetool`: по дефолту он создаёт `.orig` backup-файлы с не-разрешённой версией. Когда коллега запускал `git mergetool` (явно или VS Code через какую-то интеграцию), эти файлы сохранились в рабочем дереве. Решение в три шага: (1) **Удалить существующие**: `find . -name '*.orig' -delete`. (2) **Отключить создание новых**: `git config --global mergetool.keepBackup false`. (3) **Добавить в .gitignore на всякий случай**: `echo '*.orig' >> .gitignore` — это защитит, если коллега забудет отключить keepBackup в новом репо или на другом компе. Альтернативный workflow, который убирает проблему совсем: не использовать `git mergetool` вообще. Открыть конфликтный файл в VS Code из обычного `code .`, использовать встроенный merge editor (с версии 1.69+) или inline-кнопки, сохранить, `git add && git commit`. Это работает без `.orig` файлов, потому что VS Code не идёт через `git mergetool` — он просто редактирует файл в working tree."
+/>

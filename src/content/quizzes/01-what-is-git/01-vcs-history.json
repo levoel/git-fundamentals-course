@@ -1,0 +1,74 @@
+{
+  "lessonSlug": "01-what-is-git/01-vcs-history",
+  "moduleId": "01-what-is-git",
+  "_meta": {
+    "idPrefix": "git-m01-01",
+    "description": "Quiz for lesson 1.1 — История систем контроля версий"
+  },
+  "questions": [
+    {
+      "id": "git-m01-01-q1",
+      "type": "multiple-choice",
+      "question": "В чём принципиальное ограничение RCS (1982) по сравнению с CVS (1986)?",
+      "options": [
+        { "id": "a", "text": "RCS не поддерживал бинарные файлы вообще" },
+        { "id": "b", "text": "RCS работал только с одним файлом за раз — не было концепта commit, объединяющего изменения нескольких файлов" },
+        { "id": "c", "text": "RCS не хранил историю изменений" },
+        { "id": "d", "text": "RCS требовал интернет-соединения" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "RCS версионировал файлы независимо. У каждого файла foo.c,v была своя цепочка ревизий. Если ваше изменение затрагивает 5 файлов — нет атомарной операции, фиксирующей их вместе. CVS добавила версионирование всего проекта: commit охватывает несколько файлов как единое логическое изменение. Это было критическим скачком в удобстве работы команд.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m01-01-q2",
+      "type": "multiple-choice",
+      "question": "Что было главной проблемой Subversion, которую решил Git?",
+      "options": [
+        { "id": "a", "text": "SVN не поддерживал атомарные коммиты" },
+        { "id": "b", "text": "SVN не отслеживал переименования файлов" },
+        { "id": "c", "text": "SVN был централизованным — все операции требовали сервера, без интернета нельзя было сделать commit или посмотреть log" },
+        { "id": "d", "text": "SVN не поддерживал бинарные файлы" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "SVN исправил «локальные» проблемы CVS — атомарные коммиты, переименования файлов (это в SVN РАБОТАЕТ), дешёвые ветки. Но сохранил центральную модель: один сервер с репозиторием, клиенты с рабочими копиями. Без интернета нельзя ни сохранить commit, ни посмотреть историю. Git с distributed-моделью отвечал на запрос времени: распределённые команды, нестабильный интернет, open-source с тысячами контрибьюторов.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m01-01-q3",
+      "type": "multiple-choice",
+      "question": "Почему Linus Torvalds начал писать Git в апреле 2005 года?",
+      "options": [
+        { "id": "a", "text": "Хотел заработать денег на новой системе контроля версий" },
+        { "id": "b", "text": "Компания BitMover отозвала бесплатную лицензию на BitKeeper для open-source — Linux kernel остался без VCS, и Linus написал замену с нуля за 23 дня" },
+        { "id": "c", "text": "Subversion 1.0 был слишком медленным" },
+        { "id": "d", "text": "Mercurial появился позже Git, поэтому конкурировал" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "С 2002 года Linux kernel использовал коммерческую BitKeeper по бесплатной лицензии. В апреле 2005 Andrew Tridgell попытался реверс-инжинирить BitKeeper protocol, что вызвало конфликт с автором BitKeeper Larry McVoy. McVoy отозвал бесплатную лицензию для open-source. Linus начал писать Git 6 апреля, через 23 дня Linux kernel уже переехал на Git. Mercurial появился ПАРАЛЛЕЛЬНО, тоже в апреле 2005 — но независимо.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m01-01-q4",
+      "type": "multiple-choice",
+      "question": "Что из перечисленного Git УНАСЛЕДОВАЛ от CVS, а что — изобрёл сам?",
+      "options": [
+        { "id": "a", "text": "От CVS: snapshots вместо дельт. Сам: атомарные commits" },
+        { "id": "b", "text": "От CVS: distributed модель. Сам: content-addressable storage" },
+        { "id": "c", "text": "От CVS: атомарный commit на несколько файлов, optimistic concurrency. Сам: content-addressable storage, snapshots (не дельты), cheap branching" },
+        { "id": "d", "text": "Git ничего не унаследовал от CVS — это полностью новый дизайн" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "Git — это синтез предыдущих идей. От CVS унаследовал атомарный commit, охватывающий несколько файлов, и optimistic concurrency (без lock-ов). От Subversion — транзакционность и отслеживание renames. От Monotone — distributed-модель. Изобрёл сам: content-addressable storage через SHA-1 хеши, хранение через snapshots (не дельты), и сверхдешёвые ветки (41 байт на ветку).",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m01-01-q5",
+      "type": "true-false",
+      "question": "До CVS большинство команд координировало работу через ручные бэкапы (foo.c.bak, foo.c.old) и голосовые договорённости «не трогай файл, я редактирую».",
+      "correctAnswer": true,
+      "explanation": "Это правда. До SCCS (1972) и RCS (1982) программисты делали ручные копии файлов и координировались голосом. Эта модель не масштабируется на команды больше 10 человек или проекты длиннее 6 месяцев, что и стимулировало появление VCS.",
+      "bloomLevel": "conceptual"
+    }
+  ]
+}

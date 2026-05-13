@@ -1,0 +1,59 @@
+{
+  "lessonSlug": "19-recovery/04-gc-prune-maintenance",
+  "moduleId": "19-recovery",
+  "_meta": {
+    "idPrefix": "git-m19-04"
+  },
+  "questions": [
+    {
+      "id": "git-m19-04-q1",
+      "type": "multiple-choice",
+      "question": "В чём разница между loose objects и pack files в .git/objects/?",
+      "options": [
+        {"id": "a", "text": "Loose objects быстрее для чтения, pack files — для записи"},
+        {"id": "b", "text": "Loose object — отдельный файл per object (один blob = один файл). Pack — много objects в одном compressed файле с delta-compression. git gc упаковывает loose в pack, экономит место в 4-10x"},
+        {"id": "c", "text": "Loose только в .git/info, pack только в /tmp"},
+        {"id": "d", "text": "Loose для текстовых файлов, pack для бинарных"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Loose objects: каждый Git object (blob, tree, commit) — отдельный файл `.git/objects/ab/c123...`. Простой формат, легко создаётся (когда commit), но: много inodes, нет cross-file compression. Pack: bundle objects в один файл (.pack) + index (.idx) для random access. Применяется delta compression (похожие objects хранятся как diff от base) + zlib поверх. Compression обычно 4-10x для текстовых проектов (Python, SQL). git gc делает repack: loose -> pack, удаляет loose после.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m19-04-q2",
+      "type": "multiple-choice",
+      "question": "`git gc --aggressive` отличается от `git gc` тем, что:",
+      "options": [
+        {"id": "a", "text": "Удаляет файлы безвозвратно"},
+        {"id": "b", "text": "Применяет более глубокий delta search (window=250 vs default 10), даёт лучше compression на 5-15%, но **в 10-100x медленнее**. Делается редко (раз в год / после большого rewrite типа filter-repo), не регулярно"},
+        {"id": "c", "text": "Удаляет все unreachable objects сразу без 2-week buffer"},
+        {"id": "d", "text": "Включает push в remote"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "--aggressive — для situations где compression critically важен. Тратит больше CPU на поиск optimal deltas. Пример: 1GB репо — обычный gc 1 min, aggressive 30 min. Diminishing returns: после первого aggressive gc следующие aggressive дают marginal improvement. Делается: (1) раз в год для maintenance; (2) после `git filter-repo` (массовое rewrite истории); (3) когда `du -sh .git` вырос внезапно. НЕ делай каждый день / в CI — wasted time. Регулярный обычный gc + git maintenance — достаточно.",
+      "bloomLevel": "analytical"
+    },
+    {
+      "id": "git-m19-04-q3",
+      "type": "multiple-choice",
+      "question": "Junior замечает, что .git/ репо разросся до 5GB. Команда для нахождения, какие конкретные blobs занимают много места?",
+      "options": [
+        {"id": "a", "text": "ls -la .git/objects/"},
+        {"id": "b", "text": "git rev-list --objects --all | git cat-file --batch-check='%(objectname) %(objecttype) %(objectsize:disk) %(rest)' | awk '/blob/ { print $3, $4 }' | sort -nr | head -20"},
+        {"id": "c", "text": "du -sh ."},
+        {"id": "d", "text": "git log --stat"}
+      ],
+      "correctAnswer": "b",
+      "explanation": "Сложная но мощная команда: (1) rev-list --objects --all — перечисляет ВСЕ objects в репо (даже не reachable from HEAD), показывая их path в дереве; (2) cat-file --batch-check — для каждого SHA выводит type и disk size; (3) awk фильтрует blob, оставляет size + path; (4) sort -nr — sort by size desc; (5) head -20 — top 20. Видишь типичные виновники: legacy parquet в data/, large notebook с outputs, migration с inline данными. Это input для решения: LFS migrate или filter-repo cleanup. ls/du — только текущая размер на диске, не структура objects.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m19-04-q4",
+      "type": "true-false",
+      "question": "Для DE-репо с Jupyter notebooks полезно использовать `nbstripout` как pre-commit hook — он автоматически очищает output cells (включая случайно сохранённые credentials, plot images размером MB) перед commit. Это резко уменьшает размер репо и предотвращает leak.",
+      "correctAnswer": true,
+      "explanation": "Jupyter .ipynb — JSON структура, в которой output cells хранятся вместе с code. Outputs могут быть: (1) большие base64-encoded plots (MB на cell); (2) `print(connection)` с паролями; (3) DataFrame previews с чувствительными данными. nbstripout — pre-commit hook, который перед commit очищает outputs. Файл коммитится только с code и markdown — без heavy/sensitive output. Преимущества: размер репо уменьшается 10-100x, нет случайных leaks через outputs, diffs ноутбуков читаемы. Setup: pip install nbstripout, в .pre-commit-config.yaml добавить hook.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

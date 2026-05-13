@@ -1,0 +1,63 @@
+{
+  "lessonSlug": "15-hooks-automation/01-git-hooks-internals",
+  "moduleId": "15-hooks-automation",
+  "_meta": {
+    "idPrefix": "git-m15-01",
+    "description": "Quiz for lesson 01 of module 15 — git hooks internals"
+  },
+  "questions": [
+    {
+      "id": "git-m15-01-q1",
+      "type": "multiple-choice",
+      "question": "Где живут Git hooks и как они активируются?",
+      "options": [
+        { "id": "a", "text": "В .gitignore" },
+        { "id": "b", "text": "В .git/hooks/ — директория с шаблонами .sample. Чтобы активировать: убрать .sample (имя должно быть точным — pre-commit, commit-msg и т.д.), сделать chmod +x. Git auto-vызывает в соответствующие моменты lifecycle (pre-commit перед commit, pre-push перед push). Скрипт может быть на любом языке — bash, Python, Ruby, Go" },
+        { "id": "c", "text": "В config.json" },
+        { "id": "d", "text": "В .github/workflows/" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Mechanics: `.git/hooks/` создаётся при `git init` с шаблонами вида `pre-commit.sample`, `commit-msg.sample` и т.д. Шаблоны не активны (расширение .sample). Активация: (1) Переименовать файл без .sample — `pre-commit.sample` -> `pre-commit`. Имя должно ТОЧНО совпадать с lifecycle event Git. (2) Сделать executable — `chmod +x .git/hooks/pre-commit`. (3) Git автоматически вызывает в соответствующий момент. Доступные client-side hooks: pre-commit, commit-msg, prepare-commit-msg, post-commit, pre-rebase, post-checkout, post-merge, pre-push. Server-side: pre-receive, update, post-receive. Hook — обычный исполняемый скрипт, Git делает `exec`. Возвращаемый code: 0 = OK, non-zero = abort operation (для pre-* hooks). В pre-commit `git diff --cached` показывает staged changes. cwd hook-а = root репо.",
+      "studyHint": "Повторите урок 01 — раздел 'Где живут hooks'",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m15-01-q2",
+      "type": "multiple-choice",
+      "question": "Какие 3 самых полезных client-side hook для DE и для чего каждый?",
+      "options": [
+        { "id": "a", "text": "post-receive, pre-receive, update — для server-side" },
+        { "id": "b", "text": "pre-commit (перед каждым commit — линт, формат, проверка secrets), commit-msg (валидация commit message format — conventional commits), pre-push (перед push — final тесты, защита main branch)" },
+        { "id": "c", "text": "Все hooks одинаково полезны" },
+        { "id": "d", "text": "post-commit — единственный полезный" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Самые часто используемые client-side hooks в DE workflow: (1) pre-commit — главный. Запускается перед commit, если возвращает non-zero exit, commit отменяется. Используется для: linting (ruff, mypy, eslint), formatting (ruff format, prettier), проверка секретов (gitleaks), очистка outputs из notebooks (nbstripout), check-added-large-files. (2) commit-msg — получает путь к файлу с message. Используется для валидации conventional commits format через commitlint — если message не feat:/fix:/chore:/etc. — commit отменён. (3) pre-push — перед фактическим push на remote. Здесь: запуск полного test suite (если линт быстрый, тесты слишком долгие для pre-commit), блокировка прямого push в main, проверка integrity. Менее важные: post-commit (notifications), prepare-commit-msg (templating message), post-merge (auto pip install при изменении requirements). На уровне DE-команды pre-commit + commit-msg обычно покрывают 90% потребностей.",
+      "studyHint": "Повторите урок 01 — раздел 'Самые полезные client-side hooks'",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m15-01-q3",
+      "type": "multiple-choice",
+      "question": "Какова главная проблема нативных .git/hooks для команды?",
+      "options": [
+        { "id": "a", "text": "Они работают слишком медленно" },
+        { "id": "b", "text": ".git/ — это служебная папка, НЕ versioned, не commit-ится. Когда коллега делает git clone, у него .git/hooks/ пуст (только .sample файлы). Твои отличные hooks для лonta, secrets, format существуют только у тебя локально. Коллега коммитит без проверок. Эта проблема — главная мотивация для pre-commit framework и аналогов (которые хранят config в repo и автоматически устанавливают hooks)" },
+        { "id": "c", "text": "Они доступны только на macOS" },
+        { "id": "d", "text": "Их нельзя написать на Python" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Главное ограничение native hooks: содержимое .git/ не tracked в Git репо. После git clone: (1) .git/objects/ создаётся свежий из удалённой истории. (2) .git/hooks/ — только template .sample файлы из git-core. Никаких custom hooks. Это значит: ты написал отличный pre-commit hook, который проверяет TODO, секреты, форматирование. Коллега клонирует репо — у него этого нет. Он коммитит код с TODO и hardcoded password в main. Обходные пути есть — `core.hooksPath` указывает Git на другую папку (которая может быть в репо), но это требует bootstrap-скрипта на каждой машине. Native подход хорош для personal проектов или experiments, но для team workflow не годится. Решение — frameworks (pre-commit, husky, lefthook), которые: (1) Хранят config в repo (versioned). (2) Имеют одну команду установки (`pre-commit install`), которая создаёт hooks в .git/hooks/. (3) Поддерживают community hook catalog. (4) Дают reproducibility через pinning versions.",
+      "studyHint": "Повторите урок 01 — раздел 'Главная проблема: hooks не versioned'",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m15-01-q4",
+      "type": "true-false",
+      "question": "Команда `git commit --no-verify -m 'emergency fix'` обходит pre-commit и commit-msg hooks, что иногда нужно для экстренных фиксов. Хорошие команды настраивают hooks так, чтобы --no-verify был exception, не правилом.",
+      "correctAnswer": true,
+      "explanation": "Точно. `--no-verify` (или `-n`) — флаг, который обходит ВСЕ client-side hooks для конкретной операции. Использования: (1) Эмердженси-фикс в production ночью когда формат не критичен. (2) Hook сломан, надо исправить (parsing error в pre-commit YAML). (3) Огромный squash где hooks правомерно reject (например, file > maxkb из миграции старого кода). Аналогично `git push --no-verify` обходит pre-push. ВАЖНО: если люди в команде постоянно используют --no-verify — это signal: либо hooks слишком strict (нужно ослабить правила или добавить exclude-патерны), либо есть culture issue (люди не хотят следовать процессу). Хорошие команды: hooks должны быть полезными (auto-fix где возможно, понятные error messages), но не наказывающими. И есть belt+suspenders — CI запускает те же checks, поэтому --no-verify локально не спасёт от blocked merge. Branch protection rule 'require status checks' блокирует PR с failing CI независимо от local hooks.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

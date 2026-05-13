@@ -1,0 +1,505 @@
+---
+title: "Line endings: CRLF vs LF, canonical 2026 setup"
+description: "Главный cross-platform footgun Git — line endings. core.autocrlf vs .gitattributes, почему shell-скрипты ломаются, каноничный setup 2026 года"
+order: 4
+difficulty: "intermediate"
+estimatedTime: 24
+topics: ["Git", "CRLF", "LF", "cross-platform", "gitattributes"]
+---
+
+# Line endings: CRLF vs LF, canonical 2026 setup
+
+Если у тебя в команде есть один Windows-разработчик, рано или поздно ты столкнёшься со странным diff: открываешь PR, и Git показывает, что коллега "изменил все 500 строк файла", хотя реально он поменял одну строку. Или ты запускаешь `bash script.sh` на Linux, и shell кидает `\r: command not found` — а коллега утверждает "у меня на Windows всё работает".
+
+Это line endings — самый недооценённый источник пропавшего времени в cross-platform командах. В этом уроке: что такое LF/CRLF, почему Windows отличается, что такое `core.autocrlf`, почему он сломан в 2026, и какой каноничный setup через `.gitattributes`.
+
+---
+
+## История: откуда взялись LF и CRLF
+
+Текстовый файл — это последовательность байт. Когда нужен перенос строки, в файл вставляется специальный символ. Проблема: в разных ОС этот символ — разный.
+
+<DiagramContainer title="Три исторических символа переноса строки" color="blue">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Unix-traditions: 0x0A — один байт, минималистично. Linux, macOS (с 10.x)">
+        <DataBox label="LF" className="border-emerald-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>0x0A — Line Feed</div>
+            <div>\n в C/Python</div>
+            <div>Unix, Linux, macOS</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="DOS/Windows: два байта 0x0D 0x0A. Историческое наследие телетайпов">
+        <DataBox label="CRLF" className="border-amber-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>0x0D 0x0A — Carriage Return + Line Feed</div>
+            <div>\r\n в C/Python</div>
+            <div>DOS, Windows</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+    <Tooltip content="Старый Mac OS до 9 — почти исчез к 2026, но иногда вылазит">
+      <DataBox label="CR (legacy)" className="border-zinc-500/30 w-72 mx-auto">
+        <div className="text-xs space-y-1">
+          <div>0x0D — Carriage Return</div>
+          <div>\r в C/Python</div>
+          <div>Classic Mac OS (≤9), мёртв</div>
+        </div>
+      </DataBox>
+    </Tooltip>
+  </FlowColumn>
+</DiagramContainer>
+
+Корни в эпохе телетайпов: каретка возвращалась в начало строки (CR), потом бумага прокручивалась на строку вниз (LF). Это были два разных физических действия. Unix (и потом всё, что от него произошло — Linux, macOS) решили: "хватит, один символ означает перенос строки". Microsoft (DOS, Windows) сохранили оба.
+
+В 2026 это всё ещё актуально. Notepad на Windows по умолчанию пишет CRLF. Visual Studio — CRLF. Linux/macOS-инструменты — LF.
+
+---
+
+## Почему это проблема для Git
+
+Git хранит файлы байт-в-байт. Если кто-то закоммитил файл с CRLF, а другой добавил строку и сохранил с LF — Git видит "изменены все строки", потому что байты в конце каждой строки разные.
+
+```diff
+- print("hello")\r\n       ← было CRLF
++ print("hello")\n          ← стало LF (всё та же логика, но байты другие)
+- print("world")\r\n
++ print("world")\n
+```
+
+Открываешь PR — diff показывает 100 изменённых строк, хотя коллега всего лишь сохранил файл в другом редакторе. Code review невозможен.
+
+Это первая боль. Вторая — **shell scripts**: если `.sh` имеет CRLF, Linux/macOS bash при чтении видит `\r` как часть имени команды и падает:
+
+```bash
+$ ./script.sh
+./script.sh: line 2: $'\r': command not found
+```
+
+Третья — **YAML/Python**: иногда CRLF ломает парсинг строк в edge cases. Особенно в multi-line strings.
+
+---
+
+## Решение №1 (старое, сломанное): core.autocrlf
+
+Git исторически решал проблему через настройку `core.autocrlf`. Идея: "пусть Git автоматически конвертирует line endings при checkout и commit".
+
+```bash
+# Для Windows: при checkout — CRLF, при commit — LF
+git config --global core.autocrlf true
+
+# Для macOS/Linux: при commit конвертировать в LF, при checkout не трогать
+git config --global core.autocrlf input
+
+# Не трогать вообще
+git config --global core.autocrlf false
+```
+
+<DiagramContainer title="core.autocrlf — три режима" color="purple">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Windows-режим: на диске CRLF, в Git хранится LF">
+        <DataBox label="autocrlf=true" className="border-purple-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>commit: CRLF -> LF</div>
+            <div>checkout: LF -> CRLF</div>
+            <div>для Windows-разработчиков</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Unix-режим: на диске LF, в Git тоже LF. Случайные CRLF — нормализуются">
+        <DataBox label="autocrlf=input" className="border-emerald-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>commit: CRLF -> LF</div>
+            <div>checkout: НЕ ТРОГАТЬ</div>
+            <div>для macOS/Linux</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Никакой конвертации, что положили — то и хранится">
+        <DataBox label="autocrlf=false" className="border-zinc-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>commit: не трогать</div>
+            <div>checkout: не трогать</div>
+            <div>нужен .gitattributes</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+### Почему этот подход сломан
+
+Проблема `core.autocrlf` в том, что **это per-машина настройка**. У тебя `input`, у коллеги-Windows `true`, у третьего вообще `false`. Каждый что-то получает по-своему, плюс глобальная настройка может конфликтовать с per-репо.
+
+Ещё хуже: `autocrlf` пытается **угадать**, какие файлы текстовые. Алгоритм — посмотреть первые несколько байт, если они выглядят как ASCII — текст. Это часто ошибается. Бинарные файлы вроде иконок могут "случайно выглядеть текстом" в первых байтах, и Git их испортит.
+
+Результат: ты не знаешь, что у тебя получится. Может быть, нормализуется. Может быть, нет. Может быть, у коллеги выглядит иначе.
+
+<Callout type="warning">
+Если ты пользуешься только `core.autocrlf` без `.gitattributes`, ты строишь систему на shifting sand. Это работает для personal repo на одной машине. Для team-репо нужен `.gitattributes`.
+</Callout>
+
+---
+
+## Решение №2 (каноничное 2026): .gitattributes
+
+Каноничный подход — **указать line endings в `.gitattributes`**, который commit-ится в репо. Тогда все участники получают **одинаковое** поведение, независимо от их `core.autocrlf`.
+
+```gitattributes
+# === Универсальный fallback: все text-файлы хранятся как LF ===
+* text=auto eol=lf
+
+# === Конкретные текстовые файлы ===
+*.py        text eol=lf
+*.sh        text eol=lf
+*.bash      text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+*.json      text eol=lf
+*.md        text eol=lf
+*.sql       text eol=lf
+*.txt       text eol=lf
+*.html      text eol=lf
+*.css       text eol=lf
+*.js        text eol=lf
+*.ts        text eol=lf
+
+# === Windows-specific — должны быть CRLF ===
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+*.ps1       text eol=crlf
+
+# === Бинари — не трогать вообще ===
+*.png       binary
+*.jpg       binary
+*.gif       binary
+*.ico       binary
+*.pdf       binary
+*.zip       binary
+*.tar.gz    binary
+*.parquet   binary
+*.duckdb    binary
+*.sqlite    binary
+*.so        binary
+*.dll       binary
+*.exe       binary
+```
+
+Что это даёт:
+
+1. **Все** в команде получают одинаковое поведение — настройки локального `core.autocrlf` игнорируются для файлов, перечисленных в `.gitattributes`.
+2. **Внутренний хранилище Git** — всегда LF (этого требует `text=auto eol=lf`).
+3. **При checkout** на любой ОС — все text-файлы получают LF, кроме `.bat`/`.cmd`/`.ps1` (CRLF — иначе Windows их не запустит).
+4. **Бинари** — не трогаются, ни при commit, ни при checkout.
+
+---
+
+## `* text=auto eol=lf` — главная строка
+
+Разберём:
+
+- `*` — паттерн "все файлы"
+- `text=auto` — Git сам определяет, текстовый файл или нет. Эвристика: посмотрит первые байты, если NUL — бинарь, иначе текст.
+- `eol=lf` — для текстовых: при commit нормализуй в LF, при checkout оставь LF (на любой ОС).
+
+Это базовый fallback для всех файлов в репо. Дополнительные правила (`*.py text eol=lf` явно, `*.bat text eol=crlf`) — для точности и читаемости.
+
+<Callout type="tip">
+Сначала пиши `* text=auto eol=lf` как первое правило. Потом — конкретные исключения и binary-файлы. Это безопасный default.
+</Callout>
+
+---
+
+## Что делать после изменения .gitattributes в существующем репо
+
+Если ты добавил `.gitattributes` в существующий репо, где раньше line endings были смешанные, нужно **перенормализовать всю историю** (а точнее — рабочую копию для будущих commit-ов):
+
+```bash
+# 1. Commit .gitattributes
+git add .gitattributes
+git commit -m "chore: add .gitattributes for line endings"
+
+# 2. Перенормализовать все файлы в working tree по новым правилам
+git add --renormalize .
+
+# 3. Если что-то изменилось — commit
+git status
+# Если есть modified — то normalize что-то поменял
+git commit -m "chore: normalize line endings"
+```
+
+`git add --renormalize .` — спасительная команда. Она применяет правила из `.gitattributes` ко всем уже tracked файлам. Без неё `.gitattributes` действует только на новые/изменённые файлы, а историю не трогает.
+
+<Callout type="warning">
+После `--renormalize` все блобы файлов в Git могут измениться (если у них были CRLF). Это создаст один большой commit с "изменениями" во многих файлах. Лучше делать это **до** старта активной разработки в команде, чтобы не ломать чужие PR-ы.
+</Callout>
+
+---
+
+## Per-ОС шпаргалка
+
+Для контекста, что вообще должна делать твоя локальная `core.autocrlf`:
+
+<DiagramContainer title="Настройки в зависимости от ОС" color="indigo">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="macOS — нативный LF, конвертировать не нужно. autocrlf=input защищает от accidental CRLF">
+        <DataBox label="macOS" className="border-indigo-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>core.autocrlf=input</div>
+            <div>core.eol=lf</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Linux — нативный LF, аналогично macOS">
+        <DataBox label="Linux" className="border-indigo-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>core.autocrlf=input</div>
+            <div>core.eol=lf</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Windows — два варианта: traditional autocrlf=true (нативные CRLF) или modern false + .gitattributes (LF on disk)">
+        <DataBox label="Windows" className="border-amber-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>autocrlf=true (legacy)</div>
+            <div>autocrlf=false + .gitattributes (modern)</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Команды для применения:
+
+```bash
+# macOS / Linux
+git config --global core.autocrlf input
+git config --global core.eol lf
+
+# Windows (legacy)
+git config --global core.autocrlf true
+
+# Windows (modern — LF everywhere, .gitattributes rules)
+git config --global core.autocrlf false
+git config --global core.eol lf
+```
+
+С modern setup + `.gitattributes` в репо `core.autocrlf` практически не имеет значения для tracked файлов — атрибуты переопределяют его.
+
+---
+
+## Debugging: какие line endings в файле
+
+Команды для проверки:
+
+```bash
+# 1. file — покажет, какой формат у файла
+$ file script.sh
+script.sh: Bourne-Again shell script, ASCII text executable, with CRLF line terminators
+                                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                                                            проблема
+
+# 2. cat -A — покажет управляющие символы
+$ cat -A script.sh
+#!/bin/bash^M$           ← ^M это \r (CR), $ это конец строки. Значит CRLF.
+
+# 3. hexdump для уверенности
+$ head -1 script.sh | hexdump -C
+00000000  23 21 2f 62 69 6e 2f 62  61 73 68 0d 0a              |#!/bin/bash..|
+                                              ^^ ^^
+                                              0d  0a = CR LF = CRLF
+
+# Чистый LF был бы:
+00000000  23 21 2f 62 69 6e 2f 62  61 73 68 0a                  |#!/bin/bash.|
+                                              ^^
+                                              0a = LF only
+```
+
+Конвертация существующего файла:
+
+```bash
+# CRLF -> LF
+$ dos2unix script.sh
+$ sed -i 's/\r$//' script.sh     # альтернатива через sed
+
+# LF -> CRLF (редко нужно)
+$ unix2dos script.bat
+```
+
+Если у тебя в репо запах CRLF (открыл shell-script в Notepad — он сохранил с CRLF), просто запусти `dos2unix` и закоммить.
+
+---
+
+## VS Code и другие редакторы
+
+Большинство современных редакторов умеют сохранять в нужном формате. Для VS Code — в правом нижнем углу есть индикатор `CRLF`/`LF`, кликаешь — выбираешь нужное. Можно настроить дефолт через `settings.json`:
+
+```json
+{
+  "files.eol": "\n"
+}
+```
+
+Это сделает LF дефолтом для всех новых файлов. Для существующих — нужно открыть файл, кликнуть индикатор и сменить.
+
+`.editorconfig` — кросс-редакторный стандарт, который Git не учитывает напрямую, но многие редакторы используют:
+
+```ini
+# .editorconfig
+root = true
+
+[*]
+end_of_line = lf
+charset = utf-8
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.bat]
+end_of_line = crlf
+```
+
+Положи `.editorconfig` в корень репо вместе с `.gitattributes` — оба работают на одну цель.
+
+---
+
+## Полный canonical setup 2026: copy-paste
+
+Вот два файла, которые покрывают 99% случаев. Скопируй в каждый новый проект:
+
+**`.gitattributes`** (в корне репо):
+
+```gitattributes
+# Universal fallback — все text-файлы хранятся как LF
+* text=auto eol=lf
+
+# Шелл-скрипты — всегда LF (иначе не запустятся на Linux/macOS)
+*.sh        text eol=lf
+*.bash      text eol=lf
+
+# Windows-скрипты — должны быть CRLF
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+*.ps1       text eol=crlf
+
+# Бинарники — не трогать
+*.png       binary
+*.jpg       binary
+*.pdf       binary
+*.zip       binary
+*.tar.gz    binary
+*.parquet   binary
+*.duckdb    binary
+*.sqlite    binary
+*.db        binary
+*.so        binary
+*.dll       binary
+*.exe       binary
+*.jar       binary
+
+# Diff drivers
+*.py        diff=python
+```
+
+**`.editorconfig`** (опционально, но рекомендуется):
+
+```ini
+root = true
+
+[*]
+end_of_line = lf
+charset = utf-8
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{bat,cmd,ps1}]
+end_of_line = crlf
+
+[*.{py,sh}]
+indent_style = space
+indent_size = 4
+
+[*.{json,yaml,yml,js,ts}]
+indent_style = space
+indent_size = 2
+
+[Makefile]
+indent_style = tab
+```
+
+Эти два файла commit-ишь в репо и забываешь. Cross-platform работает как часы.
+
+---
+
+## Попробуй сам
+
+```bash
+# Создай тестовый репо
+mkdir lineending-demo && cd lineending-demo
+git init
+
+# Создай файл с CRLF (имитируем Windows)
+printf "line1\r\nline2\r\nline3\r\n" > script.sh
+file script.sh
+# script.sh: ASCII text, with CRLF line terminators
+
+# Без .gitattributes — Git сохранит как есть
+git add script.sh
+git commit -m "add script with CRLF"
+
+# Посмотри, что в Git
+git cat-file -p HEAD:script.sh | hexdump -C
+# 0d 0a — есть, CRLF сохранилось
+
+# Создай .gitattributes
+cat > .gitattributes <<'EOF'
+*.sh text eol=lf
+EOF
+git add .gitattributes
+git commit -m "add .gitattributes"
+
+# Перенормализуй
+git add --renormalize .
+git status
+# modified: script.sh
+
+git commit -m "normalize line endings"
+
+# Проверь, что теперь в Git
+git cat-file -p HEAD:script.sh | hexdump -C
+# 0a без 0d — чистый LF в storage
+
+# Working tree тоже должен быть LF (eol=lf и checkout даёт LF)
+file script.sh
+# script.sh: ASCII text   ← без "CRLF" в выводе, значит LF
+```
+
+Это полный цикл: было CRLF -> добавили правило -> renormalize -> стало LF и в Git, и на диске.
+
+---
+
+## TL;DR
+
+1. **CRLF (Windows) vs LF (Unix)** — главный footgun cross-platform Git.
+2. **`core.autocrlf`** — старое решение, ненадёжно, per-машина.
+3. **`.gitattributes` + `* text=auto eol=lf`** — каноничное решение 2026 года.
+4. **`.bat`/`.cmd`/`.ps1`** — единственные исключения, оставляй CRLF.
+5. **`git add --renormalize .`** — применить новые правила к существующим файлам.
+6. **`.editorconfig`** — дополнение, чтобы редакторы создавали правильные файлы изначально.
+
+В любом серьёзном репо в 2026 году в корне должны лежать оба файла: `.gitattributes` (для Git) и `.editorconfig` (для редакторов). Это инфраструктурная гигиена.
+
+---
+
+<KnowledgeCheck
+  question="Коллега-Windows открыл PR, и Git показывает 'changed 500 files, +50000 -50000'. По факту он изменил один файл. В чём причина и как починить?"
+  answer="Причина — у коллеги локально `core.autocrlf=true` (или Windows-инструмент сохранил все файлы с CRLF), и при commit его клиент перезаписал все text-файлы с CRLF -> LF (или наоборот). Git видит это как изменение каждого байта в конце каждой строки. Решение: (1) В репо должен быть `.gitattributes` с `* text=auto eol=lf` — это нормализует все файлы под единый формат, независимо от ОС автора. (2) Затем `git add --renormalize .` один раз — приведёт всё в порядок одним коммитом. (3) После этого все участники команды (включая Windows-коллегу) получат identical behaviour: на диске CRLF у Windows если нужно, в Git — всегда LF. PR коллеги пересоздать после нормализации. Дополнительно полезен `.editorconfig` с `end_of_line = lf`, чтобы редакторы изначально создавали правильные файлы."
+/>

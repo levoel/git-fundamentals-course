@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "11-pull-requests/02-creating-good-pr",
+  "moduleId": "11-pull-requests",
+  "_meta": { "idPrefix": "git-m11-02" },
+  "questions": [
+    {
+      "id": "git-m11-02-q1",
+      "type": "multiple-choice",
+      "question": "Какой PR title следует Conventional Commits format?",
+      "options": [
+        { "id": "a", "text": "Update stuff" },
+        { "id": "b", "text": "Added new pipeline maybe" },
+        { "id": "c", "text": "feat(dags): add users ETL pipeline. Формат <type>(<scope>): <description>. type из feat/fix/docs/style/refactor/test/chore/perf/revert. Scope опционален. Description короткий, императивный mood ('add' не 'added')" },
+        { "id": "d", "text": "FEATURE: pipeline (updated)" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "Conventional Commits — стандарт structured commit/PR titles. (а) и (b) — нечеткие, нет type. (d) — caps wrong, не conventional format. (c) — правильно: type (feat = new feature), scope (dags = область), description короткий императив. Преимущества: auto changelog generation, auto SemVer bump (feat=minor, fix=patch, BREAKING CHANGE=major), CI hooks могут enforce, читаемость git log.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m11-02-q2",
+      "type": "multiple-choice",
+      "question": "Идеальный размер PR в LOC?",
+      "options": [
+        { "id": "a", "text": "1000-2000 LOC, чтобы покрыть всю feature" },
+        { "id": "b", "text": "200-400 LOC. Research (Google/Microsoft): 75% багов находится в первые 200 строк review, после 500 — detection падает. Большой PR висит дольше (никто не хочет review wall of code), требует rebase из-за конфликтов, hard to revert точечно. Если фича не помещается — раздели на stack PRs или feature flag" },
+        { "id": "c", "text": "Любой размер OK если код работает" },
+        { "id": "d", "text": "Меньше 50 LOC всегда" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Эмпирически 200-400 LOC — sweet spot для review quality. Меньше — много overhead на PR создание/review. Больше — defect detection падает. Большие фичи лучше декомпозировать: layer-by-layer (data models -> migration -> API), stack PRs (PR2 depends on PR1), или feature flag (merge безопасно, включить флагом отдельно). PR > 1000 LOC — red flag, обсудить с tech lead.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m11-02-q3",
+      "type": "multiple-choice",
+      "question": "Что такое 'atomic PR' и почему важно?",
+      "options": [
+        { "id": "a", "text": "PR который автоматически тестируется" },
+        { "id": "b", "text": "PR содержащий одну логическую тему (только feature, или только bug fix, или только refactor — не смешивать). Преимущества: проще review (фокус на одну тему), меньше конфликтов (smaller diff), точечный revert (один PR откатывает одну фичу), быстрее merge. Anti-pattern: 'добавил DAG + поправил bug + refactor utils' — должно быть 3 отдельных PR" },
+        { "id": "c", "text": "PR с атомарными транзакциями БД" },
+        { "id": "d", "text": "PR в одном коммите" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Atomic = неделимый по теме. Если ты делаешь несколько несвязанных изменений в одном PR — reviewer теряется, нельзя approve часть и отклонить другую. Точечный revert невозможен (если bug fix зашит в feature, откатывать всё). Правильно: один PR — одна тема. 'feat: X', 'fix: Y', 'refactor: Z' — отдельные PR, можно мержить параллельно.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m11-02-q4",
+      "type": "multiple-choice",
+      "question": "Что должно быть в description хорошего PR?",
+      "options": [
+        { "id": "a", "text": "Только description в одну строку" },
+        { "id": "b", "text": "## Summary (что меняем, 1-3 bullets); ## Why (контекст, ссылка на issue); ## Changes (ключевые файлы/области); ## Test plan (чек-лист как протестировано); Screenshots/output для UI/CLI changes; Closes #N для auto-close issue. Reviewer должен понять PR за 30 секунд из description" },
+        { "id": "c", "text": "Только title достаточно" },
+        { "id": "d", "text": "Полная stack trace бага" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Structured description ускоряет review. Reviewer открывает PR, читает description: понимает что делаем, зачем, как проверить, в каком issue прописано. Без description — нужно угадывать из diff. С хорошим description — review takes 15 min. Без — может затянуться часами с вопросами 'почему так?', 'это про что?'. Self-review template (Summary/Why/Test plan/Closes) — must-have для каждого PR.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m11-02-q5",
+      "type": "true-false",
+      "question": "Magic слова 'Closes #123' в description PR автоматически закроют issue #123 после merge.",
+      "correctAnswer": true,
+      "explanation": "Да. GitHub поддерживает linking keywords: Closes, Fixes, Resolves (всё синонимы). При merge PR, упомянутые issues автоматически закрываются. Множественные: 'Closes #123, closes #456' закроет обе. Полезно для tracking — issue в backlog -> linked PR -> auto-close при merge -> backlog clean. Альтернатива без auto-close: 'Related to #123' — создаёт mention, но не закроет.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

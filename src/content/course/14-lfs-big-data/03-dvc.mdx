@@ -1,0 +1,564 @@
+---
+title: "DVC: Data Version Control для ML/DE"
+description: "DVC — версионирование данных через метаданные в Git и реальный storage в облаке. Когда лучше LFS, базовый workflow и реальные DE сценарии"
+order: 3
+difficulty: "intermediate"
+estimatedTime: 24
+topics: ["DVC", "Data Version Control", "ML", "S3", "data versioning"]
+---
+
+# DVC: Data Version Control для ML/DE
+
+DVC (Data Version Control) — open-source инструмент, который решает ту же задачу что LFS — версионирование больших файлов — но архитектурно по-другому. Если LFS — это "Git с прицепом для бинарей", то DVC — "Git + параллельная система для data, синхронизированная с ним". DVC ничего не добавляет в Git, не использует filters — он работает рядом, и реальный data лежит в **обычных object storages** (S3, GCS, Azure Blob, MinIO), которые у DE уже часто есть.
+
+В этом уроке: чем DVC отличается от LFS, базовый workflow (`dvc init`, `dvc add`, `dvc push`, `dvc pull`), как метаданные хранятся в Git, и когда DVC реально выигрывает у LFS — особенно в DE/ML контексте.
+
+---
+
+## Mental model: Git хранит метаданные, DVC хранит data
+
+В DVC репо ты видишь два параллельных мира:
+
+<DiagramContainer title="Git метаданные + DVC remote data" color="indigo">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Git репо хранит только .dvc файлы — маленькие YAML с hash-ами. Никаких бинарей в Git">
+        <DataBox label="Git репо" className="border-blue-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>code.py</div>
+            <div>config.yaml</div>
+            <div>data/features.parquet.dvc (200 bytes)</div>
+            <div>data/model.pkl.dvc (200 bytes)</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="DVC remote — обычный S3/GCS bucket. Файлы лежат под хешами, как у LFS, но в твоей инфраструктуре">
+        <DataBox label="DVC Remote (S3)" className="border-emerald-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>s3://my-de-bucket/dvc/</div>
+            <div>4c/ac1962... ← features.parquet</div>
+            <div>89/a3f12c... ← model.pkl</div>
+            <div>(хранятся по хешам, дедуплицированы)</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+    <Arrow direction="down" label="dvc push / dvc pull" />
+    <Tooltip content="Связь — через .dvc файлы. Git commit + DVC push выполняются параллельно">
+      <DataBox label="Атомарный workflow" className="border-purple-500/30 w-96 mx-auto">
+        <div className="text-xs">git commit (метаданные) + dvc push (данные)</div>
+      </DataBox>
+    </Tooltip>
+  </FlowColumn>
+</DiagramContainer>
+
+В Git репо для каждого DVC-tracked файла лежит маленький YAML вида:
+
+```yaml
+# data/features.parquet.dvc
+outs:
+- md5: 4cac19622fc3ade9c373d54e8e76e85f7466bcab85cee5a3a5cfd6e64da82e25
+  size: 104857600
+  path: features.parquet
+```
+
+Это всё. Сам `features.parquet` — в `data/features.parquet` в working tree, но в `.gitignore` (DVC автоматически добавляет). При коммите Git видит только `.dvc` файл. При `dvc push` — реальный файл идёт в S3.
+
+Связь: hash в `.dvc` файле — это контрольная сумма реального файла. Если кто-то склонировал репо, делает `dvc pull` — DVC читает hash из `.dvc` файла, идёт в S3 по этому hash, скачивает.
+
+---
+
+## DVC vs LFS: ключевые различия
+
+<DiagramContainer title="DVC vs LFS — где какой выигрывает" color="blue">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="LFS интегрирован с Git через filter mechanism, требует git lfs install">
+        <DataBox label="Git LFS" className="border-amber-500/30 w-80">
+          <div className="text-xs space-y-1">
+            <div>Filter-based интеграция в Git</div>
+            <div>git push отправляет и Git, и LFS</div>
+            <div>Storage — обычно встроен в hosting (GitHub LFS)</div>
+            <div>Bandwidth $$ при активном использовании</div>
+            <div>Pointer файлы 130 байт каждый</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="DVC независим от Git, использует свои команды и любой S3-compatible storage">
+        <DataBox label="DVC" className="border-emerald-500/30 w-80">
+          <div className="text-xs space-y-1">
+            <div>Параллельная система рядом с Git</div>
+            <div>Свои команды: dvc push/pull</div>
+            <div>Storage — любой S3/GCS/Azure/MinIO/SSH</div>
+            <div>Нет дополнительных bandwidth fees</div>
+            <div>.dvc файлы 200 байт + pipelines support</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Главное преимущество DVC для DE — **storage** flexibility. У тебя уже есть S3 bucket с прод-данными? DVC прямо туда складывает свои объекты. Не нужно дополнительно платить GitHub за LFS bandwidth.
+
+Второе — DVC умеет **pipelines** (`dvc.yaml`): описываешь, как один шаг ETL зависит от другого, DVC отслеживает hashes inputs/outputs и пересчитывает только изменившееся. Это уже близко к Airflow/Dagster, но на уровне локальной разработки.
+
+Третье — **ML metrics tracking** (`dvc exp`, `dvc metrics`). DVC может логировать метрики моделей, сравнивать эксперименты, генерить dashboards. Это уровень MLflow, но проще.
+
+Минусы DVC:
+- **Сложнее старт**: нужен S3 bucket или эквивалент (LFS работает "из коробки" на GitHub)
+- **Не для бинарей в general** — DVC специально для data pipelines, не для случайных PDF в репо
+- **CLI сложнее**: больше команд, концепты pipelines нужно понимать
+
+---
+
+## Установка и init
+
+DVC — Python пакет, ставится через pip:
+
+```bash
+# В виртуальном окружении
+pip install dvc
+
+# Или с поддержкой конкретного backend
+pip install 'dvc[s3]'         # AWS S3
+pip install 'dvc[gs]'         # Google Cloud Storage
+pip install 'dvc[azure]'      # Azure Blob
+pip install 'dvc[all]'        # всё сразу
+```
+
+Инициализация в репо:
+
+```bash
+cd my-de-project
+dvc init
+
+# DVC создал директорию .dvc/
+$ ls .dvc/
+config  .gitignore  tmp
+
+# Что в config?
+$ cat .dvc/config
+[core]
+    remote = ""
+```
+
+`dvc init` создаёт служебную папку `.dvc/`, в неё ничего не commit-ится напрямую (data в `.gitignore`). Сам `.dvc/config` — commit-ится.
+
+```bash
+$ git status
+.dvc/        ← новая папка (некоторые файлы в Git)
+.dvcignore   ← аналог .gitignore для DVC scope
+
+$ git add .dvc .dvcignore
+$ git commit -m "chore: init DVC"
+```
+
+---
+
+## Добавление файлов в DVC
+
+Сценарий: у тебя в `data/` есть raw_data.parquet на 200MB.
+
+```bash
+# Tracking файла через DVC
+$ dvc add data/raw_data.parquet
+100% Adding...|████████████|1/1 [00:01,  1.21file/s]
+
+To track the changes with git, run:
+    git add data/.gitignore data/raw_data.parquet.dvc
+
+# Что произошло?
+$ ls data/
+.gitignore         ← новый, DVC автоматически создал
+raw_data.parquet   ← оригинальный файл, остался на диске
+raw_data.parquet.dvc  ← маленький YAML с hash-ом
+
+$ cat data/.gitignore
+/raw_data.parquet    ← DVC сказал Git-у это игнорировать
+
+$ cat data/raw_data.parquet.dvc
+outs:
+- md5: 4cac19622fc3ade9c373d54e8e76e85f7466bcab85cee5a3a5cfd6e64da82e25
+  size: 209715200
+  path: raw_data.parquet
+```
+
+Закоммитим **только метаданные**:
+
+```bash
+$ git add data/.gitignore data/raw_data.parquet.dvc
+$ git commit -m "data: add raw_data via DVC"
+
+# Реальный 200MB файл — НЕ в Git
+$ git ls-files
+data/.gitignore
+data/raw_data.parquet.dvc
+.dvc/...
+```
+
+Сам parquet лежит в `data/raw_data.parquet` локально (как обычный файл), и в `.dvc/cache/` (DVC сделал hash и копию для cache).
+
+```bash
+# Где DVC хранит локальный cache?
+$ ls .dvc/cache/4c/
+ac19622fc3ade9c373d54e8e76e85f7466bcab85cee5a3a5cfd6e64da82e25
+                ← реальный 200MB файл, hash как имя
+```
+
+`.dvc/cache/` — это локальный DVC cache. Содержит реальные данные, hashed.
+
+---
+
+## Настройка remote storage
+
+Для real workflows нужен remote — куда DVC будет пушить и откуда коллеги будут pull-ить.
+
+Самый частый вариант — S3:
+
+```bash
+# Указать remote
+$ dvc remote add -d myremote s3://my-de-bucket/dvc-storage
+
+# -d значит "default remote"
+# Альтернативные backend-ы:
+$ dvc remote add -d myremote gs://my-bucket/dvc       # GCS
+$ dvc remote add -d myremote azure://mybucket/dvc    # Azure
+$ dvc remote add -d myremote ssh://user@host/dvc     # SSH
+$ dvc remote add -d local-mirror /mnt/shared/dvc     # local mount
+
+# Что в config?
+$ cat .dvc/config
+[core]
+    remote = myremote
+['remote "myremote"']
+    url = s3://my-de-bucket/dvc-storage
+
+# Commit config — пусть все знают, где remote
+$ git add .dvc/config
+$ git commit -m "chore: configure DVC remote (S3)"
+```
+
+Авторизация — стандартными механизмами AWS (для S3): переменные `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, или `aws configure`, или IAM role на EC2. DVC использует boto3 под капотом.
+
+---
+
+## Push и pull
+
+После `dvc add` и `git commit`, чтобы загрузить реальные данные в remote:
+
+```bash
+$ dvc push
+Pushing
+1 file (200 MB) sent...
+1 file pushed
+```
+
+Теперь `data/raw_data.parquet` лежит в S3 bucket. Структура в S3:
+
+```
+s3://my-de-bucket/dvc-storage/
+├── 4c/
+│   └── ac19622fc3ade9c373d54e8e76e85f7466bcab85cee5a3a5cfd6e64da82e25
+│       (это твой raw_data.parquet)
+```
+
+Коллега, который только что склонировал репо:
+
+```bash
+$ git clone https://github.com/acme/de-project.git
+$ cd de-project
+
+# Видит только метаданные
+$ ls data/
+.gitignore
+raw_data.parquet.dvc
+                ← реального файла нет!
+
+# Pull DVC content
+$ dvc pull
+A   data/raw_data.parquet
+1 file added
+
+$ ls data/
+.gitignore
+raw_data.parquet     ← теперь есть
+raw_data.parquet.dvc
+```
+
+DVC прочитал hash из `raw_data.parquet.dvc`, сходил в remote S3, скачал blob по hash, положил в `data/raw_data.parquet`. Готово.
+
+---
+
+## Версионирование: история data
+
+Когда ты обновляешь файл, DVC создаёт новую версию:
+
+```bash
+# Обновили parquet
+$ python -c "
+import pandas as pd
+df = pd.read_parquet('data/raw_data.parquet')
+new_df = pd.DataFrame(...)
+pd.concat([df, new_df]).to_parquet('data/raw_data.parquet')
+"
+
+# DVC видит изменение
+$ dvc status
+data/raw_data.parquet.dvc:
+    changed outs:
+        modified:           data/raw_data.parquet
+
+# Перетрекать
+$ dvc add data/raw_data.parquet
+
+# Теперь raw_data.parquet.dvc содержит НОВЫЙ hash
+$ cat data/raw_data.parquet.dvc
+outs:
+- md5: 89a3f12c...   ← новый hash, был 4cac1962...
+  size: 220000000
+  path: raw_data.parquet
+
+# Commit + push
+$ git add data/raw_data.parquet.dvc
+$ git commit -m "data: update raw_data v2"
+$ dvc push
+
+# В S3 теперь оба файла:
+# 4c/ac1962... (старая версия)
+# 89/a3f12c... (новая)
+
+# Старая версия привязана к старому commit-у в Git
+$ git checkout HEAD~1   # вернуться на коммит до обновления
+$ dvc pull              # скачать ту версию parquet
+$ ls -lh data/raw_data.parquet
+# 200M — старая версия
+
+$ git checkout main
+$ dvc pull
+$ ls -lh data/raw_data.parquet
+# 220M — новая версия
+```
+
+То есть `git checkout` + `dvc pull` = атомарная навигация по версиям code+data. Это даёт **reproducibility**: можно вернуться в commit три месяца назад, скачать те данные, и запустить тот же код — получишь те же результаты. Для ML/DE это бесценно.
+
+---
+
+## DVC pipelines: bonus
+
+DVC не просто версионирует файлы — он умеет описывать pipelines. Файл `dvc.yaml`:
+
+```yaml
+stages:
+  prepare:
+    cmd: python src/prepare.py
+    deps:
+      - src/prepare.py
+      - data/raw_data.parquet
+    outs:
+      - data/prepared.parquet
+
+  train:
+    cmd: python src/train.py
+    deps:
+      - src/train.py
+      - data/prepared.parquet
+    outs:
+      - models/model.pkl
+    metrics:
+      - metrics.json:
+          cache: false
+```
+
+Запуск:
+
+```bash
+# DVC видит зависимости, запускает в правильном порядке
+$ dvc repro
+'data/prepared.parquet' didn't change, skipping
+Running stage 'train':
+    python src/train.py
+...
+
+# Локальная DAG-визуализация
+$ dvc dag
++---------+
+| prepare |
++---------+
+     *
+     *
+     *
++-------+
+| train |
++-------+
+```
+
+Это уже DAG для ML pipeline. DVC отслеживает hashes deps — если ничего не изменилось, stage не пересчитывается. Это локальный аналог Airflow, удобный для experimentation.
+
+`dvc exp run` запускает эксперименты с разными параметрами, `dvc exp show` сравнивает результаты в таблице. Уровень MLflow или Weights & Biases, но проще и встроено в Git workflow.
+
+---
+
+## Когда DVC лучше LFS
+
+| Сценарий | LFS | DVC |
+| --- | --- | --- |
+| GitHub-репо, мало data, no setup | Лучше | Нужен S3 |
+| Бинарные artifacts (PDF, видео) | Лучше | Не специально для этого |
+| ML pipeline с experiments | Хуже | Лучше (dvc.yaml, dvc exp) |
+| У вас уже S3/GCS со своими данными | Дублирует storage | Использует ваш bucket напрямую |
+| Tysячи файлов, частые updates | Bandwidth $$ | Часть инфраструктуры |
+| Reproducibility ML | Базовая | Атомарная (git+dvc) |
+| Корпоративное self-hosted | Сложно | S3-compatible: легко |
+
+Правило: **для ML/DE проектов в production — DVC обычно лучше**. Для маленьких проектов с парой бинарей — LFS быстрее настроить.
+
+---
+
+## Альтернативы DVC и LFS
+
+В 2026 экосистема data versioning разнообразна:
+
+<DiagramContainer title="Альтернативы для версионирования data" color="purple">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="LakeFS — Git-like операции на S3 buckets, для всего data lake">
+        <DataBox label="LakeFS" className="border-purple-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>Branches на S3</div>
+            <div>Для всего data lake</div>
+            <div>Сложнее</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="MLflow / W&B — tracking experiments + artifact storage">
+        <DataBox label="MLflow / W&B" className="border-blue-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>ML-specific</div>
+            <div>Experiments + models</div>
+            <div>Свой UI</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Iceberg / Delta — таблицы с time travel в data lake">
+        <DataBox label="Iceberg / Delta" className="border-emerald-500/30 w-56">
+          <div className="text-xs space-y-1">
+            <div>Table-level versioning</div>
+            <div>Time travel queries</div>
+            <div>Для DWH</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Эти инструменты решают разные задачи. DVC — для версионирования файлов рядом с code в Git репо. Iceberg — для версионирования таблиц в data warehouse. MLflow — для трекинга ML experiments и моделей. LakeFS — для веток на S3 buckets.
+
+Junior DE сначала разбирается с DVC (потому что это в зоне Git, его повседневной работы), а более продвинутые инструменты — по мере необходимости.
+
+---
+
+## Полный workflow: DVC на типичном DE проекте
+
+```bash
+# 1. Setup (один раз)
+pip install 'dvc[s3]'
+cd my-de-project
+dvc init
+git add .dvc .dvcignore
+git commit -m "chore: init DVC"
+
+# 2. Configure remote
+dvc remote add -d myremote s3://acme-de/dvc-storage
+git add .dvc/config
+git commit -m "chore: configure DVC S3 remote"
+
+# 3. Track raw data
+dvc add data/raw/transactions.csv
+git add data/raw/.gitignore data/raw/transactions.csv.dvc
+git commit -m "data: track transactions raw"
+
+# 4. Push to remote
+dvc push
+
+# 5. Регулярная работа
+# ... обновили данные ...
+dvc add data/raw/transactions.csv
+git add data/raw/transactions.csv.dvc
+git commit -m "data: refresh transactions (Q2)"
+dvc push
+
+# 6. Onboarding новый коллега
+git clone https://github.com/acme/de-project.git
+cd de-project
+pip install -r requirements.txt   # включает dvc[s3]
+dvc pull                          # скачать все DVC-tracked файлы
+```
+
+Это базовый цикл. Дальше — pipelines (`dvc.yaml`), experiments (`dvc exp`), metrics tracking. Глубокий DVC — это отдельный курс, тут показали базу.
+
+---
+
+## Попробуй сам: локальный DVC
+
+Без S3 — DVC можно использовать с локальным remote (для понимания механики):
+
+```bash
+# Создать sandbox
+mkdir dvc-demo && cd dvc-demo
+git init
+dvc init
+git add .dvc .dvcignore && git commit -m "init"
+
+# Локальный remote (просто директория)
+mkdir -p ~/dvc-local-remote
+dvc remote add -d localmirror ~/dvc-local-remote
+git add .dvc/config && git commit -m "add local remote"
+
+# Создать "большой" файл
+python -c "
+import pandas as pd
+import numpy as np
+df = pd.DataFrame(np.random.rand(100_000, 5))
+df.to_parquet('data.parquet')
+"
+ls -lh data.parquet   # ~5 MB
+
+# Tracking через DVC
+dvc add data.parquet
+ls
+# .gitignore  (создан DVC, игнорит data.parquet)
+# data.parquet
+# data.parquet.dvc
+
+cat data.parquet.dvc
+# outs:
+# - md5: ...
+#   size: ...
+#   path: data.parquet
+
+# Commit метаданных
+git add .gitignore data.parquet.dvc
+git commit -m "add data v1"
+
+# Push в локальный remote
+dvc push
+ls ~/dvc-local-remote/
+# Видна структура hash-based storage
+
+# Симулировать удаление и восстановление
+rm data.parquet
+ls   # data.parquet нет
+dvc pull
+ls   # data.parquet есть, восстановлен
+```
+
+Это полный цикл: add -> commit -> push -> pull. С S3 — то же самое, только `~/dvc-local-remote` заменяется на `s3://bucket/path`.
+
+---
+
+<KnowledgeCheck
+  question="У вашей команды Data Engineer-ов есть GitHub репо с airflow DAG-ами и пара raw CSV (по 50MB), которые обновляются раз в квартал. У компании уже есть S3 bucket для прод-данных. Выбираешь LFS или DVC и почему?"
+  answer="DVC — однозначно. Причины: (1) У вас уже есть S3 — DVC использует его напрямую, не нужно дополнительно платить GitHub за LFS storage и bandwidth. (2) Quarterly updates — DVC экономнее: storage S3 cents/GB, LFS bandwidth на GitHub дороже. (3) Code и data синхронизованы — `git checkout v2024.Q1 && dvc pull` даёт точное состояние кода + данных того времени. Для DAG-ов с reproducibility это критично — баг в продакшене? Можно воспроизвести точное состояние. (4) Долгосрочно DVC даст путь к pipelines (`dvc.yaml`) и experiments — если когда-то добавится ML компонент, DVC growth path есть. LFS не плох, но если у вас уже есть S3 — он избыточен. Setup: `pip install dvc[s3] && dvc init && dvc remote add -d myremote s3://your-bucket/dvc-data && dvc add data/raw_*.csv && git add . && git commit && dvc push`. Готово, репо чистый, данные в вашем S3, версии связаны с git commits."
+/>

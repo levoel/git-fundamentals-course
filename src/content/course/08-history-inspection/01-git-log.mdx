@@ -1,0 +1,503 @@
+---
+title: "git log: arsenal для чтения истории"
+description: "Все важные флаги git log — graph, oneline, --since, --author, --grep, -S; aliases для повседневности"
+order: 1
+difficulty: "beginner"
+estimatedTime: 22
+topics: ["Git", "log", "history", "search"]
+---
+
+# git log: arsenal для чтения истории
+
+`git log` без флагов — это бесконечный поток коммитов в самом базовом виде: SHA, автор, дата, сообщение. Так его обычно показывают в туториалах. В реальной работе у `git log` десятки флагов, которые превращают его в **исследовательский инструмент**: найти, когда добавилась строка, кто работал над функцией, что коллега сделал за последнюю неделю.
+
+В этом уроке мы разбираем самые полезные флаги и собираем cheat sheet, который ты будешь использовать каждый день.
+
+---
+
+## Базовый `git log`
+
+```bash
+$ git log
+commit f4e5d6c7a8b9c0d1e2f3g4h5i6j7k8l9m0n1o2p3
+Author: Lev Neganov <lev@example.com>
+Date:   Wed May 13 10:23:45 2026 +0300
+
+    feat: add hourly aggregation for spark job
+
+commit a1b2c3d4e5f6...
+Author: Alice <alice@example.com>
+Date:   Wed May 13 09:15:22 2026 +0300
+
+    fix: handle null partition keys in producer
+
+...
+```
+
+По дефолту Git показывает: полный SHA, автор, дата, полное сообщение. Это слишком verbose для повседневного использования.
+
+---
+
+## Compact view: `--oneline`
+
+Один из самых важных флагов. Показывает каждый коммит в одну строку:
+
+```bash
+$ git log --oneline
+f4e5d6c feat: add hourly aggregation for spark job
+a1b2c3d fix: handle null partition keys in producer
+9876543 docs: update README
+def5678 refactor: extract auth helpers
+abc1234 chore: bump dependencies
+```
+
+Формат: короткий SHA (7-8 символов, достаточно для уникальной идентификации в большинстве репо) + первая строка commit-сообщения.
+
+`--oneline` — это сокращение от `--pretty=oneline --abbrev-commit`. В быту используется почти везде.
+
+---
+
+## Граф: `--graph`
+
+Показывает ASCII-граф веток и merge commits:
+
+```bash
+$ git log --oneline --graph
+*   f4e5d6c Merge branch 'feature/x' into main
+|\
+| * abc1234 feat: implement x
+| * def5678 wip: scaffold x
+* | 9876543 fix: typo in readme
+|/
+* a1b2c3d init
+```
+
+Звёздочки — коммиты, вертикальные/диагональные линии — связи parent-child.
+
+Это must-have для понимания, как ветки сливались в репозитории.
+
+### `--graph --all`
+
+`--all` добавляет все ветки, не только текущую:
+
+```bash
+$ git log --oneline --graph --all
+* abc1234 (HEAD -> feature/x) latest in feature
+* def5678 wip in feature
+| * 9876543 (origin/main, main) latest in main
+| * a1b2c3d earlier in main
+|/
+* c0c0c0c init
+```
+
+Видишь обе ветки одновременно. Это лучший способ ориентироваться в графе.
+
+### `--decorate`
+
+Показывает refs (имена веток, тегов, HEAD) у каждого коммита:
+
+```bash
+* abc1234 (HEAD -> feature/x, origin/feature/x) latest
+```
+
+В современных Git `--decorate` включён по дефолту, флаг не нужен. Но знай о нём.
+
+---
+
+## Time filters: `--since`, `--until`
+
+Фильтр по дате:
+
+```bash
+# Что было за последнюю неделю
+git log --since="1 week ago"
+
+# В пределах даты
+git log --since="2026-05-01" --until="2026-05-13"
+
+# За вчера
+git log --since="yesterday" --until="today"
+
+# С Git 2.0+ поддерживаются relative dates
+git log --since="2 days ago"
+git log --since="2.weeks"
+```
+
+Очень полезно при подведении итогов недели или анализе релиза:
+
+```bash
+# Что вошло в релиз 1.2.0
+git log v1.1.0..v1.2.0 --oneline
+
+# Что сделал я за месяц
+git log --author="Lev Neganov" --since="1 month ago" --oneline
+```
+
+---
+
+## Author filter: `--author`
+
+Фильтр по автору. Подстрока, не точное совпадение:
+
+```bash
+git log --author="alice"           # все коммиты Alice (по имени или email)
+git log --author="@example.com"    # все по email домену
+git log --author="Lev\|Alice"      # regex: или Lev, или Alice
+```
+
+Для работы:
+
+```bash
+# Что коллега сделал на этой неделе
+git log --author="alice" --since="1 week ago" --oneline
+```
+
+---
+
+## Message search: `--grep`
+
+Фильтр по тексту в сообщении коммита:
+
+```bash
+# Все fix-коммиты
+git log --grep="fix:"
+
+# Регулярка
+git log --grep="\(fix\|hotfix\)"
+
+# Case-insensitive
+git log --grep="DEPRECAT" -i
+```
+
+Полезно для поиска коммитов на конкретные темы:
+
+```bash
+# Когда мы что-то делали с partition keys
+git log --grep="partition" --oneline
+
+# Все breaking changes
+git log --grep="BREAKING" --oneline
+```
+
+---
+
+## Pickaxe: `-S "string"`
+
+Это **магический** флаг. `-S` ищет коммиты, в которых **появилась или исчезла** заданная строка:
+
+```bash
+$ git log -S "DB_TIMEOUT = 60" --oneline
+abc1234 perf: increase DB timeout for prod
+9876543 revert: rollback DB_TIMEOUT change
+```
+
+То есть Git проходит по каждому коммиту, считает diff, и проверяет: появилась/исчезла ли строка `"DB_TIMEOUT = 60"` в этом коммите.
+
+Невероятно полезно когда нужно ответить на вопрос **"когда у нас этот код появился?"**:
+
+```bash
+# Когда мы добавили retry logic
+git log -S "retry_count" --oneline -p
+
+# -p добавляет patch (diff) для каждого найденного коммита
+```
+
+### `-S` vs `-G`
+
+- `-S "DB_HOST"` — ищет точное вхождение строки. Меняется ли количество вхождений.
+- `-G "DB_HOST.*prod"` — regex по diff'у (полная строка с изменением).
+
+`-G` мощнее, но медленнее. Используй `-S` для точных строк, `-G` когда нужен regex pattern.
+
+```bash
+# Все коммиты, где менялась строка с регулярным паттерном
+git log -G "DB_TIMEOUT\s*=\s*[0-9]+" --oneline
+```
+
+<Callout type="tip">
+Pickaxe (`-S`) — это твой "Sherlock Holmes" в Git. Когда видишь странный код и хочешь узнать "когда и зачем это появилось" — `git log -S "<этот код>" -p`. Найдёшь коммит -> читаешь сообщение -> понимаешь контекст.
+</Callout>
+
+---
+
+## Path filter: `-- path`
+
+Покажет коммиты, которые трогали указанный файл / директорию:
+
+```bash
+# История одного файла
+git log --oneline -- src/etl.py
+
+# История директории
+git log --oneline -- src/dags/
+
+# История с патчем (полный diff каждого коммита)
+git log -p -- src/etl.py
+```
+
+Заметь двойной дефис `--` — он отделяет revision-аргументы от path-аргументов. Полезно когда имя файла совпадает с именем ветки.
+
+### `--follow`: следить за переименованиями
+
+По умолчанию `git log -- file.py` показывает историю **по имени файла**. Если файл был переименован — история обрывается на момент переименования.
+
+```bash
+git log --follow --oneline -- src/etl.py
+```
+
+`--follow` следит за переименованиями: если `src/etl.py` раньше назывался `src/extract.py`, лог продолжится в историю старого имени.
+
+Ограничение: `--follow` работает только с **одним** файлом, не директорией.
+
+---
+
+## Diff stats
+
+### `--stat`
+
+Показывает статистику изменений каждого коммита:
+
+```bash
+$ git log --stat
+commit f4e5d6c...
+Author: Lev
+Date: ...
+
+    feat: add hourly aggregation
+
+ src/etl.py    | 25 ++++++++++++++++++++++---
+ tests/test.py | 18 +++++++++++++++++++
+ 2 files changed, 40 insertions(+), 3 deletions(-)
+```
+
+Полезно для обзора PR: вот файлы, вот сколько строк изменено.
+
+### `--shortstat`
+
+Только итог по каждому коммиту:
+
+```bash
+$ git log --shortstat
+commit f4e5d6c... feat: add hourly aggregation
+ 2 files changed, 40 insertions(+), 3 deletions(-)
+```
+
+### `--numstat`
+
+Числа в табличном виде (good for parsing):
+
+```bash
+$ git log --numstat
+commit f4e5d6c...
+25	3	src/etl.py
+18	0	tests/test.py
+```
+
+---
+
+## Range syntax: что включать
+
+### `A..B` — что есть в B, но не в A
+
+```bash
+# Что в feature/x, чего нет в main
+git log main..feature/x
+
+# Что новенького в origin/main по сравнению со мной
+git log main..origin/main
+```
+
+### `A...B` — что в одной из веток, но не в обеих (symmetric difference)
+
+```bash
+# Что отличается между main и feature
+git log main...feature/x
+```
+
+С `--left-right` Git помечает каждый коммит:
+
+```bash
+$ git log --oneline --left-right main...feature/x
+< 9876543 only in main
+> abc1234 only in feature/x
+> def5678 only in feature/x
+```
+
+### Limit number
+
+```bash
+git log -5         # последние 5 коммитов
+git log -n 10      # последние 10
+```
+
+---
+
+## Format customization
+
+Дефолтные форматы не всегда удобны. Есть встроенные:
+
+```bash
+git log --pretty=oneline      # одна строка, полный SHA
+git log --pretty=short        # SHA, автор, message (без даты)
+git log --pretty=medium       # дефолт
+git log --pretty=full         # + committer
+git log --pretty=fuller       # + commit date
+```
+
+Кастомный формат через `--pretty=format`:
+
+```bash
+git log --pretty=format:"%h %an %ar : %s"
+```
+
+Placeholders:
+
+- `%H` / `%h` — полный/короткий SHA.
+- `%an` / `%ae` — author name / email.
+- `%ar` — relative date (`2 hours ago`).
+- `%ad` — author date.
+- `%s` — subject (первая строка сообщения).
+- `%b` — body (остальное сообщение).
+- `%d` — refs (decoration).
+- `%C(color)` — цвет.
+
+Пример красивого формата:
+
+```bash
+git log --pretty=format:"%C(yellow)%h%Creset %C(blue)%an%Creset %C(green)%ar%Creset%C(red)%d%Creset %s"
+```
+
+Этот формат полезно сохранить как alias.
+
+---
+
+## Полезные aliases
+
+Добавь в `~/.gitconfig`:
+
+```ini
+[alias]
+    lg = log --graph --pretty=format:'%C(yellow)%h%Creset -%C(red)%d%Creset %s %C(green)(%cr)%C(blue) <%an>%Creset' --abbrev-commit
+    lga = log --graph --all --pretty=format:'%C(yellow)%h%Creset -%C(red)%d%Creset %s %C(green)(%cr)%C(blue) <%an>%Creset' --abbrev-commit
+    last = log -1 HEAD --stat
+    today = log --since="midnight" --oneline
+    week = log --since="1 week ago" --oneline
+```
+
+Или короче через CLI:
+
+```bash
+git config --global alias.lg "log --graph --pretty=format:'%C(yellow)%h%Creset -%C(red)%d%Creset %s %C(green)(%cr)%C(blue) <%an>%Creset' --abbrev-commit"
+```
+
+Теперь `git lg` даст тебе красивый graph view.
+
+---
+
+## Reverse order
+
+По дефолту коммиты идут от новых к старым. Иногда нужно наоборот:
+
+```bash
+git log --reverse --oneline
+```
+
+Полезно для изучения истории проекта с самого начала.
+
+---
+
+## Merge filtering
+
+```bash
+# Только обычные коммиты, без merge commits
+git log --no-merges
+
+# Только merge commits
+git log --merges
+
+# Только first-parent (полезно при squash workflow)
+git log --first-parent
+```
+
+`--first-parent` показывает только "магистральную" историю — игнорирует ветвления в merged feature branches.
+
+---
+
+## Putting it all together: реальные сценарии
+
+### Сценарий 1: "что вошло в последний релиз"
+
+```bash
+git log --no-merges v1.2.0..HEAD --oneline
+```
+
+### Сценарий 2: "что Alice делала на прошлой неделе"
+
+```bash
+git log --author="alice" --since="1 week ago" --until="today" --oneline
+```
+
+### Сценарий 3: "когда мы изменили DB_TIMEOUT"
+
+```bash
+git log -S "DB_TIMEOUT" --oneline -p
+```
+
+### Сценарий 4: "история этого файла после переименования"
+
+```bash
+git log --follow --oneline -- src/etl.py
+```
+
+### Сценарий 5: "вижу подозрительный коммит — кто этот человек"
+
+```bash
+git log -1 <sha> --format=full
+```
+
+### Сценарий 6: "что в моей ветке, чего нет в main"
+
+```bash
+git log main..HEAD --oneline
+```
+
+---
+
+## Попробуй сам
+
+```bash
+# Скачай большой репо для практики
+git clone https://github.com/django/django.git
+cd django
+
+# Базовый log
+git log --oneline | head -10
+
+# Graph
+git log --oneline --graph --all | head -30
+
+# Когда последний раз менялся setup.py
+git log --oneline --follow -- setup.py | head -5
+
+# Найди коммиты, в которых появилась/исчезла строка "BREAKING"
+git log -S "BREAKING" --oneline | head -10
+
+# Покажи, какие файлы трогал последний коммит
+git log -1 --stat
+
+# Покажи все merge коммиты
+git log --merges --oneline | head -10
+
+# Кто самые активные авторы за последний год
+git log --since="1 year ago" --pretty=format:"%an" | sort | uniq -c | sort -rn | head -10
+
+# Активность по часам — есть ли night-owl коммиттеры
+git log --pretty=format:"%ad" --date=format:"%H" | sort | uniq -c | sort -rn
+```
+
+---
+
+<KnowledgeCheck
+  question={`Тебе нужно расследовать: «мы в каком-то коммите добавили os.environ.get('DB_PASSWORD') в config.py, кто и когда?». Опиши последовательность git log команд, которые быстро дадут ответ, и как разобраться, если оригинальный файл уже переименован.`}
+  answer={`Пошаговый подход: (1) Pickaxe по точной строке: git log -S "os.environ.get('DB_PASSWORD')" --oneline --all -- config.py. Флаг -S ищет коммиты, в которых эта строка появилась/исчезла. --all ищет во всех ветках (не только текущей). -- config.py ограничивает поиск этим файлом. Это самый быстрый способ. (2) Если строка нашлась, посмотреть детали: git log -S "os.environ.get('DB_PASSWORD')" --all -- config.py -p — флаг -p добавит diff каждого коммита, увидишь точное место добавления. Или git show <sha> для одного коммита. (3) Если файл переименовали (config.py раньше был settings.py): git log -S '...' --all --follow -- config.py. Флаг --follow отслеживает переименования. Важно: --follow работает только с одним файлом, не директорией, и в комбинации с -S имеет ограничения. Альтернатива: убрать -- config.py совсем — поиск пройдёт по всему репо. (4) Если ничего не нашлось, возможно строка отформатирована иначе (пробелы, кавычки): используй -G с regex: git log -G "os\\.environ\\.get" --all -- config.py. (5) Альтернативный путь: git blame config.py | grep DB_PASSWORD — покажет автора и SHA коммита для конкретной строки. Потом git show <sha> для деталей. Blame быстрее, если ты уже знаешь конкретную строку. Pickaxe лучше, когда строка могла быть удалена/изменена.`}
+/>

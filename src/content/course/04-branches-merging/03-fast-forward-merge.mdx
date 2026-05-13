@@ -1,0 +1,332 @@
+---
+title: "Fast-forward merge — линейная история"
+description: "Что такое fast-forward merge, когда возможен (линейная история), git merge --ff-only для безопасности"
+order: 3
+difficulty: "beginner"
+estimatedTime: 14
+topics: ["Git", "Merge", "Fast-forward", "Branches"]
+---
+
+# Fast-forward merge — линейная история
+
+В Git есть две принципиально разные стратегии слияния веток: **fast-forward merge** (линейный) и **three-way merge** (с merge commit). В этом уроке — про первый. Это самая простая ситуация, и понимание её важно для понимания всех остальных.
+
+После урока вы будете спокойно понимать, когда Git делает fast-forward, когда не делает, как принудить или запретить fast-forward, и почему `--ff-only` — безопасный default для junior.
+
+---
+
+## Когда возможен fast-forward
+
+Fast-forward возможен, **когда история двух веток линейна** — то есть ветка, в которую мы мержим, не имеет никаких новых коммитов с момента, когда от неё «отпочковалась» вторая ветка.
+
+Представим типичную ситуацию:
+
+<DiagramContainer title="Состояние до merge: feature идёт вперёд, main стоит на месте" color="indigo">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="main" tooltip="main стоит на коммите C1. С момента создания feature на ней не было новых коммитов">main -> C1</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="feature/x" tooltip="feature/x создана от C1. После этого на ней сделано 3 коммита: C2, C3, C4. main не сдвинулась">feature/x -> C4</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="История" tooltip="C1 -> C2 -> C3 -> C4. Линейно. feature/x — это main + 3 коммита">C1 -> C2 -> C3 -> C4</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+При `git merge feature/x` Git замечает: «main — это предок feature/x. Можно просто переместить указатель main на C4». Никакого нового коммита не нужно — это и есть **fast-forward**: «перемотка ветки вперёд».
+
+<DiagramContainer title="После fast-forward merge" color="emerald">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="main" variant="highlight" tooltip="main теперь тоже указывает на C4. Просто двинули указатель — нового коммита не создавалось">main -> C4</DataBox>
+      <DataBox label="feature/x" tooltip="Без изменений — всё ещё на C4">feature/x -> C4</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="История" tooltip="Линейная: C1 -> C2 -> C3 -> C4. Никаких «развилок» в графе" variant="highlight">Линейная история</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+С точки зрения файлов на ветке main: до merge на ней было состояние C1, после merge — состояние C4. Все коммиты C2, C3, C4 теперь «принадлежат» истории main.
+
+---
+
+## Когда fast-forward невозможен
+
+Если на ветке main появились коммиты после создания feature — история **не линейна**, fast-forward невозможен:
+
+<DiagramContainer title="Расходящаяся история — нужен three-way merge" color="amber">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="До merge" tooltip="main двинулась вперёд (на M1), feature/x ушла своим путём (на C2, C3)">Расходящаяся</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="C0" tooltip="Общий предок (merge base)">C0</DataBox>
+      <Arrow direction="right" label="main:" />
+      <DataBox label="M1" tooltip="Коммит на main, появился после создания feature/x" variant="warning">M1</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="C0" tooltip="Тот же C0">C0</DataBox>
+      <Arrow direction="right" label="feature:" />
+      <DataBox label="C2 -> C3" tooltip="Коммиты на feature/x">C2 -> C3</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Нет линейности" tooltip="main и feature/x разошлись от C0. Просто двинуть main на C3 нельзя — потеряем M1. Нужен three-way merge с merge commit" variant="warning">Нужен three-way</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+В этой ситуации Git создаёт **merge commit** с двумя parent: M1 (main) и C3 (feature/x). Это и есть **three-way merge** — следующий урок.
+
+---
+
+## Команда git merge: что именно происходит
+
+Полный flow для fast-forward:
+
+```bash
+# Создаём ситуацию
+mkdir -p ~/git-sandbox/lesson-04-ff
+cd ~/git-sandbox/lesson-04-ff
+git init
+echo "initial" > a.txt && git add . && git commit -m "C1: initial"
+
+# Создаём feature-ветку
+git switch -c feature/x
+echo "feature" > b.txt && git add . && git commit -m "C2: add b"
+echo "more" >> b.txt && git add . && git commit -m "C3: extend b"
+
+# Смотрим — main всё ещё на C1, feature/x на C3
+git log --oneline --all --graph
+# * <C3> feature/x: C3: extend b
+# * <C2> feature/x: C2: add b
+# * <C1> main: C1: initial
+```
+
+Теперь делаем merge:
+
+```bash
+git switch main
+git merge feature/x
+# Updating <C1>..<C3>
+# Fast-forward
+#  b.txt | 2 ++
+#  1 file changed, 2 insertions(+)
+```
+
+Заметьте — Git явно говорит «Fast-forward». Это и есть тип merge.
+
+```bash
+git log --oneline --all --graph
+# * <C3> (HEAD -> main, feature/x) C3: extend b
+# * <C2> C2: add b
+# * <C1> C1: initial
+```
+
+main теперь на C3 — тот же коммит, что feature/x. Никакого merge commit нет — история линейная.
+
+---
+
+## Принуждение fast-forward: --ff-only
+
+Иногда вы хотите **гарантировать**, что merge будет именно fast-forward. Если ситуация не позволяет — пусть лучше Git откажется, чем создаст merge commit.
+
+```bash
+git merge --ff-only feature/x
+```
+
+Если возможен FF — будет FF. Если невозможен — ошибка:
+
+```bash
+# Если main впереди от merge base:
+git merge --ff-only feature/x
+# fatal: Not possible to fast-forward, aborting.
+```
+
+В таком случае вы решаете руками: либо `git rebase` для линейности, либо `git merge --no-ff` для merge commit (об этом дальше).
+
+`--ff-only` — это **безопасный режим для junior**. Если вы хотите гарантию, что история останется линейной — используйте.
+
+---
+
+## Запрет fast-forward: --no-ff
+
+Обратное: «никогда не делай fast-forward, всегда создавай merge commit, даже если линейность возможна».
+
+```bash
+git merge --no-ff feature/x
+```
+
+Зачем? Чтобы **сохранить факт ветвления в истории**. Когда вы делаете много мелких коммитов на feature, потом merge с --no-ff, в истории остаётся группа:
+
+<DiagramContainer title="Merge с --no-ff: видна группа коммитов" color="purple">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="main: M2" tooltip="Merge commit" variant="highlight">M2 (merge)</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="parent 1 -> main" tooltip="C1 — предыдущее состояние main">C1</DataBox>
+      <DataBox label="parent 2 -> feature/x" tooltip="C4 — последний коммит feature/x">C4</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="История" tooltip="В git log виден M2 как 'Merge feature/x'. По --first-parent можно пройти только по main, игнорируя коммиты внутри feature">M2 -> C1 (main path)</DataBox>
+      <DataBox label="" tooltip="">M2 -> C4 -> C3 -> C2 (feature)</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+С `--no-ff`:
+
+- В `git log --first-parent main` вы видите только «крупные» события: «merged feature/x», «merged feature/y» — структура продукта.
+- Коммиты внутри feature остаются доступными, но не засоряют main.
+- При нужде можно сделать `git revert` на merge commit и откатить всю фичу одной командой.
+
+Это и есть **GitHub Flow с merge commits** — популярная стратегия. Подробно — модуль 12.
+
+<Callout type="tip">
+В Pull Request на GitHub есть три кнопки слияния: «Create a merge commit» (--no-ff), «Squash and merge» (объединить все коммиты PR в один и применить), «Rebase and merge» (rebase + fast-forward). Выбор зависит от культуры команды. Подробно — модуль 11.
+</Callout>
+
+---
+
+## Конфигурация поведения по умолчанию
+
+Можно настроить, что Git делает при `git merge` без явных флагов:
+
+```bash
+# Force --ff-only: ошибка вместо merge commit
+git config --global merge.ff only
+
+# Force --no-ff: всегда merge commit
+git config --global merge.ff false
+
+# Default: fast-forward когда возможен, merge commit когда нет
+git config --global merge.ff true   # или unset
+```
+
+И для pull (мы это делали в модуле 02):
+
+```bash
+# Безопасный pull для junior
+git config --global pull.ff only
+```
+
+При `git pull --ff-only`: либо чисто fast-forward, либо ошибка. Никаких автоматических merge commits.
+
+---
+
+## Визуализация в git log
+
+Включите `--graph --oneline --all` в `git log` — будет видна структура:
+
+```bash
+git log --graph --oneline --all
+```
+
+Fast-forward merge:
+
+```text
+* <C4> (HEAD -> main, feature/x) Latest
+* <C3> Another
+* <C2> Earlier
+* <C1> Initial
+```
+
+Three-way merge с --no-ff:
+
+```text
+*   <M> (HEAD -> main) Merge branch 'feature/x'
+|\
+| * <C4> (feature/x) Latest
+| * <C3> Another
+| * <C2> Earlier
+|/
+* <C1> Initial
+```
+
+Разница: во втором случае виден «развилка» (`|\` и `|/`) — графически очевидно, что была feature-ветка.
+
+Полезный alias для красивого графа:
+
+```bash
+git config --global alias.lg \
+  "log --graph --oneline --decorate --all"
+```
+
+После этого `git lg` показывает компактный читаемый граф.
+
+---
+
+## Best practices для junior
+
+1. **Используйте `pull.ff = only`** в global config (мы делали в модуле 02). Защищает от случайных merge commits при pull.
+2. **На локальной работе** делайте обычный `git merge` — fast-forward, когда возможен, иначе явно решайте, как мержить.
+3. **При интеграции feature-ветки** в main выбирайте `--no-ff`: сохраняется факт ветвления, легче делать revert при необходимости.
+4. **В PR на GitHub** — следуйте policy команды. Если нет — «Create a merge commit» безопасный default.
+
+---
+
+## Попробуй сам
+
+1. Создайте репозиторий и сделайте fast-forward merge:
+
+```bash
+mkdir -p ~/git-sandbox/lesson-04-ff
+cd ~/git-sandbox/lesson-04-ff
+git init
+
+echo "initial" > a.txt
+git add . && git commit -m "Initial"
+
+git switch -c feature/x
+echo "feat1" > b.txt && git add . && git commit -m "Add b"
+echo "feat2" > c.txt && git add . && git commit -m "Add c"
+
+git switch main
+git merge feature/x
+# Должно сказать "Fast-forward"
+
+git log --oneline --graph --all
+```
+
+2. Сделайте --no-ff merge:
+
+```bash
+git switch -c feature/y
+echo "feat3" > d.txt && git add . && git commit -m "Add d"
+
+git switch main
+git merge --no-ff feature/y -m "Merge feature/y"
+# Создаст merge commit, откроет редактор или возьмёт -m
+
+git log --oneline --graph --all
+# Увидите развилку
+```
+
+3. Создайте ситуацию, где FF невозможен:
+
+```bash
+git switch -c feature/z
+echo "feat4" > e.txt && git add . && git commit -m "Add e"
+
+git switch main
+echo "main-changed" > a.txt
+git add . && git commit -m "Update on main"
+
+# Теперь и main, и feature/z имеют новые коммиты от общего предка
+git merge --ff-only feature/z
+# fatal: Not possible to fast-forward, aborting.
+
+# Альтернатива: обычный merge с merge commit
+git merge feature/z
+# Создаст merge commit (потому что FF невозможен)
+```
+
+---
+
+<KnowledgeCheck
+  question="Junior настроил `merge.ff = only` глобально, потом попытался слить ветку feature/x в main, получил ошибку «Not possible to fast-forward». Что делать дальше?"
+  answer="Ошибка говорит: между main и feature/x была расходящаяся история — на main появились коммиты, которых нет на feature/x. FF невозможен. Варианты: 1) `git rebase main` на feature/x — перебазировать ветку поверх свежей main, после чего история станет линейной, можно FF (но изменит SHA коммитов feature/x — нельзя если ветка уже запушена). 2) `git merge feature/x --no-ff -m '...'` — явно сделать merge commit, обходя глобальную настройку. 3) Pull request — если работа в команде, push feature/x, открыть PR, mainтейнеры решают, как мержить. Для junior в командной работе обычно вариант 3: pull request даёт code review + явный выбор merge стратегии. Для соло-работы — вариант 1 (rebase) если ветка локальная, или вариант 2 (merge commit) если ветка уже была запушена и кто-то мог из неё пиллать."
+/>

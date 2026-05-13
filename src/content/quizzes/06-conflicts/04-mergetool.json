@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "06-conflicts/04-mergetool",
+  "moduleId": "06-conflicts",
+  "_meta": { "idPrefix": "git-m06-04" },
+  "questions": [
+    {
+      "id": "git-m06-04-q1",
+      "type": "multiple-choice",
+      "question": "Сколько 'панелей' обычно показывает 3-way merge GUI editor?",
+      "options": [
+        { "id": "a", "text": "Одну — финальный файл" },
+        { "id": "b", "text": "Две — old и new версии" },
+        { "id": "c", "text": "Три-четыре: OURS, THEIRS, BASE (общий предок), и RESULT (финальный)" },
+        { "id": "d", "text": "Десять — все возможные версии" }
+      ],
+      "correctAnswer": "c",
+      "explanation": "Хороший 3-way merge UI показывает три или четыре панели одновременно: OURS (твоя текущая ветка), THEIRS (мерджимая ветка), BASE (общий предок) и RESULT (финальная версия, куда ты собираешь). Это намного удобнее текстовых маркеров: видишь все версии сразу, есть кнопки 'Accept Current/Incoming/Both', подсветка синтаксиса, intellisense. VS Code Merge Editor (с 1.69, 2022), JetBrains IDE (PyCharm, IntelliJ) и старые meld/kdiff3/p4merge — все используют этот pattern.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m06-04-q2",
+      "type": "true-false",
+      "question": "VS Code имеет встроенный 3-way merge editor с версии 1.69 (июль 2022) — нет необходимости устанавливать дополнительные расширения для разрешения конфликтов.",
+      "correctAnswer": "true",
+      "explanation": "VS Code 1.69+ имеет полноценный встроенный 3-way merge editor. При конфликте в проекте: Source Control панель -> клик на конфликтный файл -> 'Open in Merge Editor'. Откроется UI с панелями Incoming/Current/Result. К 2026 году editor зрелый и удобный, бесплатный, кросс-платформенный. Если уже используешь VS Code как редактор — это лучший дефолт для джуна. Альтернатива — inline кнопки прямо над маркерами в файле ('Accept Current Change | Accept Incoming | ...').",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m06-04-q3",
+      "type": "multiple-choice",
+      "question": "Что делает команда `git mergetool`?",
+      "options": [
+        { "id": "a", "text": "Автоматически разрешает все конфликты" },
+        { "id": "b", "text": "Запускает сконфигурированный GUI tool (merge.tool) для каждого конфликтного файла; после сохранения и закрытия инструмента Git помечает файл git add автоматически" },
+        { "id": "c", "text": "Удаляет конфликтные файлы" },
+        { "id": "d", "text": "Скачивает инструменты для merge" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`git mergetool` запускает GUI tool, указанный в `merge.tool` (vscode, meld, kdiff3, intellij и т.д.). Для каждого конфликтного файла по очереди: открывает инструмент, ты разрешаешь, сохраняешь и закрываешь. Git автоматически помечает разрешённые файлы как `git add`. Создаёт `.orig` backup-файлы по дефолту — можно отключить через `mergetool.keepBackup = false`. Современная альтернатива: разрешать прямо в IDE (VS Code/JetBrains), без `git mergetool` — IDE работает с `.git/` напрямую.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m06-04-q4",
+      "type": "multiple-choice",
+      "question": "После использования `git mergetool` в репо появилось много `.orig` файлов, и git status их показывает. Как это исправить?",
+      "options": [
+        { "id": "a", "text": "Установить новую версию Git" },
+        { "id": "b", "text": "`find . -name '*.orig' -delete` + `git config --global mergetool.keepBackup false` + добавить `*.orig` в .gitignore" },
+        { "id": "c", "text": "Эти файлы критичны, не трогай их" },
+        { "id": "d", "text": "Делать `git mergetool --no-backup` каждый раз" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`.orig` файлы создаются `git mergetool` по дефолту как backup с не-разрешённой версией. Решение в три шага: (1) **Удалить существующие**: `find . -name '*.orig' -delete`. (2) **Отключить создание новых**: `git config --global mergetool.keepBackup false`. (3) **Добавить в .gitignore** на всякий случай: `echo '*.orig' >> .gitignore`. Альтернатива — не использовать `git mergetool` вообще: разрешать конфликты прямо в IDE (VS Code, PyCharm), которая работает с файлами без backup creation.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m06-04-q5",
+      "type": "multiple-choice",
+      "question": "Когда GUI mergetool ЛУЧШЕ всего использовать вместо ручного CLI?",
+      "options": [
+        { "id": "a", "text": "Всегда — GUI всегда лучше" },
+        { "id": "b", "text": "Когда 5+ конфликтов в одном файле, сложный рефакторинг, или нужна визуализация структуры" },
+        { "id": "c", "text": "Только для бинарных файлов" },
+        { "id": "d", "text": "Только при работе через SSH" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "GUI лучше: (1) 5+ конфликтов в одном файле — 3-way panel экономит когнитивную нагрузку, (2) сложный код (рефакторинг, переезд функций) — проще видеть структуру, (3) с code review параллельно — видно историю. CLI лучше: (1) 1-2 простых конфликта, (2) YAML/JSON config (обычно тривиальный), (3) удалённая SSH-сессия без X11. Lock-файлы — НИ ОДИН, регенерируй. Бинарные — CLI с `--ours/--theirs` целиком. Не надо 'выбрать один инструмент на жизнь' — переключайся в зависимости от сценария.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

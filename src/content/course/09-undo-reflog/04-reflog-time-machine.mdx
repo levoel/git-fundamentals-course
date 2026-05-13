@@ -1,0 +1,326 @@
+---
+title: "git reflog — машина времени для HEAD"
+description: "Reflog хранит каждое движение HEAD за последние 90 дней. Lifeline когда reset --hard убил работу, когда удалил ветку, когда rebase пошёл криво. HEAD@{N} синтаксис и восстановление."
+order: 4
+difficulty: "beginner"
+estimatedTime: 30
+topics: ["reflog", "HEAD", "recovery", "lost-commits", "garbage-collection", "HEAD-syntax"]
+---
+
+# git reflog — машина времени для HEAD
+
+Reflog — самая недооценённая команда Git, и **самая главная безопасность** для всех «опасных» операций (reset --hard, rebase, branch delete). Если ты понимаешь reflog, ты можешь смело экспериментировать с историей: всегда есть путь назад.
+
+В этом уроке: что такое reflog, зачем он есть, как читать `HEAD@{N}` синтаксис, и три boilerplate-сценария восстановления — потерянный коммит после `reset --hard`, удалённая ветка, кривой rebase.
+
+---
+
+## Что такое reflog
+
+Reflog — это **локальный журнал движений HEAD** (и каждой ветки). Каждый раз когда HEAD куда-то указывает на новое (commit, reset, checkout, merge, rebase) — Git записывает в reflog: «вчера в 14:00, HEAD двинулся с abc1234 на def5678, причина: commit».
+
+```bash
+$ git reflog
+def5678 (HEAD -> main) HEAD@{0}: commit: Add validation
+abc1234 HEAD@{1}: commit: Add transform
+ghi9012 HEAD@{2}: commit (initial): Initial
+```
+
+Формат каждой строки:
+
+- `def5678` — хэш коммита, на котором HEAD оказался **после** действия.
+- `HEAD@{0}` — последнее движение, `HEAD@{1}` — предпоследнее, и так далее.
+- `commit:` — тип действия (commit, reset, checkout, merge, pull, ...).
+- `Add validation` — описание (для commit — message, для reset — `moving to <ref>`, и т. д.).
+
+Reflog **локален** — не пушится на сервер, не виден коллегам. Это твой персональный журнал. Хранится в `.git/logs/HEAD` и `.git/logs/refs/heads/<branch>`. Записи живут **90 дней** по умолчанию (потом стираются garbage collection).
+
+<Callout type="tip">
+Помни: reflog — локальный. После `git clone` у тебя пустой reflog. Если коллега force-push-нул `main`, его reflog видит «откуда куда сдвинули». Твой локальный reflog после fetch — нет. Поэтому если ты единственный, кто видел злополучные коммиты, восстановление лежит **только на тебе**.
+</Callout>
+
+---
+
+## `HEAD@{N}` синтаксис — как обращаться к старым состояниям
+
+`HEAD@{0}` — текущее состояние HEAD.
+`HEAD@{1}` — где был HEAD **до** последнего движения.
+`HEAD@{2}` — на одно движение раньше.
+И так далее.
+
+Это **не** то же самое что `HEAD~1` / `HEAD^`:
+
+| Синтаксис | Значение |
+|---|---|
+| `HEAD~1` | Родительский коммит (по графу истории) |
+| `HEAD^` | То же — родительский коммит |
+| `HEAD@{1}` | Где был HEAD до прошлого действия (по reflog) |
+| `HEAD@{yesterday}` | Где был HEAD вчера в это же время |
+| `HEAD@{2.hours.ago}` | Где был HEAD 2 часа назад |
+
+Различие критичное. `HEAD~1` смотрит **по истории коммитов**. `HEAD@{1}` смотрит **по журналу движений**. Если ты сделал `git reset --hard HEAD~3`, то `HEAD@{1}` — это место **до reset**, то есть тот HEAD, что был 3 коммита вперёд.
+
+<DiagramContainer title="HEAD~N (по графу) vs HEAD-at-N (по времени)">
+  <FlowColumn>
+    <DataBox tooltip="Граф коммитов: A -> B -> C -> D, HEAD на D">Граф коммитов</DataBox>
+    <FlowRow>
+      <FlowNode tooltip="">A</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="">B</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="">C</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="Текущий HEAD">D (HEAD)</FlowNode>
+    </FlowRow>
+    <FlowRow>
+      <DataBox tooltip="HEAD~N идёт по parent edges графа">HEAD~1 = C, HEAD~2 = B, HEAD~3 = A</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox tooltip="Сценарий: reset --hard HEAD~3 потом checkout главного коммита">Reflog после reset --hard B</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <FlowNode tooltip="После reset (текущий)">{'HEAD@{0}'} = B</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="До reset был на D">{'HEAD@{1}'} = D</FlowNode>
+      <Arrow direction="right" />
+      <FlowNode tooltip="Изначальный коммит, перед D">{'HEAD@{2}'} = C</FlowNode>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+---
+
+## Сценарий 1: восстановить после reset --hard
+
+Самая частая «о боже» ситуация. Ты делал работу:
+
+```bash
+$ git log --oneline
+ccc3333 (HEAD -> feature) Add complex transformations  # 4 часа работы
+bbb2222 Fix data validation                            # 2 часа работы
+aaa1111 Initial pipeline
+```
+
+Делаешь `git reset --hard HEAD~5` чтобы откатиться на чужую старую версию, ошибся в количестве — снёс свои коммиты:
+
+```bash
+$ git reset --hard HEAD~5
+HEAD is now at zzz9999 Old commit from days ago
+
+$ git log --oneline
+zzz9999 (HEAD -> feature) Old commit from days ago
+# ccc3333 и bbb2222 пропали!
+```
+
+Паника? Нет. Reflog помнит:
+
+```bash
+$ git reflog
+zzz9999 HEAD@{0}: reset: moving to HEAD~5
+ccc3333 HEAD@{1}: commit: Add complex transformations
+bbb2222 HEAD@{2}: commit: Fix data validation
+aaa1111 HEAD@{3}: commit: Initial pipeline
+...
+
+# Возвращаемся на состояние до reset
+$ git reset --hard HEAD@{1}
+
+$ git log --oneline
+ccc3333 (HEAD -> feature) Add complex transformations
+bbb2222 Fix data validation
+aaa1111 Initial pipeline
+# Восстановили!
+```
+
+Тот же приём работает на ветке, имени:
+
+```bash
+$ git reset --hard ccc3333    # просто по хэшу — тоже OK
+```
+
+---
+
+## Сценарий 2: восстановить удалённую ветку
+
+Ты сделал `git branch -D feature/etl-users`, потом понял, что зря — там была важная работа, ещё не замерженная.
+
+```bash
+$ git branch -D feature/etl-users
+Deleted branch feature/etl-users (was abc1234).
+
+# Через секунду...
+$ git checkout feature/etl-users
+error: pathspec 'feature/etl-users' did not match any file(s) known to git
+```
+
+Reflog ветки уже стёрт (он жил с веткой), но reflog HEAD помнит:
+
+```bash
+$ git reflog
+def5678 HEAD@{0}: checkout: moving from feature/etl-users to main
+abc1234 HEAD@{1}: commit: Last work on feature
+...
+```
+
+Хэш `abc1234` — кончик удалённой ветки. Восстанавливаем:
+
+```bash
+$ git checkout -b feature/etl-users abc1234
+
+# Или
+$ git branch feature/etl-users abc1234
+$ git switch feature/etl-users
+```
+
+Ветка вернулась с тем же кончиком.
+
+<Callout type="tip">
+Альтернативный путь — `git fsck --lost-found`. Эта команда сканирует `.git/objects` и находит **dangling** (unreachable) коммиты. Полезно, когда reflog уже подтерт, но GC ещё не прошёл. Выдаст список «безнадёжных» коммитов — смотришь содержимое через `git show <hash>`, находишь нужный, делаешь `git branch recovered <hash>`.
+</Callout>
+
+---
+
+## Сценарий 3: спасение после кривого rebase
+
+Ты делал `git rebase -i HEAD~10` (модуль 07), ошибся в conflict resolution, получил мусор. Хочется откатиться **до** rebase, как было.
+
+```bash
+$ git reflog
+fff5555 HEAD@{0}: rebase (finish): returning to refs/heads/feature
+eee4444 HEAD@{1}: rebase (pick): Final commit
+...
+abc1234 HEAD@{15}: rebase (start): checkout origin/main
+def5678 HEAD@{16}: commit: My last commit before rebase   # <- вот сюда
+```
+
+Видишь `rebase (start)` — это пометка начала rebase. Сразу **до** неё — состояние ветки **до** rebase. Берём `HEAD@{16}` и:
+
+```bash
+$ git reset --hard HEAD@{16}
+# Ветка вернулась к pre-rebase состоянию
+```
+
+В реальности удобнее использовать `ORIG_HEAD` — Git автоматически записывает «состояние до rebase / merge / reset» в этот reference:
+
+```bash
+$ git reset --hard ORIG_HEAD
+# То же самое — откат к pre-rebase состоянию
+```
+
+`ORIG_HEAD` ставится в начале операций rebase/merge/reset. Полезный shortcut когда «я сейчас что-то опасное сделал, надо вернуть».
+
+---
+
+## Per-branch reflog
+
+`git reflog` без аргументов = `git reflog show HEAD`. Можно посмотреть журнал конкретной ветки:
+
+```bash
+$ git reflog show feature/etl-users
+abc1234 feature/etl-users@{0}: commit: Add tests
+def5678 feature/etl-users@{1}: commit: Initial work
+ghi9012 feature/etl-users@{2}: branch: Created from main
+```
+
+Это удобно для нескольких веток одновременно. Каждая ветка хранит свой журнал в `.git/logs/refs/heads/<branch>`. После `git branch -D <branch>` этот журнал удаляется (но HEAD-reflog остаётся).
+
+---
+
+## Garbage collection и срок жизни reflog
+
+Записи reflog **не вечны**. По умолчанию:
+
+- **Reachable** записи (на которые ещё указывает какая-то ветка/HEAD/tag): хранятся **90 дней**.
+- **Unreachable** записи (orphan commits, не привязаны ни к чему): хранятся **30 дней**.
+
+После этого `git gc` (garbage collection) удаляет объекты. Это значит — если ты `reset --hard`-нул коммит и 31 день не заходил в репозиторий, **GC может его уже стёр**. Восстановления нет.
+
+На практике для junior это не проблема — ты регулярно работаешь с репо, GC не успевает. Но если ты восстанавливаешь старый репозиторий — проверь даты, и **немедленно** делай `git branch backup-<date> <hash>`, чтобы коммит стал reachable и не подвергался stale-30-day GC.
+
+Конфиг сроков:
+
+```bash
+$ git config gc.reflogExpire 180.days        # reachable: храним 180 дней
+$ git config gc.reflogExpireUnreachable 60.days  # orphan: 60 дней
+```
+
+---
+
+## Reflog c временными выражениями
+
+Можно обращаться к HEAD относительно времени:
+
+```bash
+$ git diff HEAD@{yesterday}                   # что я изменил со вчера
+$ git diff main@{2.weeks.ago}                # как ветка main изменилась за 2 недели
+$ git show HEAD@{2.hours.ago}                # коммит, на котором был HEAD 2 часа назад
+$ git checkout main@{"2026-05-01 10:00"}    # состояние main в конкретный момент
+```
+
+Полезно при отладке: «когда я уронил DAG-файл — попробую посмотреть, как ветка выглядела утром».
+
+---
+
+## Что reflog НЕ покрывает
+
+Reflog отслеживает **движение указателей** (HEAD, ветки). Что **не** покрывает:
+
+1. **Working tree** — несохранённые изменения. `git reset --hard` уничтожает working tree, и reflog никак не помогает восстановить.
+2. **Untracked files** — Git их не отслеживает в принципе.
+3. **Действия других людей на remote** — твой reflog локальный.
+4. **`git stash drop`** — stash имеет свой reflog (`git reflog show stash`), но он часто очищается агрессивнее.
+
+Поэтому правило безопасности: перед `--hard` либо `git add .` (сохрани в index — оттуда восстановить через reflog объектов можно), либо `git stash` (отдельный namespace).
+
+---
+
+## Попробуй сам
+
+Проиграй сценарий потерянной работы:
+
+```bash
+$ mkdir reflog-demo && cd reflog-demo
+$ git init
+$ echo "initial" > f.txt && git add . && git commit -m "C1"
+$ echo "important work" > f.txt && git commit -am "C2: critical change"
+$ echo "more work" > f.txt && git commit -am "C3: another important change"
+
+# Случайно
+$ git reset --hard HEAD~3
+fatal: ambiguous argument 'HEAD~3'  # OK, нет 3 родителей
+$ git reset --hard HEAD~2
+$ git log --oneline
+abc1111 (HEAD -> main) C1
+
+# Где моя работа?!
+$ git reflog
+abc1111 HEAD@{0}: reset: moving to HEAD~2
+ccc3333 HEAD@{1}: commit: C3: another important change
+bbb2222 HEAD@{2}: commit: C2: critical change
+abc1111 HEAD@{3}: commit (initial): C1
+
+# Восстановили!
+$ git reset --hard HEAD@{1}
+$ git log --oneline
+ccc3333 (HEAD -> main) C3: another important change
+bbb2222 C2: critical change
+abc1111 C1
+```
+
+Также попробуй удалить и восстановить ветку:
+
+```bash
+$ git switch -c feature && echo "feature work" > feat.txt && git add . && git commit -m "Feature"
+$ git switch main
+$ git branch -D feature
+$ git reflog
+$ git checkout -b feature-restored <hash-из-reflog>
+```
+
+---
+
+## Killer takeaway
+
+`git reflog` — это локальный журнал всех движений HEAD за последние ~90 дней. Это безопасность всего, что «опасно» в Git: reset --hard, удаление веток, кривой rebase. Запомни два паттерна: `git reflog` -> найти нужный хэш -> `git reset --hard <hash>` (или `git branch backup <hash>` для сохранности). `ORIG_HEAD` — auto-bookmark до последнего rebase/merge/reset. Reflog не помогает с uncommitted working tree — для этого stash или add заранее.
+
+<KnowledgeCheck quizSlug="09-undo-reflog/04-reflog-time-machine" />

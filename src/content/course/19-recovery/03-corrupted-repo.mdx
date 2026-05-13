@@ -1,0 +1,598 @@
+---
+title: "Corrupted .git: index.lock, loose object errors, re-clone"
+description: ".git corrupted: git fsck --full диагностика. index.lock — старый process не закрылся, безопасно delete если нет git процесса. Loose object corrupted — re-clone проще chirurgical fix. backup .git перед попыткой fix."
+order: 3
+difficulty: "intermediate"
+estimatedTime: 25
+topics: ["corrupted-repo", "index-lock", "fsck", "loose-objects", "re-clone", "backup"]
+---
+
+# Corrupted .git: index.lock, loose object errors, re-clone
+
+Иногда `.git` директория ломается. Симптомы:
+
+- `git status` выдаёт `error: bad object...` или `fatal: index file corrupt`.
+- `git pull` падает с `error: unable to write sha1 filename...`.
+- `git commit` пишет `fatal: Unable to create '.git/index.lock': File exists`.
+- `git log` показывает `error: object file ...`.
+
+Иногда это **временное** (lock-file висит от убитого процесса). Иногда — **реальная coruption** (повреждённый pack, испорченный диск).
+
+В этом уроке:
+
+1. Чтение error сообщений Git — какой именно проблема.
+2. `index.lock` — самая частая проблема, тривиальное решение.
+3. Loose object corruption — диагностика и chirurgical fix.
+4. Когда честно: **re-clone проще лечения**.
+5. Профилактика — `git maintenance`, backup, fsck-cron.
+
+---
+
+## Что вообще может сломаться
+
+Структура `.git`:
+
+```
+.git/
+├── HEAD                        # symbolic ref к текущей ветке
+├── config                      # local config
+├── index                       # staging area (binary)
+├── refs/
+│   ├── heads/main             # SHA текущего HEAD
+│   └── tags/
+├── objects/
+│   ├── ab/c123...             # loose object (blob/tree/commit)
+│   ├── pack/
+│   │   ├── pack-X.pack        # packed objects (compressed bundle)
+│   │   └── pack-X.idx         # index для pack-X.pack
+│   └── info/packs
+├── logs/                       # reflog (см. урок 01)
+└── hooks/                      # client-side hooks (модуль 15)
+```
+
+Coruption может быть в любой части:
+
+| Часть | Симптом | Шанс recovery |
+|---|---|---|
+| `index.lock` (висящий) | "File exists" при commit | 100% (delete file) |
+| `index` corrupt | "index file corrupt" | 80% (regenerate) |
+| Loose object | "object file ... is empty / bad" | Зависит (см. ниже) |
+| pack-X.pack | "bad object", checksum mismatch | Низкий (re-clone) |
+| `refs/heads/X` | "bad ref" — пустой/мусор | 90% (manual edit) |
+| `logs/HEAD` | reflog corrupt | 100% (можно жить без) |
+| Reflog corruption — gc может потерять работу | Низкий, но возможен | — |
+
+---
+
+## Начало диагностики: git fsck --full
+
+Универсальная команда «проверь репо»:
+
+```bash
+$ git fsck --full
+Checking object directories: 100% (256/256), done.
+Checking objects: 100% (12345/12345), done.
+
+error: object file .git/objects/ab/c123...: bad object
+fatal: loose object abc123... is corrupt
+```
+
+`--full` — проверка всех objects, включая packed. Без `--full` — только loose.
+
+Output показывает **конкретные** SHA, которые повреждены. Дальше — лечение конкретного типа.
+
+<Callout type="tip">
+Перед любым recovery action: **сделай backup `.git`**. `cp -r .git .git.backup`. Если recovery провалится — нет хуже, чем было.
+</Callout>
+
+---
+
+## Проблема 1: index.lock висит
+
+Симптом:
+
+```bash
+$ git commit -am "Fix"
+fatal: Unable to create '/path/to/.git/index.lock': File exists.
+
+Another git process seems to be running in this repository, e.g.
+an editor opened by 'git commit'. Please make sure all processes
+are terminated then try again. If it still fails, a git process
+may have crashed in this repository earlier:
+remove the file manually to continue.
+```
+
+`index.lock` — это **file lock**. Git создаёт его перед операциями с index, удаляет после. Если процесс **убит** в середине — lock остаётся, новый git не может работать.
+
+### Решение
+
+```bash
+# Проверь — нет ли реально запущенного git процесса
+$ ps aux | grep git
+user 12345 ... git fetch       # ← если виден активный git
+user 23456 ... grep git        # ← это сам grep, не Git
+
+# Если нет активного git — удали lock
+$ rm -f .git/index.lock
+
+# Повтори команду
+$ git commit -am "Fix"
+[main abcdef1] Fix
+```
+
+Безопасно? Да, если git процесс не работает. Опасно — если есть параллельный процесс (другой terminal, IDE git extension). В этом случае — убей процесс или подожди.
+
+### Аналогичные locks
+
+Есть и другие lock-файлы:
+
+```
+.git/HEAD.lock
+.git/refs/heads/main.lock
+.git/packed-refs.lock
+.git/config.lock
+```
+
+Решение то же: проверить активные процессы, удалить lock.
+
+```bash
+$ find .git -name "*.lock" -mmin +10 -delete
+# удалить все lock-файлы старше 10 минут (старые точно zombie)
+```
+
+---
+
+## Проблема 2: index corrupt
+
+Симптом:
+
+```bash
+$ git status
+fatal: index file corrupt
+```
+
+Index — binary файл со staging area. Если он сломан — можно **пересоздать** из HEAD:
+
+```bash
+$ rm .git/index
+$ git reset
+Unstaged changes after reset:
+M  dag.py
+M  models/users.sql
+```
+
+`git reset` (без аргументов) перечитывает index из HEAD. Файлы на диске не трогаются. После — все изменения видны как `unstaged`, можно снова `git add`.
+
+<Callout type="warning">
+`git reset` (без `--hard`) **не удаляет** изменения в working tree. Делает только rebuild index. Files на диске целы.
+</Callout>
+
+---
+
+## Проблема 3: loose object corrupt
+
+Симптом:
+
+```bash
+$ git status
+error: object file .git/objects/ab/c123def...: bad object
+fatal: loose object abc123def is corrupt
+```
+
+Loose object на диске — пустой или повреждённый. Часто из-за:
+
+- Out of disk space во время write.
+- File system corruption (sector damage, btrfs/ext4 bug).
+- Killed-9 git process в момент object write.
+- Скопировал `.git` через `cp -r` со включёнными hard links — иногда rename атомарность нарушается.
+
+### Recovery (если object не critical)
+
+Если повреждённый object — старый или маловажный, можно убрать его и связанные коммиты:
+
+```bash
+# 1. Сделай backup
+$ cp -r .git .git.backup
+
+# 2. Удали corrupted object
+$ rm .git/objects/ab/c123def...
+
+# 3. Запусти fsck
+$ git fsck --full
+missing blob abc123def for tree fedcba9
+# или
+broken link from commit xyz to blob abc123def
+```
+
+`broken link` — есть commit/tree, который ссылается на этот blob. История broken.
+
+Если object — это **blob** для какого-то файла, иногда удаётся restore из working tree:
+
+```bash
+# Какой commit/file использовал этот blob?
+$ git log --raw --all | grep abc123def
+:100644 100644 fedcba9 abc123def M dag.py
+
+# Если у тебя на диске есть текущая версия этого файла,
+# и SHA совпадает — повторно add-нём
+$ git hash-object dag.py
+abc123def      # совпадает = blob идентичен текущему файлу
+
+$ git add dag.py
+# blob пересоздан из working tree
+```
+
+Это работает **только** если файл на диске точно соответствует утерянному blob.
+
+### Recovery из remote
+
+Если репо имеет remote — fetch недостающие objects:
+
+```bash
+$ git fetch --all
+# git заметит missing objects и попробует докачать
+
+$ git fsck --full
+# проверим — повторяется ли?
+```
+
+Если remote имеет нужные objects — обычно fetch их притянет. Если нет (force-push потерял) — другой путь.
+
+### Когда сдаваться: re-clone
+
+В реальности **re-clone дешевле** chirurgical fix. Сценарий:
+
+1. Сохрани uncommitted изменения: `git diff > /tmp/changes.patch`, или просто скопируй файлы.
+2. Запиши имена локальных веток: `git branch | tee /tmp/local-branches.txt`.
+3. `cd ..; rm -rf <repo>; git clone <remote>`.
+4. Apply `changes.patch` если был.
+5. Re-create локальные ветки, если они **не были запушены** — это потеря, push своевременно.
+
+Time investment: 5 минут. vs hours of debug corrupt объекта.
+
+<Callout type="tip">
+Junior — не геройствуй. Когда `git fsck` показывает много corrupted objects, **re-clone — норма**, не позор. Senior делает то же самое.
+</Callout>
+
+---
+
+## Проблема 4: pack file corrupt
+
+Симптом:
+
+```bash
+$ git status
+error: bad pack file checksum
+fatal: pack abc... checksum mismatch
+```
+
+Pack file — это **многомегабайтный** контейнер objects. Если повреждён — теряется много данных одновременно.
+
+Recovery options:
+
+```bash
+# 1. Попробовать verify
+$ git verify-pack -v .git/objects/pack/pack-abc.pack
+# покажет какие objects внутри ок, какие нет
+
+# 2. Re-fetch с remote (best option)
+$ git fetch --all
+
+# 3. Если remote недоступен — re-clone
+```
+
+Practically — re-clone это **первое** что нужно делать.
+
+---
+
+## Проблема 5: corrupted ref
+
+Симптом:
+
+```bash
+$ git checkout feat/etl
+fatal: bad ref 'feat/etl'
+
+$ cat .git/refs/heads/feat/etl
+# пусто или мусор
+```
+
+Ref — это файл с одним SHA. Если он пустой/повреждённый — Git не знает где ветка.
+
+Recovery:
+
+```bash
+# Smart: использовать reflog
+$ git reflog show feat/etl
+# если reflog есть — последний SHA = последний state ветки
+
+abcdef1 feat/etl@{0}: commit: Some commit
+fedcba9 feat/etl@{1}: ...
+
+# Manually восстанавливаем
+$ echo "abcdef1" > .git/refs/heads/feat/etl
+# или
+$ git update-ref refs/heads/feat/etl abcdef1
+```
+
+Если reflog тоже нет — `git fsck` ищем dangling commits (урок 02), угадываем по commit messages.
+
+### packed-refs
+
+Иногда ref не файл, а запись в `.git/packed-refs`:
+
+```bash
+$ cat .git/packed-refs
+# pack-refs with: peeled fully-peeled sorted
+abcdef1234... refs/heads/main
+fedcba9876... refs/heads/feat/etl
+```
+
+Если этот файл повреждён — `vim .git/packed-refs`, удали bad line, добавь правильную через `git update-ref`.
+
+---
+
+## Проблема 6: дисковое пространство (косвенно)
+
+Симптом:
+
+```bash
+$ git push
+fatal: write error: No space left on device
+```
+
+Если диск **закончился** в момент Git операции — object может остаться half-written. После освобождения места — `git fsck` покажет corruption.
+
+Профилактика: `df -h` time-to-time. Кончается — `git gc` (упаковка освобождает место), `du -sh .git` (размер репо).
+
+---
+
+## Полный recovery flow
+
+При первых симптомах:
+
+```bash
+# 1. STOP. Не делай random commands.
+$ pkill -9 git    # если что-то висит
+
+# 2. Backup
+$ cp -r .git .git.backup
+
+# 3. Identify
+$ git fsck --full 2>&1 | tee /tmp/fsck.log
+$ cat /tmp/fsck.log
+# смотрим что именно сломано
+
+# 4. Lock-files
+$ find .git -name "*.lock" -ls
+# если что-то висит — rm
+
+# 5. Easy fix: re-clone
+# Если сомневаешься, можешь ли починить —
+# смело re-clone, спасает 90% случаев
+
+$ cd ..
+$ mv broken-repo broken-repo.dead
+$ git clone git@github.com:org/repo.git broken-repo
+$ cd broken-repo
+
+# 6. Apply uncommitted (если был backup)
+$ cp ../broken-repo.dead/some-file.py .
+# manual merge changes
+
+# 7. Final check
+$ git fsck --full
+# должно быть clean
+```
+
+---
+
+## Профилактика: git maintenance
+
+Git 2.30+ ввёл `git maintenance` — встроенный «background optimization».
+
+```bash
+$ git maintenance start
+# регистрирует периодические задачи
+
+$ git maintenance status
+hourly tasks:        commit-graph, prefetch, loose-objects
+daily tasks:         loose-objects, incremental-repack
+weekly tasks:        gc
+```
+
+Что делает:
+- `commit-graph` — оптимизация графа commits для быстрых query.
+- `prefetch` — pre-fetch remote refs (быстрее git pull).
+- `loose-objects` — упаковка loose в pack-ы (экономит inodes).
+- `incremental-repack` — частичная repack (быстрая).
+- `gc` — полная сборка мусора (раз в неделю).
+
+Включи на DE-проекте — repo здоров автоматически:
+
+```bash
+$ git -C ~/projects/de-repo maintenance start
+```
+
+### Запускается ли git maintenance в background?
+
+Да. `git maintenance start` регистрирует:
+- На Linux — systemd-timer или cron.
+- На macOS — launchd.
+- На Windows — Task Scheduler.
+
+Каждый час / день / неделю — соответствующая задача.
+
+```bash
+$ git maintenance run --task=loose-objects
+# manual trigger
+```
+
+---
+
+## Профилактика: backup стратегии
+
+### Push as backup
+
+Самый простой backup — **push в remote**:
+
+```bash
+$ git push origin feat/wip
+```
+
+Если local repo умирает — clone снова, восстанови работу с remote.
+
+Для personal experimental branches — push в `personal/<name>/wip-branch`, чтобы не replicate-ить в team-namespace.
+
+### Mirror repos
+
+Для critical репо — mirror на second remote:
+
+```bash
+$ git remote add backup git@gitlab.internal:org/repo-backup.git
+$ git push --mirror backup
+# копирует все refs (branches, tags) в backup remote
+```
+
+Можно автоматизировать в GitHub Actions:
+
+```yaml
+# .github/workflows/mirror.yml
+name: Mirror
+on:
+  push:
+    branches: ['*']
+  delete:
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: git push --mirror git@gitlab.internal:org/repo-backup.git
+        env:
+          SSH_KEY: ${{ secrets.MIRROR_SSH_KEY }}
+```
+
+Каждый push в main GitHub — auto-mirror в second remote. Защита от GitHub-сторонних problems.
+
+### Backup всей `.git`
+
+Для critical локальной работы:
+
+```bash
+$ tar czf ~/backups/repo-$(date +%Y%m%d).tar.gz .git
+```
+
+Скриптом в cron — daily backup. Восстановление: tar zxf.
+
+### OS-level
+
+- macOS Time Machine — daily snapshots.
+- Linux btrfs/zfs — snapshots.
+- Windows Volume Shadow Copy.
+
+Это не Git-specific, но спасает в catastrophic cases.
+
+---
+
+## DE-specific: corrupted dbt artifacts
+
+Не Git, но похожая проблема. `target/` директория dbt:
+
+```bash
+$ dbt run
+Error: 'target/manifest.json' is corrupted
+```
+
+Решение:
+
+```bash
+$ dbt clean
+$ rm -rf target/ logs/
+$ dbt compile
+# regenerated
+```
+
+`target/` — generated artifacts, всегда в `.gitignore`. Корrupt — `dbt clean` лечит.
+
+---
+
+## DE-specific: Airflow scheduler / DB corruption
+
+Аналогично — Airflow metadata DB может corrupt:
+
+```bash
+$ airflow scheduler
+ERROR - Internal database error
+```
+
+Recovery — не Git, а pgrepair или re-init:
+
+```bash
+$ airflow db reset      # ВНИМАНИЕ: удаляет всё! только если был backup
+```
+
+Не Git-проблема — упомянуто для широты картины. Junior должен различать:
+- Corruption в `.git` -> fsck, re-clone.
+- Corruption в `target/` (dbt) -> clean.
+- Corruption в Airflow DB -> backup restore.
+
+---
+
+## Попробуй сам
+
+Имитация corrupt + recovery:
+
+```bash
+$ mkdir corrupt-demo && cd corrupt-demo
+$ git init
+
+# Создаём commits
+$ for i in {1..5}; do
+    echo "v$i" > file.txt
+    git add file.txt
+    git commit -m "v$i"
+  done
+
+# Симулируем lock висящий
+$ touch .git/index.lock
+$ git commit --allow-empty -m "trying"
+# ошибка "Unable to create '.git/index.lock': File exists"
+
+$ rm .git/index.lock
+$ git commit --allow-empty -m "now works"
+# OK
+
+# Симулируем bad index
+$ echo "junk" > .git/index
+$ git status
+# fatal: index file corrupt
+
+$ rm .git/index
+$ git reset
+$ git status
+# OK
+
+# Симулируем bad ref
+$ echo "junk" > .git/refs/heads/main
+$ git log
+# fatal: bad ref 'main'
+
+$ git reflog show main | head -1
+# найдёшь последний SHA
+$ git update-ref refs/heads/main <sha>
+$ git log
+# OK
+```
+
+Не делай это на production репо! Sandbox only.
+
+---
+
+## Killer takeaway
+
+`.git` может coruption из-за: killed git процесса, disk full, fs bug, плохая копия. Диагностика — `git fsck --full`. Lock-файлы (`index.lock`) — самая частая проблема, безопасно delete если нет активного git процесса. Bad index — `rm .git/index; git reset` пересоздаст. Bad ref — `git update-ref` с SHA из reflog. Bad loose object — попробуй fetch, иначе **re-clone**. Bad pack file — re-clone. **Re-clone проще chirurgical fix в 80% случаев** — не геройствуй. Профилактика: `git maintenance start` (auto-optimize), push regularly (= backup), mirror remote для critical репо. На DE — различай Git corruption (fsck/clone) от dbt target/Airflow DB corruption (другие тулы).
+
+<KnowledgeCheck quizSlug="19-recovery/03-corrupted-repo" />

@@ -1,0 +1,501 @@
+---
+title: "git diff: все формы сравнения"
+description: "Working tree vs index, index vs HEAD, между коммитами и ветками; --stat, --name-only, range syntax"
+order: 2
+difficulty: "beginner"
+estimatedTime: 18
+topics: ["Git", "diff", "compare", "index"]
+---
+
+# git diff: все формы сравнения
+
+`git diff` — это инструмент сравнения двух snapshot'ов чего угодно: working tree, index, коммит, ветка. По дефолту `git diff` без аргументов показывает **неstaged изменения** в working tree (то, что ты ещё не сделал `git add`). Но это лишь одна из десятка форм.
+
+В этом уроке мы разбираемся, какие сравнения возможны, как работают `--staged`, `--cached`, range syntax с `..` и `...`, и как использовать `--stat` для быстрого обзора.
+
+---
+
+## Три области и их сравнения
+
+Помнишь три области Git: **working tree**, **index** (staging area), **repository** (HEAD коммит). `git diff` может сравнить любую пару:
+
+<DiagramContainer title="Что с чем сравнивает git diff" color="blue">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-4 justify-center items-center flex-wrap">
+      <DataBox label="working tree" className="border-blue-500/30 w-44">
+        <div className="text-xs">файлы на диске</div>
+      </DataBox>
+      <Tooltip content="git diff (без флагов) — изменения, которые ещё не добавлены в index">
+        <FlowNode variant="default">git diff</FlowNode>
+      </Tooltip>
+      <DataBox label="index (staged)" className="border-zinc-500/30 w-44">
+        <div className="text-xs">staging area</div>
+      </DataBox>
+    </FlowRow>
+    <FlowRow className="gap-4 justify-center items-center flex-wrap">
+      <DataBox label="index (staged)" className="border-zinc-500/30 w-44">
+        <div className="text-xs">staging area</div>
+      </DataBox>
+      <Tooltip content="git diff --staged — что готово к коммиту">
+        <FlowNode variant="default">git diff --staged</FlowNode>
+      </Tooltip>
+      <DataBox label="HEAD" className="border-green-500/30 w-44">
+        <div className="text-xs">последний коммит</div>
+      </DataBox>
+    </FlowRow>
+    <FlowRow className="gap-4 justify-center items-center flex-wrap">
+      <DataBox label="working tree" className="border-blue-500/30 w-44">
+        <div className="text-xs">файлы на диске</div>
+      </DataBox>
+      <Tooltip content="git diff HEAD — все изменения относительно последнего коммита">
+        <FlowNode variant="default">git diff HEAD</FlowNode>
+      </Tooltip>
+      <DataBox label="HEAD" className="border-green-500/30 w-44">
+        <div className="text-xs">последний коммит</div>
+      </DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Разберём каждый вариант.
+
+---
+
+## `git diff`: working tree vs index
+
+Без флагов — показывает изменения, которые ты сделал, **но ещё не добавил** в staging.
+
+```bash
+$ echo "new line" >> src/etl.py
+$ git diff
+diff --git a/src/etl.py b/src/etl.py
+index a1b2c3d..f4e5d6c 100644
+--- a/src/etl.py
++++ b/src/etl.py
+@@ -10,3 +10,4 @@ def process():
+     return data
+
+ # end of file
++new line
+```
+
+Это то, что ты **сделал в файле**, но Git ещё этого не "видит" в смысле "готов к коммиту".
+
+После `git add src/etl.py`:
+
+```bash
+$ git diff
+# (пусто)
+```
+
+Файл теперь в index. `git diff` без флагов больше не показывает его — потому что working tree и index теперь совпадают.
+
+---
+
+## `git diff --staged`: index vs HEAD
+
+Показывает изменения, **готовые к коммиту**. То есть в index, но ещё не в репозитории.
+
+```bash
+$ git add src/etl.py
+$ git diff --staged
+diff --git a/src/etl.py b/src/etl.py
+index a1b2c3d..f4e5d6c 100644
+--- a/src/etl.py
++++ b/src/etl.py
+@@ -10,3 +10,4 @@ def process():
+     return data
+
+ # end of file
++new line
+```
+
+`--staged` и `--cached` — синонимы:
+
+```bash
+git diff --staged
+git diff --cached
+```
+
+Используются они для "проверки перед коммитом": "то, что я сейчас закоммичу, выглядит правильно?".
+
+<Callout type="tip">
+Привычка: **перед каждым `git commit` сделать `git diff --staged`**. Это catches много багов: случайно добавил `console.log()`, оставил `print()` for debug, забыл удалить TODO, и так далее.
+</Callout>
+
+---
+
+## `git diff HEAD`: всё против HEAD
+
+Показывает **все** изменения относительно последнего коммита — и staged, и unstaged.
+
+```bash
+$ git diff HEAD
+```
+
+То есть `git diff HEAD` = `git diff` + `git diff --staged`. Полный обзор "что я ещё не закоммитил".
+
+---
+
+## Сравнение коммитов: `git diff <A> <B>`
+
+```bash
+$ git diff a1b2c3d f4e5d6c
+```
+
+Показывает изменения от коммита A к коммиту B. Можно использовать любые refs: SHA, имена веток, теги, относительные.
+
+```bash
+git diff HEAD~3 HEAD          # последние 3 коммита
+git diff main feature/x       # ветка vs ветка
+git diff v1.0 v1.1            # между тегами
+git diff @{yesterday} HEAD    # что было вчера vs сейчас (если работал)
+```
+
+Один аргумент:
+
+```bash
+git diff main                 # diff текущей ветки относительно main
+```
+
+Это эквивалент `git diff main HEAD` (от main к HEAD).
+
+---
+
+## Range syntax: `..` vs `...`
+
+В `git log` тоже были эти операторы — в `git diff` они работают чуть иначе.
+
+### `git diff A..B` — то же, что `git diff A B`
+
+```bash
+git diff main..feature/x
+git diff main feature/x       # эквивалент
+```
+
+Показывает изменения от верхушки `main` до верхушки `feature/x`.
+
+### `git diff A...B` — diff от merge base до B
+
+```bash
+git diff main...feature/x
+```
+
+Это **отличается** от `..`. Тут Git находит **merge base** двух веток и показывает изменения только в `feature/x` относительно этой точки разделения.
+
+<DiagramContainer title="diff A..B vs A...B" color="purple">
+  <FlowColumn className="p-4 gap-3">
+    <Tooltip content="A..B показывает разницу между двумя верхушками">
+      <DataBox label="A..B" className="border-zinc-500/30 w-full max-w-xl mx-auto">
+        <div className="text-xs font-mono">{'main: M0 -> M1 -> M2'}</div>
+        <div className="text-xs font-mono">{'feature: M0 -> F1 -> F2'}</div>
+        <div className="text-xs">-> показывает diff M2 vs F2</div>
+      </DataBox>
+    </Tooltip>
+    <Arrow direction="down" />
+    <Tooltip content="A...B показывает только то, что добавилось в B относительно общего предка">
+      <DataBox label="A...B" className="border-purple-500/30 w-full max-w-xl mx-auto">
+        <div className="text-xs font-mono">{'main: M0 -> M1 -> M2'}</div>
+        <div className="text-xs font-mono">{'feature: M0 -> F1 -> F2'}</div>
+        <div className="text-xs">-> показывает F1 + F2 (изменения только feature)</div>
+      </DataBox>
+    </Tooltip>
+  </FlowColumn>
+</DiagramContainer>
+
+Когда что использовать:
+
+- `A..B` — "что будет, если я попробую полностью заменить A на B".
+- `A...B` — "что я (в branch B) добавил после того, как разошёлся с A". Это то, что **показывает PR на GitHub**.
+
+В подавляющем большинстве случаев для code review используют `A...B`. Это симметричнее и понятнее.
+
+---
+
+## Только имена файлов: `--name-only` и `--name-status`
+
+Часто не нужен полный diff, а только список изменённых файлов.
+
+```bash
+$ git diff --name-only HEAD~3 HEAD
+src/etl.py
+tests/test_etl.py
+docs/README.md
+```
+
+С статусом изменений (added, modified, deleted):
+
+```bash
+$ git diff --name-status HEAD~3 HEAD
+M	src/etl.py
+A	tests/test_etl.py
+M	docs/README.md
+D	src/old.py
+```
+
+Буквы: M = modified, A = added, D = deleted, R = renamed, C = copied.
+
+Полезно для скриптов: "запусти линтер на всех изменённых файлах":
+
+```bash
+git diff --name-only origin/main...HEAD | xargs flake8
+```
+
+---
+
+## Суммарная статистика: `--stat`
+
+Аналог `git log --stat`, но для произвольного diff:
+
+```bash
+$ git diff --stat HEAD~3 HEAD
+ src/etl.py        | 25 +++++++++++++++++++++++--
+ tests/test_etl.py | 18 ++++++++++++++++++
+ docs/README.md    |  5 +++--
+ 3 files changed, 44 insertions(+), 4 deletions(-)
+```
+
+Полезный обзор перед PR: "сколько строк я меняю?".
+
+`--shortstat` — только итог:
+
+```bash
+$ git diff --shortstat HEAD~3 HEAD
+ 3 files changed, 44 insertions(+), 4 deletions(-)
+```
+
+---
+
+## `--word-diff`: построчно, но по словам
+
+Для текстовых файлов (документация, markdown) построчный diff неудобен. `--word-diff` показывает изменения **на уровне слов**:
+
+```bash
+$ git diff --word-diff
+diff --git a/README.md b/README.md
+@@ -3,5 +3,5 @@
+This is [-old-]{+new+} documentation.
+```
+
+Удобно для рецензирования прозы. Для кода — обычно нет, там важна структура построчно.
+
+---
+
+## Игнорировать whitespace
+
+Если коллега переформатировал файл, и теперь весь diff — это white-space changes:
+
+```bash
+git diff -w           # игнорировать все whitespace
+git diff -b           # игнорировать изменения количества пробелов
+git diff --ignore-blank-lines    # игнорировать пустые строки
+```
+
+`-w` особенно полезен при rebase больших файлов после форматирования.
+
+---
+
+## Output options
+
+### Цвет
+
+По дефолту в терминале — цветно. Для копирования / скриптов:
+
+```bash
+git diff --no-color           # ASCII без цвета
+git diff --color=always       # всегда цвет (даже в pipe)
+```
+
+### Context lines
+
+По дефолту diff показывает 3 строки контекста до и после изменения:
+
+```bash
+git diff -U10                 # 10 строк контекста
+git diff -U0                  # только сами изменения, без контекста
+git diff --unified=10         # длинная форма
+```
+
+---
+
+## Сравнения с подмодулями
+
+```bash
+git diff --submodule=log      # показать diff из submodules как логи коммитов
+git diff --submodule=diff     # показать diff внутри submodules
+```
+
+Полезно когда работаешь с проектами, где есть git submodules — иначе diff показывает только "submodule updated from X to Y".
+
+---
+
+## Сравнение в IDE: `git difftool`
+
+Как мы видели в Module 06, `git difftool` запускает diff в GUI вместо терминала:
+
+```bash
+git difftool                  # working tree vs index
+git difftool --staged         # index vs HEAD
+git difftool HEAD~3 HEAD      # между коммитами
+```
+
+Полезно для крупных diff'ов или когда нужна подсветка синтаксиса.
+
+---
+
+## Реальные сценарии
+
+### Перед коммитом
+
+```bash
+git diff --staged             # точно ли это то, что я хочу закоммитить?
+```
+
+### Перед PR
+
+```bash
+# Полный обзор того, что я добавил
+git diff origin/main...HEAD
+
+# Только список файлов
+git diff --name-only origin/main...HEAD
+
+# Статистика
+git diff --stat origin/main...HEAD
+```
+
+### При ревью коммита коллеги
+
+```bash
+# Показать конкретный коммит как diff
+git show <sha>
+
+# Эквивалент
+git diff <sha>~1 <sha>
+```
+
+### Когда что-то сломалось
+
+```bash
+# Что изменилось с момента последнего рабочего состояния
+git diff <last-known-good-sha> HEAD
+
+# Только определённый файл
+git diff <sha> HEAD -- src/etl.py
+```
+
+### Локальные ещё-не-pushed изменения
+
+```bash
+git diff origin/feature/x..HEAD
+```
+
+---
+
+## Цветовая кастомизация
+
+В `~/.gitconfig`:
+
+```ini
+[color "diff"]
+    meta = yellow
+    frag = magenta bold
+    func = white bold
+    old = red bold
+    new = green bold
+    commit = yellow bold
+    whitespace = red reverse
+```
+
+Дефолтные цвета обычно ок, но это для тех, кто хочет.
+
+### Diff highlight tools
+
+Для лучшего восприятия diff'ов есть утилиты:
+
+- **`diff-so-fancy`** — pretty pipe для `git diff`.
+- **`delta`** (написан на Rust) — современный pager с подсветкой синтаксиса.
+
+```bash
+# Установка delta
+brew install git-delta
+# или
+cargo install git-delta
+
+# Настройка
+git config --global core.pager delta
+git config --global interactive.diffFilter "delta --color-only"
+git config --global delta.navigate true
+git config --global delta.side-by-side true
+```
+
+`delta` особенно полезен для больших diff'ов: подсвечивает изменения внутри строк, поддерживает side-by-side view.
+
+---
+
+## Попробуй сам
+
+```bash
+mkdir diff-demo && cd diff-demo
+git init
+
+# Базовое состояние
+cat > app.py <<EOF
+def hello():
+    print("Hello, world!")
+
+def goodbye():
+    print("Bye")
+EOF
+git add . && git commit -m "init"
+
+# Сделай изменения
+sed -i.bak 's/Hello, world!/Hello, Universe!/' app.py
+echo "" >> app.py
+echo "def main():" >> app.py
+echo "    hello()" >> app.py
+rm app.py.bak
+
+# Сравни working tree vs HEAD
+git diff
+# Видишь diff
+
+# Stage частично
+git add -p app.py
+# Интерактивно: примешь одни блоки, не другие
+
+# Сравни три варианта
+git diff               # unstaged changes
+git diff --staged      # staged changes
+git diff HEAD          # все changes
+
+# Сделай коммит
+git commit -m "update greeting and add main"
+
+# Diff с предыдущим коммитом
+git diff HEAD~1 HEAD
+# Полный diff коммита
+
+# Сделай ветку с другими изменениями
+git switch -c feature
+sed -i.bak 's/main()/run_main()/' app.py && rm app.py.bak
+git commit -am "rename main to run_main"
+
+git switch -
+sed -i.bak 's/Bye/Goodbye, friend!/' app.py && rm app.py.bak
+git commit -am "longer goodbye"
+
+# Сравни ветки
+git diff main feature             # diff между верхушками
+git diff main...feature           # только feature changes относительно merge base
+
+# Только имена файлов
+git diff --name-only main...feature
+```
+
+---
+
+<KnowledgeCheck
+  question="Ты делаешь review PR коллеги. Хочешь увидеть точно 'что коллега добавил в этой ветке, как будто PR ещё не залит в main'. Какой git diff правильный — `main..feature` или `main...feature`, и почему разница важна?"
+  answer="Правильный для review PR — `main...feature` (с тремя точками). Разница: `main..feature` (две точки) показывает diff между верхушками двух веток — что нужно изменить в верхнем коммите main, чтобы получить верхушку feature. Если в main за время работы коллеги были добавлены свои коммиты (например, hotfix), они появятся в diff с минусом — будто feature их удалил. Это сбивает с толку: коллега не удалял этот код, он просто не был в его ветке. `main...feature` (три точки) показывает diff от merge base (точка разделения) до верхушки feature — только то, что коллега добавил относительно момента ветвления. Изменения, произошедшие в main параллельно, не отображаются. Это именно то, что показывает GitHub в 'Files Changed' вкладке PR. Почему важно: при `..` ты увидишь 'минусы' для строк, которые на самом деле не удалены коллегой — он просто работал от старого состояния. Это создаёт ложное впечатление, что review требует обсуждения этих 'удалений'. При `...` ты видишь только реальные изменения коллеги, чисто и однозначно. Дополнительно: эту же логику использует `git request-pull` и GitHub UI. Привыкай к `...` для PR review. Для сравнения 'вот текущее состояние двух веток' — используй `..` (или одну форму через `git diff main feature`)."
+/>

@@ -1,0 +1,387 @@
+---
+title: "git subtree: альтернатива submodule"
+description: "Subtree — встроенный механизм Git без боли submodule. Add, pull, split. Преимущества: вся история в твоём репо, никаких extra шагов для коллег. Недостатки: длинная история, push upstream сложнее"
+order: 3
+difficulty: "intermediate"
+estimatedTime: 22
+topics: ["Git", "subtree", "alternative", "history"]
+---
+
+# git subtree: альтернатива submodule
+
+`git subtree` — менее известный, но мощный механизм Git, который решает ту же задачу, что submodule — включить чужой репо внутрь своего — но без главной боли submodule (нужно `--recurse-submodules`, detached HEAD, забытые push-ы). Идея subtree: **встроить** код external репо прямо в parent, **сохранив историю**. Для пользователей это выглядит как обычная директория с обычными файлами.
+
+В этом уроке: что такое subtree, как добавить и обновлять, преимущества над submodule, и в каких случаях subtree — правильный выбор (а в каких — submodule).
+
+---
+
+## Mental model: subtree merges история
+
+<DiagramContainer title="Submodule vs subtree — две модели" color="blue">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Submodule: ссылка на коммит другого репо. История остаётся в другом репо">
+        <DataBox label="Submodule" className="border-amber-500/30 w-80">
+          <div className="text-xs space-y-1">
+            <div>parent tree содержит gitlink</div>
+            <div>(SHA + URL в .gitmodules)</div>
+            <div>История чужого репо — отдельно</div>
+            <div>Clone: нужны extra шаги</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Subtree: содержимое чужого репо сливается в parent. История становится частью parent">
+        <DataBox label="Subtree" className="border-emerald-500/30 w-80">
+          <div className="text-xs space-y-1">
+            <div>parent tree содержит сами файлы</div>
+            <div>(никаких ссылок)</div>
+            <div>История чужого репо мерджится в parent</div>
+            <div>Clone: всё работает out-of-the-box</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+После `git subtree add` в parent появляется реальная директория (`shared-utils/`) с реальными файлами. Никаких gitlink, никаких `.gitmodules`. С точки зрения Git — это просто файлы parent-а.
+
+При этом subtree merge **сохраняет** историю external репо в parent. Все коммиты `shared-utils` теперь — часть `git log` parent-а.
+
+---
+
+## Команды subtree
+
+`git subtree` встроен в Git (с версии 1.7.11). Не нужна установка.
+
+### Add: подключить external репо
+
+```bash
+# Синтаксис: git subtree add --prefix=<path> <repo-url> <ref> [--squash]
+$ cd my-parent-project
+$ git subtree add --prefix=shared-utils https://github.com/acme/shared-utils.git main --squash
+
+# Что произошло:
+$ ls shared-utils/
+main.py utils.py ...   ← реальные файлы
+
+$ git log --oneline
+def456 Merge commit 'abc123' as 'shared-utils'    ← merge commit
+abc123 Squashed 'shared-utils/' content from commit xyz789
+
+$ git status
+# clean — всё уже commit-нуто
+```
+
+`--squash` важен: без него вся история external репо разворачивается в твою. С `--squash` сворачивается в один commit "Squashed shared-utils content".
+
+Сравни:
+
+```bash
+# Без --squash: вся история shared-utils добавляется
+$ git subtree add --prefix=shared-utils https://github.com/acme/shared-utils.git main
+$ git log --oneline | head -10
+# Куча коммитов из shared-utils + один merge
+
+# С --squash: только один коммит-snapshot
+$ git subtree add --prefix=shared-utils https://github.com/acme/shared-utils.git main --squash
+$ git log --oneline | head -3
+# Squashed commit + merge
+```
+
+Для DE 99% случаев **используй `--squash`**. Иначе твой `git log` забивается чужой историей.
+
+---
+
+### Pull: обновить subtree до latest
+
+```bash
+$ git subtree pull --prefix=shared-utils https://github.com/acme/shared-utils.git main --squash
+```
+
+Это эквивалент: fetch upstream + merge изменений в subtree, ограниченных prefix-ом `shared-utils/`.
+
+Если в parent работа активная, может быть конфликт между твоими изменениями в `shared-utils/` и upstream. Resolve как обычный merge conflict.
+
+Чтобы упростить — добавь URL как remote:
+
+```bash
+# Один раз
+$ git remote add shared-utils-origin https://github.com/acme/shared-utils.git
+
+# Теперь pull проще
+$ git subtree pull --prefix=shared-utils shared-utils-origin main --squash
+```
+
+---
+
+### Push: отправить локальные изменения обратно в upstream
+
+Это **главная сложность** subtree. Допустим, ты в parent отредактировал `shared-utils/main.py` (добавил функцию). Эти изменения коммитятся в parent (вместе с твоими parent-only изменениями). Теперь хочешь отправить только эти изменения в upstream shared-utils.
+
+```bash
+$ git subtree push --prefix=shared-utils https://github.com/acme/shared-utils.git main
+```
+
+Эта команда extract-ит изменения в subtree (через split) и push-ит их в upstream. Под капотом:
+
+1. Делает `git subtree split --prefix=shared-utils` — создаёт новый branch с историей только subtree.
+2. Push-ит этот branch в upstream.
+
+Под капотом subtree split проходит по всей истории и фильтрует commits, которые касаются `shared-utils/`. На больших проектах это **медленно** (минуты для middle-size репо, десятки минут для big).
+
+```bash
+# Альтернативный вариант — split + manual push
+$ git subtree split --prefix=shared-utils -b shared-utils-export
+$ git push https://github.com/acme/shared-utils.git shared-utils-export:main
+```
+
+---
+
+## Преимущества subtree
+
+<DiagramContainer title="Subtree pros" color="emerald">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="После clone parent всё работает — никаких extra команд">
+        <DataBox label="Zero onboarding" className="border-emerald-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>git clone — готово</div>
+            <div>Нет --recurse-submodules</div>
+            <div>Нет detached HEAD</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Файлы реальные в репо, не gitlink">
+        <DataBox label="Real files" className="border-emerald-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>Все commits видят файлы</div>
+            <div>git grep работает</div>
+            <div>IDE indexing — нет проблем</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Не зависит от upstream availability">
+        <DataBox label="Self-contained" className="border-emerald-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>Upstream down — твой код работает</div>
+            <div>Не нужен сетевой доступ к upstream</div>
+            <div>Реально вся история в твоём репо</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Внутри директории — обычная работа Git без branch tricks">
+        <DataBox label="Normal Git" className="border-emerald-500/30 w-72">
+          <div className="text-xs space-y-1">
+            <div>Нет detached HEAD</div>
+            <div>Нет .git внутри</div>
+            <div>Нет extra concepts</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Самое важное — **zero onboarding cost**. Когда коллега клонирует parent, всё работает сразу. Нет ловушек "забыл submodule init". В этом subtree выигрывает у submodule подавляющим преимуществом для большинства команд.
+
+---
+
+## Недостатки subtree
+
+### 1. Раздутая история
+
+Если не использовать `--squash`, история external репо добавляется к твоей parent. Если subtree обновляется регулярно, через год у тебя в `git log` тысячи коммитов из чужого репо.
+
+**Решение**: всегда `--squash` при `add` и `pull`. Тогда каждое обновление subtree — один merge commit, не сотня.
+
+### 2. Push upstream — сложно
+
+`git subtree push` медленный на больших репо. Под капотом split обходит всю историю.
+
+**Решение**: использовать subtree **в основном для одностороннего потребления** (pull updates). Если ты часто пушишь обратно в upstream — submodule может быть удобнее. Или работай напрямую в upstream-репо (cd shared-utils-repo; edit там; commit + push в shared-utils; pull subtree).
+
+### 3. Bumping выглядит как merge commit
+
+В `git log` parent видно "Merge commit ... as 'shared-utils'" — иногда непонятно при беглом взгляде, что это subtree update vs обычный merge.
+
+**Решение**: придерживайся conventional commits style. Subtree pull -> коммит с message `chore(shared-utils): bump to latest`. Тогда в log понятно.
+
+### 4. Размер репо растёт
+
+`--squash` помогает с историей, но содержимое в parent-репо увеличивается. Если subtree большой (десятки MB), это влияет на clone time.
+
+**Решение**: если external репо большой — рассмотри submodule или DVC.
+
+---
+
+## Когда subtree, когда submodule
+
+<DiagramContainer title="Decision matrix: subtree vs submodule" color="indigo">
+  <FlowColumn className="p-4 gap-3">
+    <FlowRow className="gap-3 justify-center flex-wrap">
+      <Tooltip content="Subtree выигрывает когда: minimum hassle для consumers, ты редко contribut-ишь обратно">
+        <DataBox label="Use subtree" className="border-emerald-500/30 w-80">
+          <div className="text-xs space-y-1">
+            <div>Read-mostly (потребляешь updates)</div>
+            <div>Хочешь zero onboarding cost</div>
+            <div>External репо небольшой</div>
+            <div>OK с merge commits в log</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+      <Tooltip content="Submodule выигрывает когда: критичен SHA-pinning, нужно работать в обе стороны, упор на правильную инфраструктуру">
+        <DataBox label="Use submodule" className="border-blue-500/30 w-80">
+          <div className="text-xs space-y-1">
+            <div>Strict SHA pinning важен</div>
+            <div>Часто contribut-ишь обратно</div>
+            <div>External репо большой (не хочется в parent)</div>
+            <div>Команда уже знает submodule workflow</div>
+          </div>
+        </DataBox>
+      </Tooltip>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Конкретные DE-сценарии:
+
+**Subtree подходит**:
+- Включить чужой open-source repo как vendored dependency (например, неmaintain-юмый пакет, который не на PyPI)
+- Shared dbt-utils macros, которые ты иногда обновляешь, но не дорабатываешь
+- Маленькая shared библиотека для нескольких проектов
+
+**Submodule подходит**:
+- Большая shared-library для нескольких projects (parent остаётся стройным)
+- Critical: знать ТОЧНЫЙ SHA для production deploy
+- Multiple teams: одни owns submodule, другие consume
+
+**Ни один не подходит**:
+- Package есть на PyPI -> используй pip
+- Big data -> DVC
+- Tightly coupled -> monorepo
+
+---
+
+## Hands-on: subtree workflow
+
+```bash
+# 1. Создаём parent
+mkdir parent && cd parent
+git init
+echo "# Main project" > README.md
+git add . && git commit -m "init"
+
+# 2. Симулируем external lib
+cd ..
+mkdir extlib && cd extlib
+git init
+echo "def hello(): return 'v1'" > main.py
+git add . && git commit -m "init v1"
+echo "def goodbye(): return 'v1'" >> main.py
+git add . && git commit -m "add goodbye"
+
+# 3. Добавляем как subtree в parent
+cd ../parent
+git subtree add --prefix=extlib ../extlib master --squash
+# (или main, в зависимости от default-branch)
+
+# 4. Что в parent?
+ls
+# README.md   extlib/
+ls extlib/
+# main.py
+
+git log --oneline
+# def456 Merge commit 'abc123' as 'extlib'
+# abc123 Squashed 'extlib/' content from commit ...
+# 789012 init
+
+# Видишь: история сжата (squash) + merge commit
+
+# 5. Симулируй обновление extlib
+cd ../extlib
+echo "def new_func(): return 'v2'" >> main.py
+git add . && git commit -m "add new_func"
+
+# 6. Pull в parent
+cd ../parent
+git subtree pull --prefix=extlib ../extlib master --squash
+
+cat extlib/main.py
+# Видим new_func
+
+git log --oneline
+# Видим merge commit + squashed update
+
+# 7. Симулируй contribution upstream
+echo "def parent_modify(): pass" >> extlib/main.py
+git add extlib/main.py && git commit -m "feat(extlib): add parent_modify"
+
+# Push в upstream — слегка медленнее
+git subtree push --prefix=extlib ../extlib master
+# В реальной жизни URL вместо ../extlib
+
+cd ../extlib
+git log --oneline
+# Видим parent_modify в истории extlib
+```
+
+---
+
+## Real-world example: vendoring через subtree
+
+DE-сценарий: ты используешь маленькую open-source library `tiny-parquet-utils`, которая не на PyPI. Можно:
+
+1. Просто copy-paste файлы — теряется история, нет updates.
+2. Submodule — extra шаги для коллег.
+3. Subtree — реальные файлы + updates через `git subtree pull`.
+
+```bash
+# Вначале
+git subtree add --prefix=vendor/tiny-parquet-utils \
+  https://github.com/community/tiny-parquet-utils.git main --squash
+
+# Раз в месяц обновляешь
+git subtree pull --prefix=vendor/tiny-parquet-utils \
+  https://github.com/community/tiny-parquet-utils.git main --squash
+
+git commit -m "chore(deps): bump tiny-parquet-utils to v1.5"
+
+# Поправил bug в vendored код, хочешь contribute upstream
+git subtree push --prefix=vendor/tiny-parquet-utils \
+  https://github.com/yourname/tiny-parquet-utils.git fix-branch
+```
+
+Это vendoring with maintenance — лучшее из обоих миров.
+
+---
+
+## Cross-link
+
+- **Урок 01-02** — submodules как альтернатива
+- **Урок 04** — git worktrees (другой механизм)
+- **Модуль 14** — DVC для data, не subtree
+- **Модуль 11** — Pull Requests; subtree push требует PR в upstream
+
+---
+
+## TL;DR
+
+- Subtree — встроить external репо в parent с сохранением истории.
+- `git subtree add --prefix=X URL branch --squash` — добавить.
+- `git subtree pull --prefix=X URL branch --squash` — обновить.
+- `git subtree push --prefix=X URL branch` — push изменений upstream (медленно).
+- Преимущества: zero onboarding cost, real files, self-contained.
+- Недостатки: длинная история без squash, медленный push.
+- Использовать: vendoring read-mostly external code, маленькие shared utils.
+- НЕ использовать: package на PyPI (используй pip), big data (DVC), tight coupling (monorepo).
+
+---
+
+<KnowledgeCheck
+  question="У тебя в repo dbt project и shared-dbt-macros от другой команды. Эта macros library используется только тобой (твоя команда — единственный consumer), редко обновляется, и ты иногда находишь баги и хочешь fix-ить. Submodule, subtree или pip-package? Аргументируй."
+  answer="Subtree — оптимальный выбор для этого сценария. Аргументы: (1) Single consumer — ты единственная команда, нет много project, которые нужно бы синхронизировать с одной версией. Это упрощает требования. (2) Read-mostly с occasional contribution — subtree pull для updates, occasional `git subtree push` для fixes. Submodule strength (SHA-pinning для multiple consumers) тут не релевантна. (3) DBT macros — обычно небольшие (десятки KB), не раздуют parent репо. (4) Zero onboarding — твоя команда клонирует dbt project, всё работает immediately. Нет нужды в `--recurse-submodules` доку. (5) Real files — IDE автоматически indexит macros, jump-to-definition работает. С submodule некоторые IDE имеют проблемы с навигацией через gitlinks. Альтернативы и почему не они: (a) Submodule — overhead для single team. detached HEAD, --recurse-submodules — ничего из этого не нужно для read-mostly scenario. Submodule выигрывает только если бы macros использовали 5+ проектов с строгим pin'ингом. (b) Pip-package — для dbt macros не работает. dbt macros используют jinja-templates с .sql/.yml файлами, packaging как pip — не стандартный. Можно сделать dbt_package (модуль dbt), но это complex setup для маленькой library. Прямой включение в репо — проще. (c) Vendoring без Git — копировать файлы вручную. Теряется history of updates, fixes ломаются. (d) Monorepo с macros — не подходит если macros развиваются другой командой. Setup: `git subtree add --prefix=shared-macros https://github.com/acme/shared-dbt-macros.git main --squash`. Раз в месяц: `git subtree pull ... --squash`. Если fix bug: edit в parent -> `git subtree push ...` чтобы поделиться с upstream. В commit messages — conventional format ('chore(macros): bump to latest', 'fix(macros): handle null edge case')."
+/>

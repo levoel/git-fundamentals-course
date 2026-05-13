@@ -1,0 +1,442 @@
+---
+title: "Три дерева: working tree, index, repository"
+description: "Ключевой концепт Git: working tree (файлы на диске), index/staging (между файлами и репо), HEAD (последний commit). Без этого не понять ничего"
+order: 1
+difficulty: "beginner"
+estimatedTime: 22
+topics: ["Git", "Three trees", "Working tree", "Index", "Staging", "HEAD"]
+---
+
+# Три дерева: working tree, index, repository
+
+Это самый важный урок всего курса. Если вы поймёте концепцию three trees — все остальные модули будут лёгкими. Если не поймёте — каждый раз, когда возникнет нестандартная ситуация (особенно при `git reset`, `git restore`, конфликтах), вы будете теряться.
+
+Когда люди говорят «Git сложный», в 90% случаев они на самом деле имеют в виду: «я не понимаю, что такое index и зачем он нужен». В этом уроке разберём концептуально, что такое три дерева, почему так устроено, и какие команды между какими деревьями двигают данные.
+
+---
+
+## Что такое «дерево» в Git
+
+В этом контексте «дерево» означает **состояние файловой системы**: набор файлов и директорий со своими содержимыми. Не путать с tree-объектом Git (это конкретный тип объекта внутри Git, мы разберём в уроке 5). Здесь «дерево» — это абстрактное состояние.
+
+В Git одновременно существуют **три** таких состояния (дерева):
+
+<DiagramContainer title="Три дерева Git" color="indigo" description="Это ключевой концепт. Запомните его навсегда.">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Working Tree" variant="highlight" tooltip="Файлы, которые вы видите в файловом менеджере / редакторе. То, что лежит в директории проекта (кроме .git/). Это реальные файлы, которые вы редактируете">Working tree</DataBox>
+      <Arrow direction="right" label="git add" />
+      <DataBox label="Index (Staging)" variant="highlight" tooltip="Промежуточное состояние. «Что попадёт в следующий commit». Физически — файл .git/index в бинарном формате. Готовится снимок перед коммитом">Index / Staging</DataBox>
+      <Arrow direction="right" label="git commit" />
+      <DataBox label="HEAD / Repository" variant="highlight" tooltip="Последний commit, указатель на который — HEAD. Это уже зафиксированная история. После коммита Index синхронизирован с HEAD">HEAD</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Звучит абстрактно? Сейчас разберём каждое дерево в подробностях.
+
+---
+
+## Working Tree: что вы видите глазами
+
+**Working tree** (рабочее дерево) — это то, что видно в файловом менеджере. Если вы откроете директорию проекта и посмотрите файлы — это и есть working tree. Каждый раз, когда вы редактируете файл в редакторе и сохраняете — вы меняете working tree.
+
+```bash
+# Создали проект
+mkdir my-project && cd my-project
+echo "print('hello')" > main.py
+echo "# My Project" > README.md
+
+# Working tree:
+ls
+# main.py  README.md
+```
+
+Эти два файла — это working tree. Они физически лежат на диске. Я могу удалить main.py через `rm main.py` — это меняет working tree. Я могу открыть main.py в редакторе, добавить строку и сохранить — это тоже меняет working tree.
+
+Working tree не зависит от Git. Эти файлы — обычные файлы операционной системы. Git их «знает» (если они в репозитории), но не контролирует.
+
+---
+
+## Index (он же Staging Area): промежуточное состояние
+
+Тут начинается отличие Git от других VCS. В большинстве систем (SVN, Mercurial) есть два состояния: working copy и committed history. В Git между ними есть **третье** — index.
+
+**Index** — это «снимок, который вы готовите для следующего commit». Он лежит в файле `.git/index` (бинарный формат). Содержит список файлов с их SHA-1 хешами.
+
+<DiagramContainer title="Index — между working tree и commit" color="purple">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Working tree" tooltip="main.py с 30 строками кода">main.py (30 строк)</DataBox>
+      <Arrow direction="right" label="git add main.py" />
+      <DataBox label="Index" tooltip="Снимок: main.py 30 строк (тот же, что в working tree сейчас)">main.py (snapshot)</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Working tree" tooltip="Вы изменили main.py — теперь 35 строк (добавили функцию)">main.py (35 строк)</DataBox>
+      <Arrow direction="right" label="git status показывает" />
+      <DataBox label="Index" variant="warning" tooltip="Index всё ещё содержит снимок на 30 строк. Изменения в working tree НЕ автоматически попадают в index">Stale: 30 строк</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Working tree" tooltip="35 строк">main.py (35 строк)</DataBox>
+      <Arrow direction="right" label="git add main.py" />
+      <DataBox label="Index" tooltip="Обновился до текущей версии">main.py (35 строк)</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Зачем это нужно? В CVCS commit просто записывает всё, что есть на диске. В Git вы можете точно выбирать, что попадает в commit:
+
+- У вас есть 5 изменённых файлов
+- Логически они относятся к двум разным задачам: 2 файла — баг-фикс, 3 файла — новая фича
+- Вы можете сделать `git add` только на 2 файла для багфикса
+- `git commit` — commit с только этими 2 файлами в нём
+- Дальше `git add` на остальные 3 файла, `git commit` — второй коммит для фичи
+
+Это и есть **selective commit**: вы создаёте логически чистую историю, даже когда в работе много разного одновременно. В SVN такого нет — там commit пишет ровно то, что на диске.
+
+Кроме того, через `git add -p` (interactive) можно добавлять в index не весь файл целиком, а отдельные **куски** (hunks) из файла. Это позволяет один файл, в котором два логических изменения, разнести по двум коммитам.
+
+<Callout type="tip">
+Index — это первое концептуальное место, где junior спотыкаются. Чтобы привыкнуть, представьте index как «корзину», в которую вы кладёте товары перед оплатой. Working tree — это магазин (что есть). Index — корзина (что я готовлю к покупке). Commit — оплата (зафиксировал покупку). Между этими тремя состояниями есть граница.
+</Callout>
+
+---
+
+## HEAD: указатель на последний commit
+
+**HEAD** — это «текущий коммит». Это специальная ссылка в Git, указывающая на коммит, в котором вы сейчас находитесь. Когда вы на ветке main и последний коммит — `a1b2c3...`, HEAD указывает на `a1b2c3...`.
+
+HEAD физически — это файл `.git/HEAD`:
+
+```bash
+cat .git/HEAD
+# ref: refs/heads/main
+```
+
+Это указатель на ветку. А ветка — файл с SHA коммита:
+
+```bash
+cat .git/refs/heads/main
+# a1b2c3d4e5f6...
+```
+
+После `git commit` HEAD автоматически обновляется на новый коммит. После `git switch <branch>` HEAD меняется на ветку.
+
+В контексте «трёх деревьев» HEAD — это **состояние дерева, как было в последнем коммите**. Когда мы говорим «сравнить с HEAD», мы имеем в виду: сравнить с тем, что было в последнем коммите.
+
+<DiagramContainer title="HEAD как указатель на текущий commit" color="emerald">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label=".git/HEAD" tooltip="Файл, содержащий 'ref: refs/heads/main' — указатель на ветку">HEAD file</DataBox>
+      <Arrow direction="right" label="указывает на" />
+      <DataBox label=".git/refs/heads/main" tooltip="Файл ветки, содержит SHA коммита">main branch</DataBox>
+      <Arrow direction="right" label="указывает на" />
+      <DataBox label="commit a1b2c3..." tooltip="Объект коммита в .git/objects/. Содержит ссылку на tree-объект (snapshot файлов)">commit</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+В упрощённом виде: «HEAD = последний commit, в котором вы находитесь». Когда мы делаем `git commit`, новый коммит создаётся, HEAD двигается на него.
+
+---
+
+## Как команды перемещают данные между деревьями
+
+Главные команды Git — это перемещения данных между working tree, index и HEAD. Понимание, какая команда что делает — это понимание Git.
+
+<DiagramContainer title="Команды Git и перемещения между деревьями" color="amber">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Working tree" tooltip="Файлы на диске">WT</DataBox>
+      <Arrow direction="right" label="git add" />
+      <DataBox label="Index" tooltip="Что попадёт в следующий commit">Index</DataBox>
+      <Arrow direction="right" label="git commit" />
+      <DataBox label="HEAD" tooltip="Зафиксированный последний коммит">HEAD</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Working tree" tooltip="Текущее состояние">WT</DataBox>
+      <Arrow direction="left" label="git restore <file>" />
+      <DataBox label="Index" tooltip="Восстанавливает файл в WT из index">Index</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Working tree" tooltip="Текущее">WT</DataBox>
+      <Arrow direction="left" label="git restore --staged <file>" />
+      <DataBox label="Index" tooltip="Убирает файл из index, оставляет WT нетронутым">Index</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="git diff" tooltip="Без аргументов — diff между WT и index">WT ↔ Index</DataBox>
+      <DataBox label="git diff --staged" tooltip="Diff между index и HEAD">Index ↔ HEAD</DataBox>
+      <DataBox label="git diff HEAD" tooltip="Diff между WT и HEAD (объединяет два предыдущих)">WT ↔ HEAD</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Ключевые операции:
+
+- **`git add <file>`** — копирует файл из working tree в index (готовит к коммиту)
+- **`git commit`** — записывает index как новый commit, обновляет HEAD
+- **`git restore <file>`** — копирует файл из index в working tree (отменяет изменения в WT)
+- **`git restore --staged <file>`** — убирает файл из index (но оставляет в working tree). Эквивалент `git reset HEAD <file>`
+- **`git diff`** — без аргументов сравнивает WT и index (что изменилось, но ещё не добавлено)
+- **`git diff --staged`** — сравнивает index и HEAD (что добавлено, готово к commit)
+- **`git diff HEAD`** — сравнивает WT и HEAD (всё изменённое — и в WT, и в index)
+
+---
+
+## Пример: пошаговый обзор
+
+Давайте проследим, как меняются три дерева при типичной работе.
+
+### Шаг 1: Создаём файл
+
+```bash
+mkdir three-trees-demo && cd three-trees-demo
+git init
+echo "hello world" > a.txt
+```
+
+Состояние:
+
+<DiagramContainer title="Шаг 1: новый файл a.txt" color="indigo">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Working tree" tooltip="a.txt существует с содержимым 'hello world'" variant="highlight">a.txt: hello world</DataBox>
+      <DataBox label="Index" tooltip="Пусто — нет ни одного файла">(empty)</DataBox>
+      <DataBox label="HEAD" tooltip="Пусто — нет ни одного коммита">(empty)</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+`git status`:
+
+```text
+On branch main
+No commits yet
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	a.txt
+```
+
+«Untracked» — Git видит файл, но не отслеживает его (не в index).
+
+### Шаг 2: git add
+
+```bash
+git add a.txt
+```
+
+<DiagramContainer title="Шаг 2: git add a.txt" color="indigo">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Working tree" tooltip="a.txt: hello world">a.txt: hello world</DataBox>
+      <DataBox label="Index" variant="highlight" tooltip="a.txt: hello world (тот же снимок)">a.txt: hello world</DataBox>
+      <DataBox label="HEAD" tooltip="Пусто">(empty)</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+`git status`:
+
+```text
+On branch main
+No commits yet
+Changes to be committed:
+	new file:   a.txt
+```
+
+Теперь файл в index. Готов к commit.
+
+### Шаг 3: git commit
+
+```bash
+git commit -m "Add a.txt"
+```
+
+<DiagramContainer title="Шаг 3: git commit" color="indigo">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Working tree" tooltip="a.txt: hello world">a.txt: hello world</DataBox>
+      <DataBox label="Index" tooltip="a.txt: hello world">a.txt: hello world</DataBox>
+      <DataBox label="HEAD" variant="highlight" tooltip="Создан коммит с этим состоянием. HEAD указывает на него">a.txt: hello world</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+`git status`:
+
+```text
+On branch main
+nothing to commit, working tree clean
+```
+
+Все три дерева синхронизированы.
+
+### Шаг 4: Изменяем файл в WT
+
+```bash
+echo "hello world, modified" > a.txt
+```
+
+<DiagramContainer title="Шаг 4: изменили в working tree" color="indigo">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Working tree" variant="warning" tooltip="a.txt: hello world, modified — изменилось!">a.txt: ...modified</DataBox>
+      <DataBox label="Index" tooltip="Всё ещё старая версия a.txt: hello world">a.txt: hello world</DataBox>
+      <DataBox label="HEAD" tooltip="a.txt: hello world (последний коммит)">a.txt: hello world</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+`git status`:
+
+```text
+On branch main
+Changes not staged for commit:
+	modified:   a.txt
+```
+
+WT отличается от index. Изменения не staged (не добавлены в index).
+
+### Шаг 5: git add, потом ещё изменения в WT
+
+```bash
+git add a.txt
+echo "hello world, modified TWICE" > a.txt
+```
+
+<DiagramContainer title="Шаг 5: добавили в index, потом ещё раз изменили WT" color="indigo">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Working tree" variant="warning" tooltip="a.txt: ...modified TWICE — изменилось снова">a.txt: ...TWICE</DataBox>
+      <DataBox label="Index" tooltip="a.txt: ...modified (то, что мы добавили git add-ом)" variant="highlight">a.txt: ...modified</DataBox>
+      <DataBox label="HEAD" tooltip="a.txt: hello world">a.txt: hello world</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Все три дерева отличаются! `git status`:
+
+```text
+On branch main
+Changes to be committed:
+	modified:   a.txt
+Changes not staged for commit:
+	modified:   a.txt
+```
+
+«modified» в обеих секциях для одного файла — это означает, что одна версия в index, другая в working tree.
+
+`git diff`:
+
+```text
+diff --git a/a.txt b/a.txt
+index ad...
+--- a/a.txt
++++ b/a.txt
+@@ -1 +1 @@
+-hello world, modified
++hello world, modified TWICE
+```
+
+Diff между index и WT.
+
+`git diff --staged`:
+
+```text
+diff --git a/a.txt b/a.txt
+index 3b...ad
+--- a/a.txt
++++ b/a.txt
+@@ -1 +1 @@
+-hello world
++hello world, modified
+```
+
+Diff между HEAD и index.
+
+Тот, кто понимает эту картину, понимает Git.
+
+---
+
+## Mental model для запоминания
+
+Запоминать через метафору магазина:
+
+<DiagramContainer title="Метафора магазина" color="rose">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Магазин" tooltip="Все товары на полках. Можно брать, класть обратно, рассматривать. Аналог Working tree">Working tree</DataBox>
+      <Arrow direction="right" label="кладёте в корзину" />
+      <DataBox label="Корзина" tooltip="Промежуточный набор. То, что вы решили купить. Можно вернуть товары на полку. Аналог Index">Index</DataBox>
+      <Arrow direction="right" label="оплата" />
+      <DataBox label="Чек" tooltip="Зафиксированная покупка. После оплаты — финальное состояние. Аналог Commit / HEAD">Commit</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+- Working tree — магазин: все товары доступны, можете трогать.
+- Index — корзина: то, что вы готовите к оплате. Можете класть в корзину (`git add`), возвращать на полку (`git restore --staged`).
+- HEAD — чек: финальная фиксация покупки. После оплаты товары в чеке. Следующая покупка начинается с пустой корзины, но магазин полон.
+
+Эта метафора объясняет:
+
+- Зачем нужен index: чтобы выбирать, что вы покупаете. Без него — оплата всего, что трогали в магазине.
+- Почему `git add` нужен повторно при каждом изменении: вы клали этот товар в корзину раньше, потом взяли его обратно (изменили) — нужно положить заново.
+- Почему `git commit` фиксирует только то, что в index: оплата покупает то, что в корзине, а не всё, что в магазине.
+
+---
+
+## В следующих уроках
+
+В следующих уроках разберём конкретно, что происходит при `git init` (что появилось в `.git/`), при `git add`/`git commit`/`git status` (детально), что такое anatomy of commit (объект внутри), и какие объекты вообще существуют (blob, tree, commit, tag).
+
+Но если из этого урока вы вынесли «три дерева, три состояния, между ними команды двигают данные» — фундамент заложен. Все остальные модули будут на этом фундаменте.
+
+---
+
+## Попробуй сам
+
+Проверьте понимание на собственной машине. Создайте песочницу и пройдите пошагово:
+
+```bash
+mkdir -p ~/git-sandbox/lesson-03-trees
+cd ~/git-sandbox/lesson-03-trees
+git init
+
+# Шаг 1: новый файл — только в WT
+echo "first" > a.txt
+git status  # Untracked
+
+# Шаг 2: добавили в index
+git add a.txt
+git status  # Changes to be committed
+
+# Шаг 3: коммит — все три синхронизированы
+git commit -m "Add a.txt"
+git status  # nothing to commit
+
+# Шаг 4: изменили — отличается только WT от index
+echo "second" > a.txt
+git status  # Changes not staged
+git diff    # покажет diff WT vs index
+
+# Шаг 5: добавили в index, изменили снова в WT
+git add a.txt
+echo "third" > a.txt
+git status  # И modified, и Changes to be committed
+git diff           # WT vs index: second -> third
+git diff --staged  # index vs HEAD: first -> second
+
+# Шаг 6: коммит — теперь HEAD == index, но WT отличается
+git commit -m "Update to second"
+git status  # Changes not staged (только WT отличается)
+```
+
+Прокатите всю последовательность, посмотрите вывод каждой команды. Если в какой-то момент `git status` неочевиден — вернитесь к схеме трёх деревьев.
+
+---
+
+<KnowledgeCheck
+  question="Зачем в Git нужен index/staging? Почему нельзя сделать как в SVN — `git commit` просто фиксирует всё, что изменилось на диске?"
+  answer="Index даёт selective commit — вы выбираете, что попадает в коммит. Реальная ситуация: вы работаете над фичей, в процессе замечаете и фиксите баг в другом файле. Без index у вас будет коммит «implement feature + fix bug» — нечитаемая история. С index вы можете: 1) `git add` только баг-фикс файл, 2) `git commit -m 'fix: NPE in auth'`, 3) `git add` файлы фичи, 4) `git commit -m 'feat: add OAuth flow'`. Два чистых, логически согласованных коммита. Дальше: через `git add -p` можно добавлять не весь файл, а конкретные куски — позволяет один файл с двумя изменениями разнести по двум коммитам. Это не косметика — это инструмент для создания читаемой истории, по которой через год можно понять, кто, когда и зачем что менял. И ещё: index позволяет проверять снапшот, прежде чем коммитить (через `git diff --staged`). В SVN снапшот вы видите только постфактум."
+/>

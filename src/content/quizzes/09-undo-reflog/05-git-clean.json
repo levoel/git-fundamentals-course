@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "09-undo-reflog/05-git-clean",
+  "moduleId": "09-undo-reflog",
+  "_meta": { "idPrefix": "git-m09-05" },
+  "questions": [
+    {
+      "id": "git-m09-05-q1",
+      "type": "multiple-choice",
+      "question": "Зачем нужна команда git clean, когда есть git restore / reset?",
+      "options": [
+        { "id": "a", "text": "Это синоним для git reset --hard" },
+        { "id": "b", "text": "git restore/reset работают только с tracked файлами. git clean удаляет UNTRACKED файлы — те, что никогда не были в коммите/index. Нужен для уборки build artifacts (__pycache__, dist/), временных скриптов, output файлов, оставшихся после экспериментов" },
+        { "id": "c", "text": "Работает только в bare-репозитории" },
+        { "id": "d", "text": "Удаляет .git/" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Разные namespace: restore/reset -> tracked файлы (Git их знает). clean -> untracked / ignored. Часто после Python экспериментов остаются __pycache__/, *.pyc, output.csv, tmp_test.py — ни одного из них в репо нет. git restore их не уберёт (он работает только с tracked). git clean -fd удалит все untracked + директории, очистив working tree до 'только tracked'.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m09-05-q2",
+      "type": "multiple-choice",
+      "question": "Что делает `git clean -fdx`?",
+      "options": [
+        { "id": "a", "text": "Удалит только tracked файлы" },
+        { "id": "b", "text": "-f force (реально удалить), -d включая директории, -x включая файлы из .gitignore. Результат: всё что НЕ tracked — удалено. Это самый агрессивный вариант, после него working tree содержит ТОЛЬКО tracked файлы" },
+        { "id": "c", "text": "Делает только dry-run" },
+        { "id": "d", "text": "Не трогает .gitignore файлы" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Флаги: -f force (обязателен для реального удаления, защита от случайностей), -d включить директории (иначе только файлы), -x включить ignored (по умолчанию ignored файлы из .gitignore не трогаются). Комбинация = total cleanup. После git clean -fdx + git reset --hard HEAD working tree точно как сразу после fresh git clone. Опасно — все uncommitted эксперименты исчезают без шанса восстановления.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m09-05-q3",
+      "type": "multiple-choice",
+      "question": "Хочется почистить только build artifacts (то что в .gitignore: __pycache__, dist/, *.log), не трогая новые незакоммиченные файлы. Команда?",
+      "options": [
+        { "id": "a", "text": "git clean -fdx" },
+        { "id": "b", "text": "git clean -fdX — большая X означает 'ТОЛЬКО ignored файлы'. Малая x — 'untracked + ignored'. Большая X — exclusive только ignored. Безопасно для новых рабочих файлов которые не в .gitignore (например, новый DAG который пишешь)" },
+        { "id": "c", "text": "git clean -f" },
+        { "id": "d", "text": "rm -rf __pycache__/ dist/" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Mnemonic: маленькая x — extend (untracked + ignored). Большая X — eXclusive (только ignored). -fdX полезен перед коммитом для уборки build кэша без риска удалить незакоммиченную рабочую версию нового файла. Например ты пишешь dags/new_dag.py — он untracked, но не в gitignore. -fdx его удалит, -fdX оставит.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m09-05-q4",
+      "type": "multiple-choice",
+      "question": "Почему перед git clean -f рекомендуется всегда сначала git clean -n?",
+      "options": [
+        { "id": "a", "text": "-n кэширует операцию" },
+        { "id": "b", "text": "-n (--dry-run) показывает что БУДЕТ удалено, без реального удаления. Удаление через clean необратимо — reflog не помогает (untracked файлы никогда не были в Git tracking). Один опечаточный флаг или забытый файл -> потеря работы без шанса восстановления. Привычка -n спасает работу" },
+        { "id": "c", "text": "-n требует подтверждения после" },
+        { "id": "d", "text": "-n очищает кэш Git" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Reflog работает только с tracked объектами (commit-уровень). Untracked файл удалённый clean -> вне Git tracking, вне reflog, вне любого Git recovery механизма. Путь восстановления только через файловую систему (Trash на macOS, иногда — нет). Привычка 'сначала -n, посмотрел список, потом -f' — single most important habit для clean. Альтернатива: интерактивный -i mode с подтверждением каждого файла.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m09-05-q5",
+      "type": "true-false",
+      "question": "git clean без флагов сразу удаляет untracked файлы.",
+      "correctAnswer": false,
+      "explanation": "Нет. По умолчанию Git защищает себя через config `clean.requireForce=true`: команда без -f, -i или -n отказывается работать и ругается 'refusing to clean'. Это умное защитное поведение — нельзя случайно стереть работу одним опечаточным git clean. Чтобы реально удалить, нужен явный -f или интерактивный -i. Конфиг можно отключить (git config clean.requireForce false), но не стоит — лучше всегда явно указывать намерение.",
+      "bloomLevel": "conceptual"
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "lessonSlug": "08-history-inspection/01-git-log",
+  "moduleId": "08-history-inspection",
+  "_meta": { "idPrefix": "git-m08-01" },
+  "questions": [
+    {
+      "id": "git-m08-01-q1",
+      "type": "multiple-choice",
+      "question": "Какая команда показывает компактный лог с графом всех веток?",
+      "options": [
+        { "id": "a", "text": "git log --full-graph" },
+        { "id": "b", "text": "git log --oneline --graph --all" },
+        { "id": "c", "text": "git tree" },
+        { "id": "d", "text": "git history visual" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`git log --oneline --graph --all`: (1) `--oneline` — каждый коммит в одну строку (короткий SHA + subject), (2) `--graph` — ASCII визуализация графа веток и merge commits (звёздочки и линии), (3) `--all` — показать все ветки, не только текущую. Это must-have команда для понимания структуры репозитория. Часто сохраняют как alias `lg`: `git config --global alias.lg \"log --oneline --graph --all --decorate\"`. Сравни с `git log --graph --all --decorate --format=...` для красивых цветных форматов.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m08-01-q2",
+      "type": "multiple-choice",
+      "question": "В чём разница между флагами `-S` и `-G` в git log?",
+      "options": [
+        { "id": "a", "text": "Это синонимы" },
+        { "id": "b", "text": "-S 'string' — ищет коммиты, в которых изменилось количество вхождений точной строки (появилась/исчезла). -G 'regex' — поддерживает regex, ловит любое касание строки, соответствующей паттерну" },
+        { "id": "c", "text": "-S для save, -G для git" },
+        { "id": "d", "text": "-S быстрее, -G медленнее, но результат одинаковый" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Разница: (1) **`-S \"string\"`** — это 'pickaxe'. Ищет коммиты, в которых **изменилось количество вхождений** точной строки в файлах. Идеально для 'когда добавили эту функцию' или 'когда удалили этот workaround'. Не ловит cosmetic touches. (2) **`-G \"regex\"`** — regex по diff'у. Ловит **любое касание** строки, соответствующей паттерну, даже если количество вхождений не изменилось (например, переформатирование). Мощнее, но медленнее. Pickaxe (`-S`) — основной инструмент DE-расследования.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m08-01-q3",
+      "type": "true-false",
+      "question": "`git log --follow -- src/etl.py` показывает историю файла, включая периоды, когда он назывался по-другому (через переименования).",
+      "correctAnswer": "true",
+      "explanation": "`--follow` инструктирует Git следить за переименованиями файла. Если `src/etl.py` раньше назывался `src/extract.py` или `etl/main.py`, лог продолжится в историю старого имени. Без `--follow` история обрывается на коммите переименования. Ограничение: работает только с **одним** файлом, не с директорией. Алгоритм rename detection — на основе содержания файла (если 80%+ совпадение), не имени. Иногда можно усилить через `git config diff.renames copy` или флаги `-M50%`.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m08-01-q4",
+      "type": "multiple-choice",
+      "question": "Что покажет команда `git log --author='alice' --since='1 week ago' --oneline`?",
+      "options": [
+        { "id": "a", "text": "Только коммиты, в сообщении которых упомянута Alice" },
+        { "id": "b", "text": "Коммиты автора 'alice' (или совпадение по подстроке в имени/email), сделанные за последнюю неделю, в компактном формате" },
+        { "id": "c", "text": "Все ветки Alice" },
+        { "id": "d", "text": "Файлы, которые Alice трогала" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Это типичный 'weekly summary' запрос: (1) `--author='alice'` — фильтр по author name/email (подстрока, не точное), регексные шаблоны поддерживаются. (2) `--since='1 week ago'` — временной фильтр, поддерживает 'yesterday', '2 days ago', '2.weeks', date in YYYY-MM-DD. (3) `--oneline` — компактный формат: SHA + subject. Полезно для подведения итогов: 'что сделал коллега за неделю', для own retrospective: `git log --author=$USER --since='1 month ago' --oneline | wc -l` (количество своих коммитов за месяц).",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m08-01-q5",
+      "type": "multiple-choice",
+      "question": "Какой полезный alias стоит добавить для красивого log?",
+      "options": [
+        { "id": "a", "text": "git config --global alias.lg 'log --graph --pretty=format:\"%C(yellow)%h%Creset %s %C(green)(%cr) %C(blue)<%an>%Creset\" --abbrev-commit'" },
+        { "id": "b", "text": "git config --global alias.log 'log --quiet'" },
+        { "id": "c", "text": "git config alias.commit-history 'history'" },
+        { "id": "d", "text": "Aliases не нужны, дефолт хорош" }
+      ],
+      "correctAnswer": "a",
+      "explanation": "Полезный alias `lg`: цветной граф с SHA, subject, relative date и автором в одну строку. Placeholders: `%h` — короткий SHA (yellow), `%s` — subject, `%cr` — committer relative date 'a hour ago' (green), `%an` — author name (blue). Команды короткие, удобные. Также популярны: `git config --global alias.last 'log -1 HEAD --stat'`, `alias.week 'log --since=\"1 week ago\" --oneline --author=\"$USER\"'`, `alias.today 'log --since=midnight --oneline'`. Aliases — must-have для повседневной продуктивности.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

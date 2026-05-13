@@ -1,0 +1,78 @@
+{
+  "moduleId": "03-three-trees",
+  "_meta": { "idPrefix": "git-m03-exam" },
+  "questions": [
+    {
+      "id": "git-m03-exam-q1",
+      "type": "multiple-choice",
+      "question": "Junior выполнил `git init` в пустой папке и сделал `ls -la .git/`. Какое описание содержимого .git/ наиболее точно?",
+      "options": [
+        { "id": "a", "text": ".git/ хранит только последний commit и diff-файлы." },
+        { "id": "b", "text": "objects/ — content-addressable хранилище (blobs/trees/commits/tags), refs/heads/ — указатели веток, refs/tags/ — теги, HEAD — указатель на текущую ветку, index — staging area (binary), config — local config, hooks/ — sample-скрипты. Это вся ваша история и состояние репо." },
+        { "id": "c", "text": ".git/ — это просто кеш для GitHub, можно удалить и склонировать заново." },
+        { "id": "d", "text": ".git/ содержит копию рабочей директории для отката изменений." }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Вариант (b) описывает реальную структуру: objects/ — все версии всех файлов, refs/ — указатели (sha) на коммиты для веток/тегов, HEAD — указатель на текущую позицию, index — staging, config — local конфиг, hooks/ — sample-скрипты. Вариант (a) — Git хранит ВСЮ историю, не только последний коммит; (c) — удаление .git/ = удаление репозитория (история, локальные ветки, не запушенные коммиты пропадут); (d) — .git/ хранит history в виде объектов, а не копию working tree.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m03-exam-q2",
+      "type": "multiple-choice",
+      "question": "Junior изменил файл `pipeline.py` и сделал `git add pipeline.py`. Что физически произошло в .git/ и в каком из 'трёх деревьев'?",
+      "options": [
+        { "id": "a", "text": "Файл скопирован в .git/staging/, working tree остался без изменений." },
+        { "id": "b", "text": "В .git/objects/ создан новый blob-объект с SHA от содержимого pipeline.py (если такого blob ещё нет). Index (.git/index) обновлён: запись для pipeline.py теперь указывает на новый blob SHA. HEAD/working tree не тронуты." },
+        { "id": "c", "text": "Создан новый commit с этим файлом и записан в HEAD." },
+        { "id": "d", "text": "Файл удалён из working tree и помещён в staging." }
+      ],
+      "correctAnswer": "b",
+      "explanation": "`git add` делает две вещи: (1) хеширует содержимое файла -> создаёт blob в .git/objects/ если такого SHA ещё нет; (2) обновляет запись в index, чтобы она указывала на новый blob. Working tree не меняется, HEAD/коммит не создаётся. Вариант (a) — staging — это index, а не отдельная папка; (c) — commit создаёт только `git commit`, не `git add`; (d) — файл остаётся в working tree.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-m03-exam-q3",
+      "type": "multiple-choice",
+      "question": "Какой набор полей содержит объект commit в Git?",
+      "options": [
+        { "id": "a", "text": "только diff с предыдущим коммитом и сообщение." },
+        { "id": "b", "text": "tree (SHA root tree-объекта со всем snapshot файлов), parent (SHA родительского коммита; 0 для root, 1 для обычного, 2+ для merge), author (имя+email+timestamp когда написан), committer (имя+email+timestamp когда применён — может отличаться от author при rebase/cherry-pick), message." },
+        { "id": "c", "text": "tree + список изменённых файлов с их diff." },
+        { "id": "d", "text": "только список SHA всех blobs и сообщение." }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Объект commit содержит ровно эти поля. Можно увидеть командой `git cat-file -p HEAD`. Tree указывает на snapshot, parent(s) формируют DAG истории, author и committer часто совпадают, но различаются при rebase (committer = тот, кто применил), cherry-pick, или email-патчах. Вариант (a) — Git хранит snapshot через tree, не diff; (c) — diff не хранится, он вычисляется при показе; (d) — blobs прячутся внутри tree, commit видит только root tree SHA.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m03-exam-q4",
+      "type": "multiple-choice",
+      "question": "Почему `git commit --amend` после изменения сообщения создаёт новый SHA коммита, даже если содержимое (tree) не изменилось?",
+      "options": [
+        { "id": "a", "text": "Потому что SHA коммита считается от ВСЕХ его полей: tree, parent, author, committer, message. Изменение любого поля (в том числе message или committer timestamp при amend) -> другой контент объекта -> другой SHA." },
+        { "id": "b", "text": "Это баг Git, который должен был быть исправлен в 2.30+." },
+        { "id": "c", "text": "SHA меняется только если tree изменился, поэтому при amend message без изменений файлов SHA остаётся прежним." },
+        { "id": "d", "text": "amend всегда создаёт два коммита — старый и новый, поэтому SHA меняется." }
+      ],
+      "correctAnswer": "a",
+      "explanation": "Commit SHA = hash от сериализованного объекта commit (формат: 'commit <size>\\0tree <sha>\\nparent <sha>\\nauthor ...\\ncommitter ...\\n\\n<message>'). Любое изменение поля -> новый byte-content -> новый SHA. amend меняет message и committer timestamp, что гарантирует новый SHA. Поэтому amend опубликованных коммитов опасен — у других людей в репо старый коммит, у вас новый, при push нужен force. Варианты (b, c, d) — фактически неверны.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m03-exam-q5",
+      "type": "true-false",
+      "question": "В Git существует ровно 4 типа объектов: blob (содержимое файла), tree (директория — список имён + SHA blobs/sub-trees + права доступа), commit (snapshot через tree + parent + author + committer + message), tag (аннотированный тег с подписью).",
+      "correctAnswer": true,
+      "explanation": "Это четыре типа объектов Git: blob, tree, commit, tag. Все они хранятся в .git/objects/ и адресуются по SHA от их содержимого (content-addressable). Tag-объекты создаются только при annotated tags (git tag -a), lightweight tags — это просто ref в refs/tags/, не отдельный объект. Можно проверить тип любого объекта командой `git cat-file -t <sha>`.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-m03-exam-q6",
+      "type": "true-false",
+      "question": "Если два разных файла в одном коммите имеют идентичное содержимое (например два пустых __init__.py), в .git/objects/ создаётся ОДИН blob, на который ссылаются обе записи в tree.",
+      "correctAnswer": true,
+      "explanation": "Это прямое следствие content-addressable storage: SHA от содержимого — одинаковое содержимое -> одинаковый SHA -> один blob в objects/. Tree-объект хранит записи вида '100644 blob <sha> filename' — две разные записи могут указывать на один и тот же blob SHA. Это даёт автоматическую дедупликацию: пустые __init__.py во всех директориях Python-проекта = один blob. Git pack-файлы при gc/push могут дополнительно применять delta-сжатие к похожим (не одинаковым) blobs.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

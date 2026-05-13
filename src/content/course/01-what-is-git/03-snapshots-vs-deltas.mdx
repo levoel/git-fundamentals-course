@@ -1,0 +1,268 @@
+---
+title: "Snapshots vs deltas — как Git хранит данные"
+description: "Почему Git хранит snapshots, а не дельты. Content-addressable storage, SHA-1 -> SHA-256, immutability, integrity"
+order: 3
+difficulty: "beginner"
+estimatedTime: 18
+topics: ["Git", "Internals", "SHA-1", "SHA-256", "Snapshots", "Content-addressable storage"]
+---
+
+# Snapshots vs deltas — как Git хранит данные
+
+Если в одной строке описать, что отличает Git от всех VCS, появившихся до него — это будет: **Git хранит snapshots, а не дельты**. Каждый коммит — это полный снимок состояния всех файлов проекта на момент коммита, а не разница (diff) от предыдущей версии.
+
+На первый взгляд это звучит расточительно. «Если у нас 10 000 коммитов и проект на 50 МБ, неужели мы храним 10 000 × 50 МБ = полтерабайта?» Нет, не храним. И это связано с другим важным концептом: **content-addressable storage**. В этом уроке разберём, как Git реально хранит данные, и почему это так важно.
+
+---
+
+## Как раньше: дельты в RCS, SCCS, частично в Subversion
+
+В большинстве VCS до Git модель была такой: хранится одна полная версия файла, а остальные — как diff (дельты) к ней. Например, в RCS:
+
+<DiagramContainer title="Хранение через дельты (RCS, SCCS)" color="amber">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Версия 1" tooltip="Полное содержимое файла. Базовая версия. ~5 KB">v1 (полная)</DataBox>
+      <Arrow direction="right" label="diff" />
+      <DataBox label="Версия 2" tooltip="Diff от v1. Например, добавлены 2 строки, удалена 1. ~100 байт">v2 (delta)</DataBox>
+      <Arrow direction="right" label="diff" />
+      <DataBox label="Версия 3" tooltip="Diff от v2. Цепочка дельт растёт. ~200 байт">v3 (delta)</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Чтение v3" tooltip="Чтобы получить v3, нужно: загрузить v1 (полную), применить diff v1->v2, потом diff v2->v3. Чем длиннее цепочка — тем медленнее" variant="warning">v1 + 2 patches</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Плюсы дельт: экономия места. Один файл в 100 версиях с мелкими изменениями занимает в разы меньше, чем 100 полных копий.
+
+Минусы:
+
+1. **Скорость чтения зависит от длины цепочки.** Чтобы получить версию 100, нужно применить 99 patches.
+2. **Дельты сложно мерджить.** Если две ветки расходятся, объединение цепочек дельт — сложная задача.
+3. **Целостность хрупкая.** Если одна дельта повреждена — все следующие версии нечитаемы.
+4. **Renames и moves плохо работают.** Дельты привязаны к файлу. Если файл переименован — теряется связь.
+
+Subversion использовал гибридную модель: хранил полные snapshots каждые N версий и дельты между ними. Это смягчало проблему скорости, но не решало остальных.
+
+---
+
+## Как Git: snapshots всего дерева
+
+Git устроен принципиально иначе. Каждый commit — это полный snapshot **дерева файлов** на момент коммита. Не diff от предыдущего, а независимый, целостный slice состояния.
+
+<DiagramContainer title="Хранение через snapshots (Git)" color="emerald">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Commit 1" tooltip="Snapshot всего дерева: foo.c (v1), bar.c (v1), README (v1). Каждый файл — полное содержимое">tree v1</DataBox>
+      <Arrow direction="right" label="parent ->" />
+      <DataBox label="Commit 2" tooltip="Snapshot всего дерева на момент коммита 2: foo.c (v2 — изменён), bar.c (v1 — НЕ изменён), README (v1)">tree v2</DataBox>
+      <Arrow direction="right" label="parent ->" />
+      <DataBox label="Commit 3" tooltip="Snapshot: foo.c (v2), bar.c (v2 — изменён), README (v1)">tree v3</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Чтение commit 3" tooltip="Прямой доступ к snapshot. Не нужно собирать историю — у нас есть готовое состояние" variant="highlight">Прямой доступ</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Звучит как «100 версий = 100 полных копий, диск взорвётся»? Нет. Тут вступает второй ключевой концепт.
+
+---
+
+## Content-addressable storage: хранилище по содержимому
+
+Git хранит файлы и деревья в **content-addressable storage** — хранилище, в котором адрес объекта — это его содержимое. А именно — SHA-1 хеш от содержимого.
+
+Если файл не изменился между коммитами — у него **тот же SHA-1**. А значит — он хранится **один раз**, и оба коммита ссылаются на тот же blob.
+
+<DiagramContainer title="Дедупликация через SHA-1 хеши" color="purple">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Commit 1" tooltip="Tree: foo.c -> SHA-A (hello world), bar.c -> SHA-B (xyz), README -> SHA-C">tree #1</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Commit 2" tooltip="Tree: foo.c -> SHA-D (hello world 2.0 — изменено), bar.c -> SHA-B (тот же), README -> SHA-C (тот же)">tree #2</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="SHA-A" tooltip="blob 1: «hello world». Хранится ОДИН раз">blob #1</DataBox>
+      <DataBox label="SHA-B" tooltip="blob 2: «xyz». Хранится ОДИН раз. На него ссылаются и commit 1, и commit 2">blob #2</DataBox>
+      <DataBox label="SHA-C" tooltip="blob 3: README. На него ссылаются оба коммита">blob #3</DataBox>
+      <DataBox label="SHA-D" tooltip="blob 4: «hello world 2.0». Новый blob, хранится в дополнение">blob #4</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+То есть: если в commit 2 изменился только `foo.c`, мы добавляем один новый blob (новая версия foo.c) и новое tree-объект (которое ссылается на новый foo.c и старые bar.c, README). Остальные blob-ы переиспользованы. Экономия места — фактически такая же, как в дельта-модели.
+
+Но плюсы — гигантские:
+
+1. **Скорость чтения.** Не нужно «применять цепочку дельт». Достал нужный blob по SHA — получил содержимое.
+2. **Целостность.** SHA-1 хеш — это математический отпечаток содержимого. Если в blob изменится хоть один бит — SHA изменится. Битая дельта в RCS могла остаться незамеченной. В Git битый blob — это другой SHA, мгновенно детектится.
+3. **Дедупликация автоматическая.** Не нужно никаких хитрых алгоритмов. Просто хеш и проверка «есть ли уже такой объект».
+4. **Merge простой.** Сравниваешь два tree-объекта, видишь, где SHA blob-ов разные — там и есть изменения. Никакой реконструкции цепочек.
+
+---
+
+## SHA-1: что это вообще такое
+
+SHA-1 — это криптографическая хеш-функция: берёт на вход произвольное содержимое, выдаёт на выход 160-битное (20-байтовое) значение, обычно представляемое как 40 шестнадцатеричных символов.
+
+Пример: содержимое строки «hello world\n» под SHA-1 для blob-объекта Git:
+
+```bash
+echo "hello world" | git hash-object --stdin
+# 3b18e512dba79e4c8300dd08aeb37f8e728b8dad
+```
+
+Это и есть «адрес» этого blob-а в Git. В любом репозитории, в любом мире, содержимое «hello world\n» будет иметь SHA-1 `3b18e5...`. Это математическое свойство, не настройка Git.
+
+<DiagramContainer title="SHA-1 — детерминированный fingerprint" color="indigo">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="hello world\n" tooltip="Содержимое — последовательность байт. Точно такое же содержимое в любой системе">Содержимое</DataBox>
+      <Arrow direction="right" label="SHA-1" />
+      <DataBox label="3b18e512..." tooltip="Уникальный 40-символьный hex-идентификатор. Изменишь хоть один байт — получишь полностью другой SHA">SHA-1 hash</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="hello world\nX" tooltip="Дописали один символ — это уже другое содержимое">Изменили</DataBox>
+      <Arrow direction="right" label="SHA-1" />
+      <DataBox label="a7f4e120..." tooltip="Полностью другой SHA. Это и значит «criptographic hash» — даже минимальное изменение даёт радикально другой результат">Другой SHA</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Свойства SHA-1 для Git:
+
+1. **Детерминированный** — одно и то же содержимое всегда даёт один SHA.
+2. **Лавинообразный** — изменение даже одного бита даёт радикально другой SHA.
+3. **Невозможность коллизий на практике** — придумать другое содержимое с тем же SHA вычислительно очень трудно (но не невозможно — см. ниже).
+4. **Невозможность инвертирования** — по SHA нельзя восстановить содержимое.
+
+В Git SHA-1 используется как:
+
+- **Адрес** объекта в хранилище: путь к blob с SHA `3b18e5...` — это `.git/objects/3b/18e5...` (первые 2 символа = поддиректория).
+- **Identifier коммита**: `git log` показывает SHA коммита. На него ссылаются ветки, теги, parent-указатели.
+- **Гарантия целостности**: при чтении объекта Git хеширует его и сравнивает с именем файла. Не совпадает — ошибка.
+
+---
+
+## SHA-1 -> SHA-256: переход в Git 3.0
+
+В 2017 году компания Google и нидерландский CWI Institute опубликовали первую практическую коллизию SHA-1 — два PDF-файла с разным содержимым и одинаковым SHA-1. Атака стоила ~$100k compute времени. Это в принципе означает: SHA-1 криптографически сломан.
+
+Для Git это не критично немедленно (атаки на репозиторий через коллизию пока непрактичны), но коммьюнити начало миграцию. Git 2.13 (2017) добавил защиту от известных коллизий. Git 2.29 (2020) добавил экспериментальную поддержку SHA-256. Git 2.42 (2023) сделал SHA-256 стабильной фичей для новых репозиториев.
+
+<DiagramContainer title="Эволюция хеш-функции в Git" color="rose">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="2005" tooltip="Git 1.0. SHA-1. 40 hex символов. Считалось безопасным">SHA-1 stable</DataBox>
+      <Arrow direction="right" label="" />
+      <DataBox label="2017" tooltip="SHAttered attack. Google + CWI показали практическую коллизию. SHA-1 криптографически сломан" variant="warning">Коллизия</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="2020" tooltip="Git 2.29. SHA-256 как experimental option при git init">SHA-256 experimental</DataBox>
+      <Arrow direction="right" label="" />
+      <DataBox label="2023" tooltip="Git 2.42. SHA-256 stable для новых репозиториев. Существующие репозитории на SHA-1 не мигрировать автоматически">SHA-256 stable</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="~2027" variant="highlight" tooltip="Git 3.0 (план). SHA-256 как default для git init. SHA-1 — опциональный для compat. Точная дата зависит от готовности экосистемы">Git 3.0</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+На май 2026 (актуальная версия Git 2.54) большинство репозиториев в мире — на SHA-1. GitHub, GitLab — все ещё SHA-1 по умолчанию (поддержка SHA-256 в роадмапе). Когда выйдет Git 3.0, начнётся плавный переход. Junior DE стоит знать про этот переход, но в реальной работе ближайшие 1-2 года вы будете работать с SHA-1 хешами.
+
+Практически: SHA-1 — это 40 символов hex. SHA-256 — это 64 символа hex. Если вы видите 64-символьный «коммит» — это репозиторий на SHA-256. Они несовместимы по протоколу — два репозитория на разных хешах не могут push/pull друг друга. Git готовит interop-формат, но пока его нет.
+
+```bash
+# Создать репозиторий с SHA-256 (опционально, Git 2.42+):
+git init --object-format=sha256
+
+# Проверить, какой формат у текущего репо:
+git rev-parse --show-object-format
+# sha1 (default)
+```
+
+---
+
+## Immutability: SHA = подпись содержимого
+
+Из content-addressable storage следует **immutability** — неизменяемость объектов. Если вы изменили blob, у него меняется SHA, и это уже **другой объект**. Старый остаётся на месте.
+
+<DiagramContainer title="Immutability — объекты никогда не меняются" color="purple">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Существует blob SHA-A" tooltip="В .git/objects/3b/18e5... лежит blob с содержимым «hello world»">Объект A</DataBox>
+      <Arrow direction="right" label="«изменяем»" />
+      <DataBox label="Создаётся blob SHA-D" tooltip="Содержимое «hello world 2.0» хешируется -> SHA-D. Это новый blob, новый файл в objects/" variant="highlight">Новый объект D</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Blob A остаётся" tooltip="Никуда не удаляется. По-прежнему доступен. На него могут ссылаться старые коммиты">Старый цел</DataBox>
+      <DataBox label="Tree обновляется" tooltip="Tree-объект коммита 2 ссылается на SHA-D вместо SHA-A. Сам Tree — это тоже новый объект">Tree указывает на D</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+Из immutability вытекают важные свойства:
+
+1. **Параллельная история возможна.** Несколько разработчиков могут одновременно расширять историю, не «портя» объекты друг друга.
+2. **Backups простые.** Скопировал `.git/objects/` — у тебя гарантированно консистентный backup, потому что объекты иммутабельны.
+3. **Garbage collection.** Когда коммит больше не достижим (ни одна ветка/tag на него не ссылается), Git может его удалить. Но **не сразу** — есть grace period 30 дней.
+4. **Reflog работает.** Даже если вы «удалили» коммит через `git reset --hard`, его SHA остаётся в reflog ещё 30 дней. Можно восстановить (модуль 09).
+
+---
+
+## Что мы получили в сухом остатке
+
+<DiagramContainer title="Преимущества модели snapshots + content-addressable" color="emerald">
+  <FlowColumn>
+    <FlowRow>
+      <DataBox label="Скорость" tooltip="Прямой доступ к любому состоянию. git log/diff/checkout — миллисекунды на больших историях">Прямой доступ</DataBox>
+      <DataBox label="Целостность" tooltip="SHA = подпись содержимого. Любое искажение детектится">SHA как guard</DataBox>
+      <DataBox label="Дедупликация" tooltip="Неизменённые файлы — один blob на все версии. Места не больше, чем у дельт">Автоматическая</DataBox>
+    </FlowRow>
+    <FlowRow>
+      <DataBox label="Merge простой" tooltip="Сравниваешь tree-объекты двух коммитов, видишь, где SHA blob-ов разные. Без реконструкции дельт">Без боли</DataBox>
+      <DataBox label="Renames работают" tooltip="Если blob тот же (одинаковый SHA), но в tree он под другим именем — Git может детектировать rename">Detect rename</DataBox>
+      <DataBox label="Distributed-friendly" tooltip="SHA одинаковые на любом клоне. Объекты можно копировать без преобразований">Same SHA везде</DataBox>
+    </FlowRow>
+  </FlowColumn>
+</DiagramContainer>
+
+В следующем уроке посмотрим, почему именно Git победил конкурентов (Mercurial, Bazaar) и стал индустриальным стандартом. Подсказка: всё это (snapshots, content-addressable storage) — не уникально для Git, но именно Git довёл эту модель до production-готового состояния и получил GitHub в нужный момент.
+
+---
+
+## Попробуй сам
+
+Если установлен Git, попробуйте увидеть content-addressable storage руками. Команды будем разбирать подробно в модуле 03, пока просто попробуйте:
+
+```bash
+mkdir -p ~/git-sandbox/lesson-01-snapshots
+cd ~/git-sandbox/lesson-01-snapshots
+git init
+
+# Создайте файл
+echo "hello world" > hello.txt
+
+# Посмотрите, какой будет SHA у этого blob
+git hash-object hello.txt
+# 3b18e512dba79e4c8300dd08aeb37f8e728b8dad
+
+# Создайте файл с тем же содержимым с другим именем
+echo "hello world" > greeting.txt
+git hash-object greeting.txt
+# 3b18e512dba79e4c8300dd08aeb37f8e728b8dad — ТОЧНО ТО ЖЕ
+
+# Это и есть content-addressable: содержимое определяет адрес
+```
+
+Магия в том, что SHA полностью определён содержимым. Имя файла, дата, владелец — не учитываются. Это и обеспечивает дедупликацию.
+
+---
+
+<KnowledgeCheck
+  question="Junior спрашивает: «Если каждый commit — это полный snapshot, почему репозиторий с 10 000 коммитов не весит 500 GB при проекте в 50 MB?»"
+  answer="Потому что content-addressable storage обеспечивает автоматическую дедупликацию. Каждый файл хранится по SHA-1 от его содержимого. Если файл не изменился между коммитами — у него тот же SHA, значит он хранится ОДИН раз, и оба коммита просто ссылаются на тот же blob. Реально новые blob-ы создаются только когда файл реально изменился. Один tree-объект (структура директорий) тоже создаётся новый, но он очень маленький (~100 байт). В итоге размер репозитория растёт пропорционально объёму ИЗМЕНЕНИЙ, а не количеству коммитов. Плюс Git делает packfiles — упаковывает похожие blob-ы вместе с дельта-компрессией для большей эффективности. Но логически модель — snapshots, и она даёт скорость доступа, как у snapshots, при размере как у дельт."
+/>

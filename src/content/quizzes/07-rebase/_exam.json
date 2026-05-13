@@ -1,0 +1,88 @@
+{
+  "lessonSlug": "07-rebase/_exam",
+  "moduleId": "07-rebase",
+  "_meta": {
+    "idPrefix": "git-exam-m07",
+    "description": "Module 07 exam: 6 questions covering rebase vs merge, interactive rebase, golden rule, rerere"
+  },
+  "questions": [
+    {
+      "id": "git-exam-m07-q1",
+      "type": "multiple-choice",
+      "question": "У тебя personal feature ветка с 5 'wip' коммитами, ты готов открыть PR. Что сделать перед PR для чистой истории?",
+      "options": [
+        { "id": "a", "text": "Сразу открыть PR с 5 wip коммитами" },
+        { "id": "b", "text": "git rebase -i HEAD~5 — squash wip-коммиты в логичные единицы (например, 'feat: X' и 'test: X'); git push --force-with-lease" },
+        { "id": "c", "text": "git merge --squash main" },
+        { "id": "d", "text": "Удалить ветку и начать заново" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Workflow подготовки PR: (1) `git rebase -i HEAD~5` открывает редактор плана. (2) Меняешь `pick` на `fixup`/`squash` для wip-коммитов, объединяя их с осмысленными коммитами. Можно использовать `reword` чтобы переименовать в conventional commits (`feat:`, `fix:`, `refactor:`). (3) Сохраняешь — Git выполнит. (4) `git push --force-with-lease` (НЕ просто `--force`!) — после rebase нужен force, потому что SHA изменились. (5) Открываешь PR. Если используешь `--fixup` + `--autosquash` workflow при работе — squash происходит автоматически.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-exam-m07-q2",
+      "type": "multiple-choice",
+      "question": "При rebase вес HEAD относительно конфликта: OURS — это новая база (main), THEIRS — твой перебазируемый коммит. Что выбрать, если хочешь 'оставить свою версию'?",
+      "options": [
+        { "id": "a", "text": "OURS — это всегда 'своя версия'" },
+        { "id": "b", "text": "THEIRS — потому что при rebase твои коммиты накладываются на чужую базу" },
+        { "id": "c", "text": "Никогда нельзя 'оставить свою', нужно объединить" },
+        { "id": "d", "text": "Зависит от ветки" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "При rebase: HEAD = новая база (main, в которую rebase'ишь), THEIRS = твой коммит из feature, который 'наносится' поверх. Это **наоборот** относительно merge, где HEAD = твоя ветка. Поэтому при rebase 'моя версия' = THEIRS, не OURS. Подсказка для ориентации: смотри на нижний маркер `>>>>>>> abc1234 (feature commit message)` — там видно, чьи изменения в THEIRS-блоке. Помни: rebase 'наносит' твои изменения на чужую базу, как cherry-pick — поэтому THEIRS всегда твоё.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-exam-m07-q3",
+      "type": "true-false",
+      "question": "Force-push в свою feature ветку после rebase допустим, если используется --force-with-lease и нет других людей, работающих на этой ветке.",
+      "correctAnswer": "true",
+      "explanation": "Это OK сценарий: после rebase своей феу-ветки SHA коммитов изменились, и обычный push отвергнут как non-fast-forward. `--force-with-lease` проверяет, не появилось ли неожиданных изменений на сервере — если кто-то напушил (например, Alice работает на той же ветке), push отвергается, ты разбираешься. Если ты единственный owner ветки — push пройдёт безопасно. **Что НЕ OK**: force-push в shared ветку (main, develop) даже с lease — потому что lease защищает от случайных коллизий, но не от организационных проблем перезаписи общей истории. Дополнительная защита — `push.useForceIfIncludes=true` (Git 2.30+).",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-exam-m07-q4",
+      "type": "multiple-choice",
+      "question": "Большой rebase: 12 коммитов твоей ветки на свежий main, который очень разошёлся. На 3 коммите из 12 возник конфликт в `src/etl.py`, ты разрешил. На 5, 7, 9 — те же конфликты в `src/etl.py`. Что включить, чтобы избежать многократного разрешения?",
+      "options": [
+        { "id": "a", "text": "git config rebase.autoStash true" },
+        { "id": "b", "text": "git config rerere.enabled true — rerere запомнит твоё первое решение и применит автоматически на коммитах 5, 7, 9" },
+        { "id": "c", "text": "git rebase --skip всех конфликтных" },
+        { "id": "d", "text": "Делать merge вместо rebase" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "rerere = Reuse Recorded Resolution. После первого разрешения конфликта в `src/etl.py` Git запомнит preimage (конфликтные блоки) -> твоё разрешение. На следующих коммитах rebase, где возникает **тот же конфликт** (тот же preimage), Git применит сохранённое решение автоматически. Видишь 'Resolved 'src/etl.py' using previous resolution'. Тебе остаётся проверить (git diff или открыть файл), `git add`, `git rebase --continue`. Включается раз и навсегда: `git config --global rerere.enabled true`. Особенно полезно для больших rebase, где те же конфликты повторяются. Альтернатива (для совсем многих коммитов) — переключиться на `git merge`, где конфликт разрешается один раз для всего merge.",
+      "bloomLevel": "applied"
+    },
+    {
+      "id": "git-exam-m07-q5",
+      "type": "multiple-choice",
+      "question": "Когда `git rebase` категорически НЕ следует использовать?",
+      "options": [
+        { "id": "a", "text": "Никогда — rebase всегда плохой" },
+        { "id": "b", "text": "На shared ветках (main, develop, release/*), на feature ветках, на которых работает ещё кто-то, после ревью PR без согласования с ревьюером" },
+        { "id": "c", "text": "Только на feature ветках" },
+        { "id": "d", "text": "После git fetch" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Категорически НЕ rebase: (1) **Shared ветки** — main, develop, release/*. Переписать историю общей ветки = катастрофа: коллеги получат сложные конфликты, CI ломается, blame/bisect портятся. (2) **Feature ветки с другими collaborators** — если Alice тоже работает на твоей feature ветке, твой rebase + force-push сломает её локальную копию. Согласовать или не rebase. (3) **Feature ветки после ревью PR** — ревьюер уже работал, комментарии привязаны к конкретным SHA строк. После force-push они 'осиротеют' (показываются как outdated). Можно, но согласовать с ревьюером. **Дополнительная защита**: branch protection с restrict force pushes на shared ветках.",
+      "bloomLevel": "conceptual"
+    },
+    {
+      "id": "git-exam-m07-q6",
+      "type": "multiple-choice",
+      "question": "Лучший набор настроек rebase для junior DE на personal-проекте/personal-фича-ветке?",
+      "options": [
+        { "id": "a", "text": "Без настроек, дефолт" },
+        { "id": "b", "text": "rebase.autoSquash=true, rebase.autoStash=true, rerere.enabled=true, push.useForceIfIncludes=true, alias push-f = push --force-with-lease" },
+        { "id": "c", "text": "Только pull.rebase=true" },
+        { "id": "d", "text": "Отключить все настройки rebase" }
+      ],
+      "correctAnswer": "b",
+      "explanation": "Оптимальный setup junior: (1) **rebase.autoSquash=true** — `rebase -i` распознаёт fixup! автоматически. (2) **rebase.autoStash=true** — uncommitted changes автоматически stash'атся перед rebase и pop'аются после. Без этого rebase падает с 'cannot rebase: you have unstaged changes'. (3) **rerere.enabled=true** — экономия времени на повторных конфликтах. (4) **push.useForceIfIncludes=true** (Git 2.30+) — дополнительная защита `--force-with-lease`, проверяет полноту локального reflog. (5) **alias pushf=push --force-with-lease** — короткая безопасная команда. Дополнительно — `pull.rebase=true` если предпочитаешь линейную историю, или `pull.ff=only` для safety.",
+      "bloomLevel": "applied"
+    }
+  ]
+}

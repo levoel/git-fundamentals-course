@@ -1,0 +1,716 @@
+---
+title: "Anatomy GitHub Actions: jobs, steps, triggers, matrix"
+description: ".github/workflows/*.yml — структура workflow. name, on (triggers: push/pull_request/schedule/workflow_dispatch), jobs, steps (uses vs run). Matrix для параллельных runs. Runners (ubuntu-latest = $$$ оптимум). Action versioning."
+order: 2
+difficulty: "beginner"
+estimatedTime: 30
+topics: ["github-actions", "yaml", "workflow", "jobs", "steps", "matrix", "runners", "triggers"]
+---
+
+# Anatomy GitHub Actions: jobs, steps, triggers, matrix
+
+В предыдущем уроке мы посмотрели на CI/CD с точки зрения «что junior увидит». Теперь — **как это устроено** под капотом. GitHub Actions — это конкретная YAML-driven система, и понимание её anatomy — основа для написания, чтения и debug-а pipelines.
+
+В этом уроке разберём:
+
+1. Структуру `.github/workflows/*.yml` файла.
+2. Triggers: `push`, `pull_request`, `schedule`, `workflow_dispatch`.
+3. Jobs (параллельные) vs Steps (последовательные).
+4. `uses` (actions marketplace) vs `run` (shell command).
+5. Matrix для запуска тестов на нескольких версиях Python.
+6. Runners: ubuntu-latest, macos-latest, self-hosted.
+7. Action versioning — почему `@v4` лучше `@main`.
+
+К концу урока сможешь читать любой workflow и понимать, что он делает.
+
+---
+
+## Где лежат workflows
+
+GitHub Actions ищет workflow YAML-файлы в одной строго определённой папке:
+
+```
+my-repo/
+  .github/
+    workflows/
+      ci.yml          ← рекомендуется
+      deploy.yml      ← рекомендуется
+      dbt-ci.yml      ← рекомендуется
+      airflow-ci.yml  ← рекомендуется
+  dags/
+  models/
+  ...
+```
+
+Имя файла не имеет значения — `ci.yml`, `pizza.yml`, `whatever.yml` — все работают. Имя **внутри** файла (через ключ `name:`) определяет, как workflow отображается в UI.
+
+```bash
+# Создать дирекоторию (если нет)
+$ mkdir -p .github/workflows
+$ touch .github/workflows/ci.yml
+```
+
+После push с этим файлом в дефолтную ветку (обычно `main`), GitHub автоматически зарегистрирует workflow и начнёт его запускать по triggers.
+
+---
+
+## Структура workflow YAML
+
+Минимальный валидный workflow:
+
+```yaml
+name: My First CI
+
+on: push
+
+jobs:
+  say-hello:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Hello, CI!"
+```
+
+Четыре обязательных части:
+
+1. **`name`** (optional, но рекомендуется) — отображаемое имя в UI.
+2. **`on`** — что запускает workflow (триггеры).
+3. **`jobs`** — словарь jobs (можно несколько, они параллельны).
+4. **Внутри каждого job** — `runs-on` (где запускать) и `steps` (что делать).
+
+### Расширенная структура
+
+```yaml
+name: Complete CI Example                  # имя для UI
+
+on:                                        # триггеры
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+env:                                       # global env vars
+  PYTHON_VERSION: "3.13"
+
+permissions:                               # права workflow на репо
+  contents: read
+  pull-requests: write
+
+jobs:
+  lint:                                    # job-1
+    runs-on: ubuntu-latest                 # runner
+    timeout-minutes: 5                     # лимит времени
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install ruff
+      - run: ruff check .
+
+  test:                                    # job-2 (запустится параллельно с lint)
+    runs-on: ubuntu-latest
+    needs: lint                            # ждать lint (запустится последовательно)
+    steps:
+      - uses: actions/checkout@v4
+      - run: pytest
+
+  deploy:                                  # job-3
+    runs-on: ubuntu-latest
+    needs: [lint, test]                    # ждать обе job
+    if: github.ref == 'refs/heads/main'    # только для main
+    steps:
+      - run: echo "Deploying to prod"
+```
+
+Это уже близко к production workflow. Разберём каждую часть.
+
+---
+
+## Triggers: что запускает workflow
+
+`on:` — ключ, определяющий что должно произойти, чтобы workflow запустился. Самые частые:
+
+### push
+
+```yaml
+on:
+  push:
+    branches:
+      - main           # только main
+      - 'release/*'    # все ветки release/X.Y
+    paths:
+      - 'dags/**'      # только если изменилось dags/*
+      - 'requirements.txt'
+    paths-ignore:
+      - 'docs/**'      # не запускать на изменения docs
+    tags:
+      - 'v*'           # запускать на тегах v1.0, v2.0, etc
+```
+
+Принимает фильтр по веткам, путям, тегам. Можно скомбинировать.
+
+### pull_request
+
+```yaml
+on:
+  pull_request:
+    branches: [main]              # PR targets main
+    types: [opened, synchronize]  # на создание + push в ветку PR
+```
+
+Триггер на события PR. `types` по умолчанию `[opened, synchronize, reopened]`. Используется почти всегда для CI.
+
+<Callout type="warning">
+**Важно**: `pull_request` запускается с правами **base branch**, не PR ветки. То есть secret-ы, доступные PR из forks, **ограничены**. Это защита: malicious fork-PR не получает доступ к secrets компании.
+</Callout>
+
+### schedule (cron)
+
+```yaml
+on:
+  schedule:
+    - cron: '0 6 * * *'    # каждый день в 06:00 UTC
+    - cron: '0 0 * * 0'    # каждое воскресенье в 00:00 UTC
+```
+
+Полезно для:
+- Nightly data quality checks.
+- Auto-обновление dependencies (Dependabot).
+- Cron-аналитика репозитория (метрики, отчёты).
+
+Cron время — **UTC**. `0 6 * * *` — это 09:00 по Москве, 02:00 по Нью-Йорку. Внимательно с TZ.
+
+<Callout type="note">
+GitHub не гарантирует точное время cron-trigger — может задержка до 30 минут в пиковое время. Не используй для time-critical batch jobs (для этого — Airflow / EventBridge).
+</Callout>
+
+### workflow_dispatch — ручной запуск
+
+```yaml
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Деплой в окружение'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+      version:
+        description: 'Версия'
+        required: false
+        type: string
+        default: 'latest'
+```
+
+Это даёт кнопку «Run workflow» в UI:
+
+```
+Actions -> My Deploy Workflow -> Run workflow ↓
+  Environment: [staging ▼]
+  Version:     [latest]
+  [Run workflow]
+```
+
+В job можно использовать input: `${{ github.event.inputs.environment }}`.
+
+Полезно для:
+- Manual production deploy (Continuous Delivery).
+- Ad-hoc data backfill через DAG.
+- Hotfix workflow.
+
+### Другие триггеры
+
+| Trigger | Использование |
+|---|---|
+| `release` | На создание release (tag + GitHub Release) |
+| `issues` | На событие issue (создание, label, etc) |
+| `issue_comment` | На комментарий в issue/PR (полезно для `/run-tests` команды) |
+| `workflow_run` | После завершения другого workflow |
+| `repository_dispatch` | Внешний trigger через API |
+
+---
+
+## Jobs vs Steps
+
+### Job = independent execution unit
+
+```yaml
+jobs:
+  job1:
+    runs-on: ubuntu-latest
+    steps: [...]
+
+  job2:
+    runs-on: ubuntu-latest
+    steps: [...]
+```
+
+Два job-а **по умолчанию параллельны** — каждый бежит на своём VM. Они не делят state — у каждого свежий runner, чистая ФС.
+
+Чтобы сделать sequential:
+
+```yaml
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps: [...]
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: test                # ждать test
+    steps: [...]
+```
+
+`needs:` создаёт DAG зависимостей. Можно `needs: [test, lint, security]` — wait for all.
+
+<DiagramContainer title="Jobs DAG: параллельно где можно, последовательно где нужно">
+  <FlowColumn>
+    <FlowNode tooltip="Сначала install — другие зависят от него">{'install'}</FlowNode>
+    <Arrow direction="down" />
+    <FlowRow>
+      <FlowNode tooltip="3 job-а параллельно после install">{'lint'}</FlowNode>
+      <FlowNode tooltip="">{'type-check'}</FlowNode>
+      <FlowNode tooltip="">{'test'}</FlowNode>
+    </FlowRow>
+    <Arrow direction="down" />
+    <FlowNode tooltip="deploy ждёт всех трёх">{'deploy (needs: [lint, type-check, test])'}</FlowNode>
+  </FlowColumn>
+</DiagramContainer>
+
+### Step = команда внутри job
+
+Шаги выполняются **последовательно** в одном runner. Если один step упадёт — остальные обычно не запускаются (можно изменить через `if: always()`).
+
+```yaml
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout                    # ← name (optional)
+        uses: actions/checkout@v4         # ← uses: action из marketplace
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:                             # ← with: параметры для action
+          python-version: '3.13'
+
+      - name: Install deps
+        run: pip install -r requirements.txt   # ← run: shell command
+
+      - name: Run tests
+        run: pytest -v
+        env:                              # ← env vars только для этого step
+          PYTEST_TIMEOUT: 60
+
+      - name: Run linter
+        run: ruff check .
+        continue-on-error: true           # ← не fail job, если упадёт
+```
+
+### uses vs run
+
+| Ключ | Что делает |
+|---|---|
+| `uses` | Запускает re-usable action из marketplace или другого репо |
+| `run` | Запускает shell command (по умолчанию bash на ubuntu) |
+
+`uses` — это **черный ящик**, написан кем-то (Anthropic, GitHub, или random user). Преимущества:
+- Не нужно писать setup-Python с нуля.
+- Auto-обновление через `@v5`.
+- Cross-platform (умеет на Windows и macOS).
+
+`run` — твой raw bash. Преимущества:
+- Полный контроль.
+- Можно увидеть что выполняется.
+
+Хороший workflow микширует: actions для setup, run для конкретной логики.
+
+---
+
+## Actions Marketplace
+
+`actions/checkout@v4` — это action, лежащий в репо `github.com/actions/checkout`, версия v4. Marketplace: https://github.com/marketplace?type=actions.
+
+Самые полезные для DE:
+
+| Action | Назначение |
+|---|---|
+| `actions/checkout@v4` | clone репо в runner |
+| `actions/setup-python@v5` | установить конкретную Python версию |
+| `actions/setup-node@v4` | для Node-based tools (e.g., dbt-power-user) |
+| `actions/cache@v4` | кеш зависимостей (см. урок 03) |
+| `actions/upload-artifact@v4` | сохранить файл из job для другого job или для скачивания |
+| `actions/download-artifact@v4` | скачать artifact из другого job |
+| `aws-actions/configure-aws-credentials@v4` | настроить AWS credentials (для S3, ECR, EMR) |
+| `gitleaks/gitleaks-action@v2` | scan для secrets |
+| `pre-commit/action@v3.0.1` | запустить pre-commit hooks |
+| `astral-sh/setup-uv@v3` | install uv (быстрый pip replacement) |
+
+Для каждого action — читай README в его репо: какие inputs, что делает, какие outputs.
+
+### Создание собственного action
+
+В средних DE-командах часто есть internal action:
+
+```
+my-actions-repo/
+  .github/
+    actions/
+      setup-dbt/
+        action.yml
+```
+
+`action.yml`:
+
+```yaml
+name: 'Setup dbt'
+description: 'Install dbt with Snowflake adapter and cache'
+inputs:
+  dbt-version:
+    description: 'dbt version'
+    default: '1.9.0'
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+    - run: pip install dbt-snowflake==${{ inputs.dbt-version }}
+      shell: bash
+```
+
+Использование:
+
+```yaml
+- uses: my-org/my-actions-repo/.github/actions/setup-dbt@v1
+  with:
+    dbt-version: '1.9.0'
+```
+
+Это DRY — повторяющаяся логика в одном месте.
+
+---
+
+## Matrix: параллельные runs
+
+Допустим, нужно запустить тесты на Python 3.11, 3.12, 3.13:
+
+```yaml
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt
+      - run: pytest
+```
+
+GitHub Actions сам создаст 3 параллельных runs, по одному на каждую версию. В UI:
+
+```
+test (3.11) PASS 1m 23s
+test (3.12) PASS 1m 18s
+test (3.13) PASS 1m 25s
+```
+
+### Многомерные matrix
+
+```yaml
+strategy:
+  matrix:
+    python-version: ['3.12', '3.13']
+    os: [ubuntu-latest, macos-latest, windows-latest]
+    exclude:
+      - os: windows-latest
+        python-version: '3.12'
+```
+
+Это 2 × 3 = 6 runs, минус 1 exclude = 5 runs.
+
+### include — добавить специфичные combinations
+
+```yaml
+strategy:
+  matrix:
+    python: ['3.13']
+    dbt: ['1.9.0']
+    include:
+      - python: '3.12'
+        dbt: '1.8.0'        # legacy combo
+      - python: '3.13'
+        dbt: '1.10.0-beta'  # bleeding edge
+```
+
+### fail-fast
+
+```yaml
+strategy:
+  fail-fast: false   # default: true
+  matrix: ...
+```
+
+`fail-fast: true` (default): если один run упал, **остальные отменяются**. Экономит CI minutes, но прячет проблемы, специфичные для одной комбинации.
+
+`fail-fast: false`: все runs до конца. Полезно когда хочется увидеть полную картину (e.g., «упало только на Windows + 3.11»).
+
+<Callout type="tip">
+Для DE matrix Python 3.12 + 3.13 — типичный setup. Не делай matrix по DB версиям (postgres 14/15/16) — это **integration test domain**, для unit tests с моками не нужно.
+</Callout>
+
+---
+
+## Runners: где код выполняется
+
+`runs-on:` определяет тип VM, где запустится job.
+
+### GitHub-hosted runners
+
+| runs-on | Что внутри | Cost |
+|---|---|---|
+| `ubuntu-latest` | Ubuntu 24.04, 4 CPU, 16 GB RAM | $0.008/min (free 2000/mo) |
+| `ubuntu-22.04` | Ubuntu 22.04 | same |
+| `windows-latest` | Windows Server 2022 | $0.016/min (2x) |
+| `macos-latest` | macOS 14, ARM | $0.080/min (10x!) |
+| `ubuntu-latest-4core` | 4 CPU, 16 GB (явно) | разные |
+| `ubuntu-latest-8core` | 8 CPU, 32 GB | дороже |
+| `ubuntu-latest-16core` | 16 CPU, 64 GB | сильно дороже |
+
+**Default: ubuntu-latest**. 99% DE workflows должны использовать его. macOS — **только** если строишь что-то для iOS/macOS distribution (редко в DE).
+
+GitHub-hosted runners — свежий VM на каждый job. Никакого state между runs.
+
+### Self-hosted runners
+
+Если CI требует:
+- Доступ к internal databases (postgres-prod-replica).
+- Большую вычислительную мощность (16+ CPU, 64+ GB RAM).
+- Кастомные tools (Spark cluster, GPU).
+- Сокращение costs (бывает дешевле при большом объёме).
+
+Тогда — self-hosted: твоя машина / EC2 / Kubernetes — регистрируется в GitHub как runner.
+
+```yaml
+jobs:
+  spark-test:
+    runs-on: [self-hosted, linux, spark-cluster]
+    steps: [...]
+```
+
+Labels (`self-hosted`, `linux`, `spark-cluster`) — фильтр для выбора правильного runner. Это уже DE-platform-engineer territory, junior с этим встретится через год.
+
+---
+
+## Action versioning: @v4 vs @main vs @SHA
+
+```yaml
+- uses: actions/checkout@v4         # tag (рекомендуется)
+- uses: actions/checkout@main       # branch (опасно)
+- uses: actions/checkout@abc1234    # SHA (самый безопасный)
+```
+
+| Reference | Pro | Con |
+|---|---|---|
+| `@v4` | Auto patch updates (v4.0 -> v4.1), удобно | Maintainer может silent-push в `v4` тег |
+| `@main` | Bleeding edge | Каждый push в main меняет behavior |
+| `@abc1234` (SHA) | Immutable, security-friendly | Не получаешь bug-fixes автоматом |
+
+**Best practice 2026**: для community actions от unknown — pin к **SHA** (Dependabot будет auto-update PRs). Для официальных actions от GitHub / актуальных org — `@v4` ок.
+
+```yaml
+# Security-conscious setup
+- uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+```
+
+Dependabot config:
+
+```yaml
+# .github/dependabot.yml
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+```
+
+Раз в неделю — Dependabot открывает PR с обновлением SHA pins.
+
+---
+
+## Контексты и expressions
+
+В workflow доступны **контексты** через `${{ ... }}` синтаксис:
+
+| Контекст | Что содержит |
+|---|---|
+| `github` | event payload: PR number, commit SHA, repo, actor |
+| `env` | переменные среды |
+| `secrets` | secrets из repo settings |
+| `matrix` | текущие значения matrix |
+| `needs` | outputs из dependent jobs |
+| `vars` | repo/org variables (не secrets) |
+
+Примеры:
+
+```yaml
+# PR number
+echo "PR #${{ github.event.pull_request.number }}"
+
+# Commit SHA
+echo "SHA: ${{ github.sha }}"
+
+# Triggered by
+echo "Actor: ${{ github.actor }}"
+
+# Conditional
+if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+# Использование secret
+env:
+  AWS_KEY: ${{ secrets.AWS_ACCESS_KEY_ID }}
+```
+
+---
+
+## Полный пример: production-ready CI
+
+```yaml
+name: Python CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.13"
+  UV_VERSION: "0.5.0"
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+
+  type-check:
+    name: Type check (mypy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv sync
+      - run: uv run mypy src/
+
+  test:
+    name: Test (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.12', '3.13']
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv sync
+      - name: Run pytest
+        run: uv run pytest --cov=src --cov-report=xml
+      - name: Upload coverage to Codecov
+        if: matrix.python == '3.13'
+        uses: codecov/codecov-action@v4
+        with:
+          file: coverage.xml
+
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  all-checks-passed:
+    name: All checks passed
+    runs-on: ubuntu-latest
+    needs: [lint, type-check, test, secret-scan]
+    steps:
+      - run: echo "All required checks passed!"
+```
+
+Что здесь хорошо:
+- Каждый check — отдельный job (параллельно).
+- `timeout-minutes` — защита от зависания.
+- Matrix для test (две версии Python).
+- `all-checks-passed` — meta-job, **один** required status check в branch protection вместо четырёх.
+- `permissions: contents: read` — минимальные права.
+
+---
+
+## Попробуй сам
+
+Создай простой workflow в существующем репо:
+
+```bash
+$ mkdir -p .github/workflows
+$ cat > .github/workflows/hello.yml << 'EOF'
+name: Hello CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  hello:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "Hello from CI! Branch is ${{ github.ref }}"
+      - run: ls -la
+      - run: |
+          cat << SCRIPT
+          PR number: ${{ github.event.pull_request.number || 'N/A' }}
+          Actor: ${{ github.actor }}
+          Event: ${{ github.event_name }}
+          SCRIPT
+EOF
+
+$ git add .github/workflows/hello.yml
+$ git commit -m "Add hello CI"
+$ git push
+```
+
+Через 10 секунд в GitHub Actions tab появится новый run. Кликни, посмотри логи каждого step. Поэкспериментируй: добавь `runs-on: macos-latest` — увидишь как изменится execution.
+
+---
+
+## Killer takeaway
+
+GitHub Actions workflow — это YAML файл в `.github/workflows/`. Структура: `on:` (триггеры — push/pull_request/schedule/workflow_dispatch), `jobs:` (параллельные unit-ы исполнения), внутри job — `steps:` (последовательные команды). `uses:` — action из marketplace, `run:` — shell. Matrix — параллельные runs (Python 3.12/3.13). Runners по умолчанию — `ubuntu-latest` ($0.008/min, для DE подходит на 99%). Pin actions к версии (`@v4`) или SHA для security. Контексты (`github.*`, `secrets.*`) дают доступ к event payload и secrets. Это базис — на нём строится любой DE CI/CD.
+
+<KnowledgeCheck quizSlug="18-ci-cd-github-actions/02-github-actions-anatomy" />
