@@ -43,21 +43,24 @@ Merge кнопка серая, написано «1 failing check». Что эт
 Базовый цикл:
 
 <DiagramContainer title="Workflow PR с CI">
-  <SequenceDiagram>
-    <Actor name="DE" />
-    <Actor name="GitHub" />
-    <Actor name="CI runner" />
-    <Actor name="Reviewer" />
-    <Lifeline />
-    <Message from="DE" to="GitHub" label="git push origin feat/new-dag" />
-    <Message from="GitHub" to="GitHub" label="git push triggers PR creation" />
-    <Message from="GitHub" to="CI runner" label="trigger workflow (.github/workflows/ci.yml)" />
-    <Message from="CI runner" to="CI runner" label="checkout, install, lint, test, build" />
-    <Message from="CI runner" to="GitHub" label="status: success / failure" />
-    <Message from="GitHub" to="DE" label="UI: check passed / failed" />
-    <Message from="Reviewer" to="GitHub" label="reviews code (если CI зелёный)" />
-    <Message from="Reviewer" to="GitHub" label="approve + merge" />
-  </SequenceDiagram>
+  <SequenceDiagram
+    actors={[
+      { id: "DE", label: "DE" },
+      { id: "GitHub", label: "GitHub" },
+      { id: "CI runner", label: "CI runner" },
+      { id: "Reviewer", label: "Reviewer" },
+    ]}
+    messages={[
+      { id: "m1", from: "DE", to: "GitHub", label: "git push origin feat/new-dag" },
+      { id: "m2", from: "GitHub", to: "GitHub", label: "git push triggers PR creation" },
+      { id: "m3", from: "GitHub", to: "CI runner", label: "trigger workflow (.github/workflows/ci.yml)" },
+      { id: "m4", from: "CI runner", to: "CI runner", label: "checkout, install, lint, test, build" },
+      { id: "m5", from: "CI runner", to: "GitHub", label: "status: success / failure" },
+      { id: "m6", from: "GitHub", to: "DE", label: "UI: check passed / failed" },
+      { id: "m7", from: "Reviewer", to: "GitHub", label: "reviews code (если CI зелёный)" },
+      { id: "m8", from: "Reviewer", to: "GitHub", label: "approve + merge" },
+    ]}
+  />
 </DiagramContainer>
 
 ### Что обычно делает CI в DE-проекте

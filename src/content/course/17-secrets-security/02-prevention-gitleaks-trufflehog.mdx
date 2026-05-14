@@ -284,20 +284,23 @@ GitHub встроил собственный сканер прямо в свою
 3. Создаёт security alert в репо для владельца.
 
 <DiagramContainer title="Что происходит после push с AWS ключом в public репо">
-  <SequenceDiagram>
-    <Actor name="DE" />
-    <Actor name="GitHub" />
-    <Actor name="GitHub Secret Scanner" />
-    <Actor name="AWS Security" />
-    <Lifeline />
-    <Message from="DE" to="GitHub" label="git push (AKIA... в коде)" />
-    <Message from="GitHub" to="GitHub Secret Scanner" label="новый push event" />
-    <Message from="GitHub Secret Scanner" to="GitHub Secret Scanner" label="regex match: AKIA..." />
-    <Message from="GitHub Secret Scanner" to="AWS Security" label="POST secure channel: leaked key" />
-    <Message from="AWS Security" to="AWS Security" label="auto-quarantine ключ" />
-    <Message from="AWS Security" to="DE" label="Email: ключ заблокирован" />
-    <Message from="GitHub Secret Scanner" to="DE" label="Security alert в репо" />
-  </SequenceDiagram>
+  <SequenceDiagram
+    actors={[
+      { id: "DE", label: "DE" },
+      { id: "GitHub", label: "GitHub" },
+      { id: "GitHub Secret Scanner", label: "GitHub Secret Scanner" },
+      { id: "AWS Security", label: "AWS Security" },
+    ]}
+    messages={[
+      { id: "m1", from: "DE", to: "GitHub", label: "git push (AKIA... в коде)" },
+      { id: "m2", from: "GitHub", to: "GitHub Secret Scanner", label: "новый push event" },
+      { id: "m3", from: "GitHub Secret Scanner", to: "GitHub Secret Scanner", label: "regex match: AKIA..." },
+      { id: "m4", from: "GitHub Secret Scanner", to: "AWS Security", label: "POST secure channel: leaked key" },
+      { id: "m5", from: "AWS Security", to: "AWS Security", label: "auto-quarantine ключ" },
+      { id: "m6", from: "AWS Security", to: "DE", label: "Email: ключ заблокирован" },
+      { id: "m7", from: "GitHub Secret Scanner", to: "DE", label: "Security alert в репо" },
+    ]}
+  />
 </DiagramContainer>
 
 ### Когда работает / когда не работает

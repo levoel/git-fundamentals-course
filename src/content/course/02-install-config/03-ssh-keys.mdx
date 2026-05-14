@@ -48,15 +48,18 @@ SSH использует **асимметричную криптографию**
 Когда вы подключаетесь по SSH, сервер посылает вам случайный challenge. Вы подписываете его приватным ключом. Сервер проверяет подпись публичным. Если подпись валидна — это вы.
 
 <DiagramContainer title="Как работает SSH-аутентификация" color="emerald">
-  <SequenceDiagram>
-    <SequenceLifeline actor="Client" tooltip="Ваш ноутбук с приватным ключом в ~/.ssh/id_ed25519" />
-    <SequenceLifeline actor="Server" tooltip="GitHub, GitLab или любой SSH-сервер. У него ваш публичный ключ" />
-
-    <SequenceMessage from="Client" to="Server" tooltip="git clone git@github.com:user/repo.git. SSH-handshake начинается">SSH connect</SequenceMessage>
-    <SequenceMessage from="Server" to="Client" tooltip="Сервер генерирует случайные данные и отправляет их">Challenge (random)</SequenceMessage>
-    <SequenceMessage from="Client" to="Server" tooltip="Клиент подписывает challenge приватным ключом. Подпись — это математическая функция от challenge и приватного ключа">Signed challenge</SequenceMessage>
-    <SequenceMessage from="Server" to="Client" tooltip="Сервер проверяет подпись публичным ключом. Если валидна — пропускает. Если нет — disconnect">OK / reject</SequenceMessage>
-  </SequenceDiagram>
+  <SequenceDiagram
+    actors={[
+      { id: "Client", label: "Client", tooltip: "Ваш ноутбук с приватным ключом в ~/.ssh/id_ed25519" },
+      { id: "Server", label: "Server", tooltip: "GitHub, GitLab или любой SSH-сервер. У него ваш публичный ключ" },
+    ]}
+    messages={[
+      { id: "m1", from: "Client", to: "Server", label: "SSH connect", tooltip: "git clone git@github.com:user/repo.git. SSH-handshake начинается" },
+      { id: "m2", from: "Server", to: "Client", label: "Challenge (random)", tooltip: "Сервер генерирует случайные данные и отправляет их" },
+      { id: "m3", from: "Client", to: "Server", label: "Signed challenge", tooltip: "Клиент подписывает challenge приватным ключом. Подпись — это математическая функция от challenge и приватного ключа" },
+      { id: "m4", from: "Server", to: "Client", label: "OK / reject", tooltip: "Сервер проверяет подпись публичным ключом. Если валидна — пропускает. Если нет — disconnect" },
+    ]}
+  />
 </DiagramContainer>
 
 Гениальность: ваш приватный ключ никогда не передаётся по сети. Только подписи. Перехватить трафик и притвориться вами невозможно (без приватного ключа подпись не сделать).
